@@ -119,24 +119,11 @@ class CognitoHeadersIdentityProvider(IdentityProvider):
 
 
 class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
-
-    app_user_id_header = Unicode(
-        default_value="X-Beaker-User-Id",
-        config=True,
-        help="Header containing user ID (app-level auth)",
-    )
-
-    app_access_token_header = Unicode(
-        default_value="X-Beaker-Access-Token",
-        config=True,
-        help="Header containing access token (app-level auth)",
-    )
-
-    app_id_token_header = Unicode(
-        default_value="X-Beaker-Id-Token",
-        config=True,
-        help="Header containing ID token (app-level auth)",
-    )
+    """
+    Identity provider for app-managed authentication via cookies.
+    Reads JWT tokens directly from httpOnly cookies set by BeakerHub.
+    Simpler than header-based auth - no need for custom X-Beaker-* headers.
+    """
 
     user_pool_id = Unicode(
         default_value="",
@@ -315,10 +302,18 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
 
 
     async def get_user(self, handler) -> User | None:
-        """Main entry point - handles app-level authentication"""
-        # Extract auth info from app-level headers
-        user_id = handler.request.headers.get(self.app_user_id_header, None)
-        jwt_data = handler.request.headers.get(self.app_id_token_header, None)
+        """Main entry point - handles app-level authentication via cookies"""
+        # read JWT tokens from cookies (set by BeakerHub)
+        try:
+            id_token = handler.get_cookie('id_token')
+            access_token = handler.get_cookie('access_token')
+        except:
+            # fallback for different tornado versions
+            id_token = handler.request.cookies.get('id_token')
+            access_token = handler.request.cookies.get('access_token')
+
+        jwt_data = id_token
+        user_id = None  # will be extracted from jwt_data
 
         # Verify and decode ID token if provided
         token_payload = None
