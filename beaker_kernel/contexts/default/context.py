@@ -23,7 +23,6 @@ class DefaultContext(BeakerContext):
 
     WEIGHT: int = 10
     SLUG: str = "default"
-    DISPLAY_NAME: str = "Data Science"
 
     def __init__(self, beaker_kernel: "BeakerKernel", config: Dict[str, Any]):
         super().__init__(beaker_kernel, self.agent_cls, config)

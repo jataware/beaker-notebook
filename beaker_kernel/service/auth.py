@@ -4,7 +4,7 @@ import base64
 import boto3
 import json
 import requests
-from traitlets import Unicode, Bool, Enum
+from traitlets import Unicode, Bool
 
 from jupyter_server.auth.authorizer import Authorizer, AllowAllAuthorizer
 from jupyter_server.auth.identity import IdentityProvider, User
@@ -14,56 +14,134 @@ try:
 except ImportError:
     pyjwt = None
 
-
 class CognitoHeadersIdentityProvider(IdentityProvider):
-
-    auth_mode = Enum(
-        ['alb', 'app', 'auto'],
-        default_value='auto',
-        config=True,
-        help="Authentication mode: 'alb' (ALB-level), 'app' (app-level), 'auto' (try both). Defaults to 'auto' for backward compatibility.",
-    )
 
     cognito_jwt_header = Unicode(
         default_value="X-Amzn-Oidc-Data",
         config=True,
-        help="Header containing the cognito JWT encoded grants (ALB mode)",
+        help="Header containing the cognito JWT encoded grants",
     )
 
     cognito_identity_header = Unicode(
         default_value="X-Amzn-Oidc-Identity",
         config=True,
-        help="Header containing the cognito user identity (ALB mode)",
+        help="Header containing the cognito user identity",
     )
 
     cognito_accesstoken_header = Unicode(
         default_value="X-Amzn-Oidc-Accesstoken",
         config=True,
-        help="Header containing the cognito active access token (ALB mode)",
-    )
-
-    app_user_id_header = Unicode(
-        default_value="X-Beaker-User-Id",
-        config=True,
-        help="Header containing user ID (app-level auth mode)",
-    )
-
-    app_access_token_header = Unicode(
-        default_value="X-Beaker-Access-Token",
-        config=True,
-        help="Header containing access token (app-level auth mode)",
-    )
-
-    app_id_token_header = Unicode(
-        default_value="X-Beaker-Id-Token",
-        config=True,
-        help="Header containing ID token (app-level auth mode)",
+        help="Header containing the cognito active access token",
     )
 
     user_pool_id = Unicode(
         default_value="",
         config=True,
-        help="AWS Cognito User Pool ID (optional - only used for enriching user info)",
+        help="AWS Cognito User Pool ID",
+    )
+
+    verify_jwt_signature = Bool(
+        default_value=True,
+        config=True,
+        help="Whether the jwt signature from cognito should be verified",
+    )
+
+
+    @lru_cache
+    def _get_elb_key(self, region: str, kid: str) -> str:
+        key_url = f"https://public-keys.auth.elb.{region}.amazonaws.com/{kid}"
+        pubkey = requests.get(key_url).text
+        return pubkey
+
+
+    @lru_cache
+    def _verify_jwt(self, jwt_data: str):
+        if pyjwt is not None:
+            header, body = [json.loads(base64.b64decode(f).decode('utf-8')) for f in jwt_data.split('.')[0:2]]
+            self.log.warning(header)
+            self.log.warning(body)
+            signer: str = header.get("signer")
+            region = signer.split(':')[3]
+            kid: str = header.get("kid")
+            pubkey = self._get_elb_key(region, kid)
+            payload = pyjwt.decode(jwt_data, key=pubkey, algorithms=["ES256", "RS256"])
+            self.log.warning(payload)
+            return payload
+
+
+    @lru_cache
+    def _get_user(self, user_id, access_token):
+        # Access token is provided as an argument to ensure that auth info is refetched (misses cache) if the access token changes.
+        try:
+            cognito_client = boto3.client('cognito-idp')
+            response = cognito_client.admin_get_user(
+                UserPoolId=self.user_pool_id,
+                Username=user_id
+            )
+
+            user_attributes = {attr['Name']: attr['Value'] for attr in response.get('UserAttributes', [])}
+            username = user_attributes.get('preferred_username') or user_attributes.get('email') or user_id
+
+            return User(
+                username=username,
+                name=user_attributes.get('name', username),
+                display_name=user_attributes.get('given_name', username),
+            )
+        except Exception as e:
+            self.log.warning(f"Failed to get cognito user info for {user_id}: {e}")
+            return None
+
+
+    async def get_user(self, handler) -> User|None:
+        jwt_data: str = handler.request.headers.get(self.cognito_jwt_header, None)
+        user_id: str = handler.request.headers.get(self.cognito_identity_header, None)
+        access_token: str = handler.request.headers.get(self.cognito_accesstoken_header, None)
+
+        match pyjwt, self.verify_jwt_signature, jwt_data:
+            case (None, _, _):
+                self.log.warning("Unable to verify JWT signature as package 'pyjwt' is not installed.")
+            case (_, _, None):
+                self.log.warning("Unable to verify JWT signature as it is not found.")
+            case (_, False, _):
+                self.log.info("Skipping checking JWT signature due to configuration.")
+            case (_, True, str()):
+                try:
+                    self._verify_jwt(jwt_data)
+                except pyjwt.exceptions.InvalidTokenError as e:
+                    self.log.warning(f"Error attempting to verify JWT token: {e}")
+                    return None
+
+        if not user_id or not access_token:
+            return None
+
+        user = self._get_user(user_id, access_token)
+        return user
+
+
+class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
+
+    app_user_id_header = Unicode(
+        default_value="X-Beaker-User-Id",
+        config=True,
+        help="Header containing user ID (app-level auth)",
+    )
+
+    app_access_token_header = Unicode(
+        default_value="X-Beaker-Access-Token",
+        config=True,
+        help="Header containing access token (app-level auth)",
+    )
+
+    app_id_token_header = Unicode(
+        default_value="X-Beaker-Id-Token",
+        config=True,
+        help="Header containing ID token (app-level auth)",
+    )
+
+    user_pool_id = Unicode(
+        default_value="",
+        config=True,
+        help="AWS Cognito User Pool ID (required if verify_jwt_signature=True - used to fetch JWKS and verify issuer. Not needed if verification is disabled)",
     )
 
     cognito_region = Unicode(
@@ -77,13 +155,6 @@ class CognitoHeadersIdentityProvider(IdentityProvider):
         config=True,
         help="Whether the jwt signature should be verified",
     )
-
-
-    @lru_cache
-    def _get_elb_key(self, region: str, kid: str) -> str:
-        key_url = f"https://public-keys.auth.elb.{region}.amazonaws.com/{kid}"
-        pubkey = requests.get(key_url).text
-        return pubkey
 
     @lru_cache
     def _get_cognito_jwks(self, user_pool_id: str, region: str) -> dict:
@@ -100,21 +171,6 @@ class CognitoHeadersIdentityProvider(IdentityProvider):
         
         # Default to us-east-1 if not set
         return "us-east-1"
-
-    @lru_cache
-    def _verify_jwt(self, jwt_data: str):
-        """Verify ALB-signed JWT"""
-        if pyjwt is not None:
-            header, body = [json.loads(base64.b64decode(f).decode('utf-8')) for f in jwt_data.split('.')[0:2]]
-            self.log.warning(header)
-            self.log.warning(body)
-            signer: str = header.get("signer")
-            region = signer.split(':')[3]
-            kid: str = header.get("kid")
-            pubkey = self._get_elb_key(region, kid)
-            payload = pyjwt.decode(jwt_data, key=pubkey, algorithms=["ES256", "RS256"])
-            self.log.warning(payload)
-            return payload
 
     def _verify_cognito_id_token(self, jwt_data: str) -> dict | None:
         """Verify Cognito ID token using JWKS"""
@@ -225,120 +281,72 @@ class CognitoHeadersIdentityProvider(IdentityProvider):
             self.log.debug(f"Could not extract user_id from token: {e}")
             return None
 
-    def _get_auth_from_alb(self, handler) -> tuple[str | None, str | None, str | None]:
-        """Extract auth info from ALB headers"""
-        jwt_data = handler.request.headers.get(self.cognito_jwt_header, None)
-        user_id = handler.request.headers.get(self.cognito_identity_header, None)
-        access_token = handler.request.headers.get(self.cognito_accesstoken_header, None)
-        return jwt_data, user_id, access_token
-
-    def _get_auth_from_app(self, handler) -> tuple[str | None, str | None, str | None]:
-        """Extract auth info from app-level headers"""
-        user_id = handler.request.headers.get(self.app_user_id_header, None)
-        access_token = handler.request.headers.get(self.app_access_token_header, None)
-        jwt_data = handler.request.headers.get(self.app_id_token_header, None)
-        return jwt_data, user_id, access_token
 
 
-    def _get_user(self, user_id, access_token):
+    def _get_user(self, user_id: str, token_payload: dict | None = None):
         """
-        Get user info from Cognito if user_pool_id is set, otherwise create basic User.
-        user_pool_id is optional - if not set, creates basic User from user_id.
+        Create User from user_id and optional token payload.
+        Token payload contains self-contained user info from Cognito ID token.
+        No pool access needed - tokens are self-contained.
         """
-        # If user_pool_id is not set, create basic User object
-        if not self.user_pool_id:
-            self.log.debug(f"user_pool_id not set, creating basic User from user_id: {user_id}")
-            return User(
-                username=user_id,
-                name=user_id,
-                display_name=user_id,
+        # If we have token payload, extract user info from it
+        if token_payload:
+            username = (
+                token_payload.get('preferred_username') or
+                token_payload.get('email') or
+                token_payload.get('sub') or
+                user_id
             )
-
-        # Try to get enriched user info from Cognito
-        try:
-            cognito_client = boto3.client('cognito-idp')
-            response = cognito_client.admin_get_user(
-                UserPoolId=self.user_pool_id,
-                Username=user_id
-            )
-
-            user_attributes = {attr['Name']: attr['Value'] for attr in response.get('UserAttributes', [])}
-            username = user_attributes.get('preferred_username') or user_attributes.get('email') or user_id
-
+            name = token_payload.get('name') or username
+            display_name = token_payload.get('given_name') or token_payload.get('name') or username
+            
             return User(
                 username=username,
-                name=user_attributes.get('name', username),
-                display_name=user_attributes.get('given_name', username),
+                name=name,
+                display_name=display_name,
             )
-        except Exception as e:
-            self.log.warning(f"Failed to get cognito user info for {user_id}: {e}, falling back to basic User")
-            # Fall back to basic User if Cognito lookup fails
-            return User(
-                username=user_id,
-                name=user_id,
-                display_name=user_id,
-            )
+        
+        # Fallback: create basic User from user_id if no token payload
+        return User(
+            username=user_id,
+            name=user_id,
+            display_name=user_id,
+        )
 
 
     async def get_user(self, handler) -> User | None:
-        """Main entry point - supports both ALB and app-level authentication"""
-        jwt_data = None
-        user_id = None
-        access_token = None
-        is_alb_mode = False
+        """Main entry point - handles app-level authentication"""
+        # Extract auth info from app-level headers
+        user_id = handler.request.headers.get(self.app_user_id_header, None)
+        jwt_data = handler.request.headers.get(self.app_id_token_header, None)
 
-        # Determine which headers to read based on auth_mode
-        if self.auth_mode == 'alb':
-            jwt_data, user_id, access_token = self._get_auth_from_alb(handler)
-            is_alb_mode = True
-        elif self.auth_mode == 'app':
-            jwt_data, user_id, access_token = self._get_auth_from_app(handler)
-            is_alb_mode = False
-        else:  # auto mode
-            # Try ALB first, then fall back to app-level
-            jwt_data, user_id, access_token = self._get_auth_from_alb(handler)
-            if not user_id:
-                jwt_data, user_id, access_token = self._get_auth_from_app(handler)
-                is_alb_mode = False
+        # Verify and decode ID token if provided
+        token_payload = None
+        if jwt_data:
+            if self.verify_jwt_signature:
+                token_payload = self._verify_cognito_id_token(jwt_data)
+                if token_payload is None:
+                    # Verification failed and was required
+                    return None
             else:
-                is_alb_mode = True
+                # Verification disabled, but still decode to extract user info
+                try:
+                    if pyjwt:
+                        token_payload = pyjwt.decode(jwt_data, options={"verify_signature": False})
+                except Exception as e:
+                    self.log.debug(f"Could not decode token (verification disabled): {e}")
 
-        # If still no user_id, try extracting from JWT if available
-        if not user_id and jwt_data:
-            user_id = self._get_user_id_from_token(jwt_data)
+        # If no user_id, try extracting from token payload
+        if not user_id:
+            if token_payload:
+                user_id = token_payload.get('sub') or token_payload.get('username')
+            elif jwt_data:
+                user_id = self._get_user_id_from_token(jwt_data)
 
         # Missing user_id means authentication failed
         if not user_id:
             return None
 
-        # Handle JWT verification
-        if jwt_data:
-            if is_alb_mode:
-                # ALB mode: verify ALB-signed JWT
-                if pyjwt is None:
-                    if self.verify_jwt_signature:
-                        self.log.warning("Unable to verify JWT signature as package 'pyjwt' is not installed.")
-                        return None
-                elif self.verify_jwt_signature:
-                    try:
-                        self._verify_jwt(jwt_data)
-                    except pyjwt.exceptions.InvalidTokenError as e:
-                        self.log.warning(f"Error attempting to verify ALB JWT token: {e}")
-                        return None
-            else:
-                # App mode: verify Cognito ID token
-                if self.verify_jwt_signature:
-                    verified_payload = self._verify_cognito_id_token(jwt_data)
-                    if verified_payload is None:
-                        # Verification failed and was required
-                        return None
-
-        # For ALB mode, access_token is required
-        if is_alb_mode and not access_token:
-            return None
-
-        # For app mode, access_token is optional (BeakerHub already authenticated)
-        # If access_token is missing, we can still create a User from user_id
-
-        user = self._get_user(user_id, access_token)
+        # Create user from token payload (self-contained, no pool access needed)
+        user = self._get_user(user_id, token_payload)
         return user

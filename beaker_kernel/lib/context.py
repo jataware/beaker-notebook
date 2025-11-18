@@ -70,7 +70,6 @@ class BeakerContext:
 
     SLUG: Optional[str]
     WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
-    DISPLAY_NAME: Optional[str] = None  # Human-readable display name for the context. If not set, falls back to SLUG or class name.
 
     def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "BeakerAgent", config: Dict[str, Any],
                  integrations: list[BaseIntegrationProvider] = None):
@@ -662,25 +661,6 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             return package_str.split(".")[-1]
         else:
             return None
-
-    @property
-    def display_name(self) -> str:
-        """
-        Human-readable display name for the context.
-
-        Falls back to SLUG (formatted) if DISPLAY_NAME is not set, or class name as last resort.
-        """
-        if hasattr(self.__class__, "DISPLAY_NAME") and self.__class__.DISPLAY_NAME is not None:
-            return self.__class__.DISPLAY_NAME
-
-        # Fallback to formatted SLUG
-        slug = self.slug
-        if slug:
-            # Convert snake_case or kebab-case to Title Case
-            return slug.replace("_", " ").replace("-", " ").title()
-
-        # Last resort: use class name
-        return self.__class__.__name__.replace("Context", "").replace("Beaker", "").strip()
 
     @property
     def lang(self):

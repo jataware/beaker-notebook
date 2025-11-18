@@ -1,13 +1,11 @@
 import asyncio
 import importlib
-import inspect
 import json
 import logging
 import os
 import traceback
 import uuid
 import urllib.parse
-import yaml
 from typing import get_origin, get_args
 from dataclasses import is_dataclass, asdict
 from collections.abc import Mapping, Collection
@@ -21,7 +19,6 @@ from jupyter_server.extension.handler import ExtensionHandlerMixin
 from jupyterlab_server import LabServerApp
 from tornado import web, httputil
 from tornado.web import StaticFileHandler, RedirectHandler, RequestHandler, HTTPError
-import toml
 
 from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.app import BeakerApp
@@ -29,8 +26,6 @@ from beaker_kernel.lib.context import BeakerContext
 from beaker_kernel.lib.subkernel import BeakerSubkernel
 from beaker_kernel.lib.agent_tasks import summarize
 from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
-from beaker_kernel.lib.workflow import Workflow
-from beaker_kernel.cli.helpers import find_pyproject_file
 from beaker_kernel.service import admin_utils
 from .api.handlers import register_api_handlers
 
@@ -328,237 +323,6 @@ class ContextHandler(ExtensionHandlerMixin, JupyterHandler):
         return self.write(context_data)
 
 
-def get_context_description(context_cls: type[BeakerContext]) -> str:
-    """
-    Get context description from package metadata, pyproject.toml, or class docstring.
-
-    Args:
-        context_cls: The context class to get description for
-
-    Returns:
-        Description string, or empty string if not found
-    """
-    # try package metadata first (works for installed packages from pypi/wheels)
-    try:
-        from importlib.metadata import metadata
-        pkg_name = context_cls.__module__.split('.')[0]
-        pkg_metadata = metadata(pkg_name)
-        description = pkg_metadata.get('Summary') or pkg_metadata.get('Description', '')
-        if description and description.strip():
-            return description.strip()
-    except Exception as e:
-        logger.debug(f"Failed to read package metadata for {context_cls.__name__}: {e}")
-
-    # fallback to pyproject.toml (works for editable installs or source)
-    try:
-        context_file = inspect.getfile(context_cls)
-        pyproject_path = find_pyproject_file(context_file)
-        if pyproject_path and pyproject_path.exists():
-            pyproject_data = toml.loads(pyproject_path.read_text())
-            project_desc = pyproject_data.get("project", {}).get("description")
-            if project_desc:
-                return project_desc.strip()
-    except Exception as e:
-        logger.debug(f"Failed to read pyproject.toml for {context_cls.__name__}: {e}")
-
-    # final fallback to class docstring
-    docstring = context_cls.__doc__
-    if docstring:
-        return docstring.strip()
-
-    return ""
-
-
-def discover_context_workflows(context_cls: type[BeakerContext]) -> list[dict]:
-    """
-    Discover workflows for a context by reading YAML files from workflows/ directory.
-
-    Args:
-        context_cls: The context class to discover workflows for
-
-    Returns:
-        List of workflow dictionaries (without steps array and output_prompt)
-    """
-    workflows = []
-    try:
-        class_dir = inspect.getfile(context_cls)
-        workflows_dir = os.path.join(os.path.dirname(class_dir), "workflows")
-        if os.path.exists(workflows_dir):
-            for workflow_yaml in Path(workflows_dir).glob("*.yaml"):
-                try:
-                    workflow_data = yaml.safe_load(workflow_yaml.read_text())
-                    workflow = Workflow.from_yaml(workflow_data)
-                    workflow_dict = asdict(workflow)
-                    # remove steps, output_prompt from each stage
-                    if "stages" in workflow_dict:
-                        for stage in workflow_dict["stages"]:
-                            if "steps" in stage:
-                                del stage["steps"]
-                    if "output_prompt" in workflow_dict:
-                        del workflow_dict["output_prompt"]
-                    workflows.append(workflow_dict)
-                except Exception as e:
-                    logger.warning(f"Failed to parse workflow file {workflow_yaml}: {e}")
-    except Exception as e:
-        logger.debug(f"Failed to discover workflows for {context_cls.__name__}: {e}")
-
-    return workflows
-
-
-def discover_context_integrations(context_cls: type[BeakerContext]) -> list[dict]:
-    """
-    Discover integrations for a context by reading api.yaml files from integrations/specifications/ directory.
-
-    Args:
-        context_cls: The context class to discover integrations for
-
-    Returns:
-        List of integration dictionaries with name and description from api.yaml files
-    """
-    integrations = []
-    try:
-        class_dir = inspect.getfile(context_cls)
-        context_package_dir = os.path.dirname(class_dir)
-
-        # multiple possible locations for integrations
-        possible_integration_dirs = []
-
-        # 1. INTEGRATION_PATH environment variable
-        integration_path = os.environ.get("INTEGRATION_PATH")
-        if integration_path:
-            integration_path_obj = Path(integration_path)
-            # points directly to specifications, or need to append?
-            if integration_path_obj.name == "specifications" and integration_path_obj.is_dir():
-                possible_integration_dirs.append(integration_path_obj)
-            else:
-                # try integrations/specifications pattern
-                specs_path = integration_path_obj / "specifications"
-                if specs_path.exists() and specs_path.is_dir():
-                    possible_integration_dirs.append(specs_path)
-
-        # 2. check relative to context class: integrations/specifications
-        relative_integrations = Path(context_package_dir) / "integrations" / "specifications"
-        if relative_integrations.exists():
-            possible_integration_dirs.append(relative_integrations)
-
-        # 3. check in parent directories (walk up from context file; 3 levels up)
-        current_dir = Path(context_package_dir)
-        for _ in range(3):
-            parent_integrations = current_dir / "integrations" / "specifications"
-            if parent_integrations.exists() and parent_integrations not in possible_integration_dirs:
-                possible_integration_dirs.append(parent_integrations)
-            current_dir = current_dir.parent
-
-        # 4. beaker resource dirs for integrations
-        from beaker_kernel.lib.autodiscovery import find_resource_dirs
-        for resource_dir in find_resource_dirs("integrations"):
-            # specifications subdirectory?
-            specs_dir = Path(resource_dir) / "specifications"
-            if specs_dir.exists() and specs_dir not in possible_integration_dirs:
-                possible_integration_dirs.append(specs_dir)
-
-        # 5. beaker resource dirs for data/{context_slug}/specifications
-        # (build hook creates this structure)
-        context_slug = context_cls.SLUG if hasattr(context_cls, 'SLUG') else None
-        if context_slug:
-            for resource_dir in find_resource_dirs("data"):
-                specs_dir = Path(resource_dir) / context_slug / "specifications"
-                if specs_dir.exists() and specs_dir not in possible_integration_dirs:
-                    possible_integration_dirs.append(specs_dir)
-
-        # use integrations from all found directories
-        seen_integrations = set()
-        for integrations_dir in possible_integration_dirs:
-            if not integrations_dir.exists() or not integrations_dir.is_dir():
-                continue
-
-            for spec_dir in integrations_dir.iterdir():
-                if not spec_dir.is_dir():
-                    continue
-
-                api_yaml = spec_dir / "api.yaml"
-                if not api_yaml.exists() or not api_yaml.is_file():
-                    continue
-
-                try:
-                    spec_data = yaml.safe_load(api_yaml.read_text())
-                    name = spec_data.get("name", "")
-                    description = spec_data.get("description", "")
-                    slug = spec_data.get("slug", "")
-
-                    # use slug as unique identifier, or name if slug not available
-                    integration_id = slug or name
-                    if integration_id and integration_id not in seen_integrations:
-                        seen_integrations.add(integration_id)
-                        integrations.append({
-                            "name": name,
-                            "description": description.strip() if description else "",
-                            "slug": slug or name.lower().replace(" ", "_"),
-                        })
-                except Exception as e:
-                    logger.debug(f"Failed to parse integration api.yaml {api_yaml}: {e}")
-
-    except Exception as e:
-        logger.debug(f"Failed to discover integrations for {context_cls.__name__}: {e}")
-
-    return integrations
-
-
-class ContextDetailHandler(ExtensionHandlerMixin, JupyterHandler):
-    """
-    Provide extended information about beaker contexts via an endpoint
-    including name, description, integrations, and workflows.
-    """
-
-    def get(self):
-        """Get extended context information for all contexts."""
-        ksm = self.kernel_spec_manager
-        contexts: dict[str, type[BeakerContext]] = autodiscover("contexts")
-        possible_subkernels: dict[str, BeakerSubkernel] = autodiscover("subkernels")
-        subkernel_by_kernel_index = {subkernel.KERNEL_NAME: subkernel for subkernel in possible_subkernels.values()}
-        installed_kernels = [
-            subkernel_by_kernel_index[kernel_name] for kernel_name in ksm.find_kernel_specs().keys()
-            if kernel_name in subkernel_by_kernel_index
-        ]
-
-        contexts = sorted(contexts.items(), key=lambda item: (item[1].WEIGHT, item[0]))
-
-        # extract context data
-        context_data = {}
-        for context_slug, context_cls in contexts:
-            # basic info (same as ContextHandler)
-            languages = [
-                {
-                    "slug": subkernel_slug,
-                    "subkernel": getattr(possible_subkernels.get(subkernel_slug), "KERNEL_NAME")
-                }
-                for subkernel_slug in context_cls.available_subkernels()
-                if subkernel_slug in set(subkernel.SLUG for subkernel in installed_kernels)
-            ]
-
-            # more details
-            description = get_context_description(context_cls)
-            workflows = discover_context_workflows(context_cls)
-            integrations = discover_context_integrations(context_cls)
-
-            display_name = getattr(context_cls, 'DISPLAY_NAME', None)
-            if display_name is None:
-                display_name = context_slug.replace("_", " ").replace("-", " ").title()
-
-            context_data[context_slug] = {
-                "slug": context_slug,
-                "display_name": display_name,
-                "description": description,
-                "weight": getattr(context_cls, 'WEIGHT', 50),
-                "languages": languages,
-                "defaultPayload": context_cls.default_payload(),
-                "integrations": integrations,
-                "workflows": workflows,
-            }
-
-        return self.write(context_data)
-
-
 class DownloadHandler(RequestHandler):
     def get(self, filepath: str):
         if filepath.startswith("."):
@@ -796,7 +560,6 @@ def register_handlers(app: LabServerApp):
 
     register_api_handlers(app)
     app.handlers.append(("/contexts", ContextHandler))
-    app.handlers.append(("/contexts/detail", ContextDetailHandler))
     app.handlers.append(("/config/control", ConfigController))
     app.handlers.append(("/config", ConfigHandler))
     app.handlers.append(("/stats", StatsHandler))
