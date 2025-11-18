@@ -343,8 +343,34 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
             elif jwt_data:
                 user_id = self._get_user_id_from_token(jwt_data)
 
-        # Missing user_id means authentication failed
+        # if no user_id from headers/jwt, check for token-based auth (for internal requests)
+        # this allows beaker-kernel internal API calls to work with jupyter token
+        # SECURITY: this fallback is safe because:
+        # 1. BeakerHub requires authentication on all /api/ routes via JWTAuthMiddleware
+        # 2. If authenticated, BeakerHub always sets X-Beaker-* headers (checked above)
+        # 3. Token fallback only triggers when NO user headers present (internal kernel calls)
         if not user_id:
+            # check if request has valid jupyter token (query param or Authorization header)
+            token_from_query = handler.get_argument('token', None)
+            token_from_header = None
+            auth_header = handler.request.headers.get('Authorization', '')
+            if auth_header.startswith('token ') or auth_header.startswith('Token '):
+                token_from_header = auth_header.split(' ', 1)[1]
+
+            provided_token = token_from_query or token_from_header
+            if provided_token:
+                # compare with configured jupyter token
+                import os
+                expected_token = os.environ.get('JUPYTER_TOKEN', '')
+                if expected_token and provided_token == expected_token:
+                    # create a system user for token-authenticated requests
+                    return User(
+                        username='system',
+                        name='System',
+                        display_name='System (Token Auth)',
+                    )
+
+            # no valid authentication found
             return None
 
         # Create user from token payload (self-contained, no pool access needed)
