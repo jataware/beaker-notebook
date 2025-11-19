@@ -1,6 +1,8 @@
 import traitlets
 from jupyter_client import kernelspec
 
+from beaker_kernel.app.base import BaseBeakerApp
+
 
 class BeakerKernelSpecManager(kernelspec.KernelSpecManager):
     NAME_SEP = r"%%"

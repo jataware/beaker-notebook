@@ -75,9 +75,9 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             }
             if app_context_dict:
                 kwargs["context"].update(**app_context_dict)
+        kwargs.setdefault("server", self.app.public_url)
 
         super().write_connection_file(
-            server=self.app.public_url,
             **kwargs
         )
 
@@ -193,6 +193,10 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
     def beaker_config(self):
         return getattr(self.parent, 'beaker_config', None)
 
+    def get_current_user(self) -> BeakerUser | None:
+        user: BeakerUser = current_user.get()
+        return user
+
     def cwd_for_path(self, path, **kwargs):
         user: BeakerUser = current_user.get()
         if user:
@@ -212,7 +216,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
     def pre_start_kernel(self, kernel_name: str, kwargs: dict):
         km, kernel_name, kernel_id = super().pre_start_kernel(kernel_name, kwargs)
         km = cast(BeakerKernelManager, km)
-        beaker_session = kwargs.get("session_path", None)
+        beaker_session = kwargs.get('env', {}).get('BEAKER_SESSION', None) or kwargs.get("session_path", None)
         if beaker_session and not km.beaker_session:
             km.beaker_session = beaker_session
         return km, kernel_name, kernel_id

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import dataclasses
 import inspect
 import json
@@ -291,32 +292,31 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         kernel_lang = kernelspec.get('spec', {}).get("language", None)
         subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
 
-        # url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
-        url = urllib.parse.urljoin(urlbase, "/api/kernels")
         path = self.beaker_kernel.session_config.get("beaker_session", None)
         if path is None:
             path = self.beaker_kernel.session_config.get("jupyter_session", "")
-        res = requests.post(
-            url,
+
+        kernel_creation_res = requests.post(
+            url=urllib.parse.urljoin(urlbase, "/api/kernels"),
             json={"name": subkernel_slug, "path": path},
             headers={
                 "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
             },
         )
-        kernel_info = res.json()
-        self.beaker_kernel.update_running_kernels()
-        kernels = self.beaker_kernel.kernels
-        subkernel_id = kernel_info["id"]
-        # NOTE: MODIFIED `connect_to`
-        # TODO: Refactor this into `lib/kernel_proxy_manager.py`
-        matching = next((n for n in kernels if subkernel_id in n), None)
-        if matching is None:
-            raise ValueError("Unknown kernel " + subkernel_id)
-        if kernels[matching] == self.beaker_kernel.server.config:
-            raise ValueError("Refusing loopback connection")
+        kernel_info = kernel_creation_res.json()
 
-        # subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
-        subkernel = subkernel_cls(subkernel_id, kernels[matching], self)
+        subkernel_id = kernel_info["id"]
+
+        connection_info_res = requests.get(
+            url=urllib.parse.urljoin(urlbase, f"/beaker/subkernels/{subkernel_id}"),
+            headers={
+                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
+            },
+        )
+        connection_info = connection_info_res.json()
+        connection_info["key"] = base64.b64decode(connection_info.get("key", b""))
+
+        subkernel = subkernel_cls(subkernel_id, connection_info, self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
 

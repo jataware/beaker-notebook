@@ -61,7 +61,10 @@ class BeakerLocalContentsManager(AsyncLargeFileManager, BaseBeakerContentsManage
         """
         user: BeakerUser = current_user.get()
         if user:
-            return os.path.join(self.parent.virtual_home_root, user.home_dir, path)
+            userdir_path = os.path.join(self.parent.virtual_home_root, user.home_dir)
+            if not os.path.isdir(userdir_path):
+                os.makedirs(userdir_path, exist_ok=True)
+            return os.path.join(userdir_path, path)
         return super()._get_os_path(path)
 
     async def _notebook_model(self, path, content=True, require_hash=False):
