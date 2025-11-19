@@ -1,35 +1,37 @@
 import asyncio
-import importlib
 import json
 import logging
 import os
 import traceback
 import uuid
 import urllib.parse
-from typing import get_origin, get_args
-from dataclasses import is_dataclass, asdict
-from collections.abc import Mapping, Collection
+from importlib.metadata import entry_points, EntryPoints, EntryPoint
+from typing import get_origin, get_args, Optional, TYPE_CHECKING
+from dataclasses import is_dataclass
 from pathlib import Path
-from typing import get_origin, get_args, GenericAlias, Union, Generic, Generator, Optional
 from types import UnionType
 
-from jupyter_server.auth.decorator import authorized
+from jupyter_server.auth.decorator import authorized, allow_unauthenticated
 from jupyter_server.base.handlers import JupyterHandler
-from jupyter_server.extension.handler import ExtensionHandlerMixin
+# from jupyter_server.extension.handler import ExtensionHandlerMixin
 from jupyterlab_server import LabServerApp
 from tornado import web, httputil
-from tornado.web import StaticFileHandler, RedirectHandler, RequestHandler, HTTPError
+from tornado.web import StaticFileHandler, RequestHandler, HTTPError
 
 from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.context import BeakerContext
 from beaker_kernel.lib.subkernel import BeakerSubkernel
-from beaker_kernel.lib.agent_tasks import summarize
 from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
 from beaker_kernel.service import admin_utils
+from beaker_kernel.service.auth import BeakerUser
 from .api.handlers import register_api_handlers
 
+if TYPE_CHECKING:
+    from .base import BaseBeakerApp
+
 logger = logging.getLogger(__name__)
+
 
 def sanitize_env(env: dict[str, str]) -> dict[str, str]:
     # Whitelist must match the env variable name exactly and is checked first.
@@ -60,17 +62,19 @@ def request_log_handler(handler: JupyterHandler):
     method = handler.request.method.upper()
     if method in SKIPPED_METHODS:
         return
+    user: BeakerUser = handler.current_user
     logger.info(
-        "%d %s %.2fms",
+        "%d %s %.2fms %s",
         handler.get_status(),
         handler._request_summary(),
         request_time,
+        f": {user.username}" if user else "",
     )
 
 
 class PageHandler(StaticFileHandler):
     """
-    Special handler that
+    Special handler that returns UI pages dynamically defined by the UI.
     """
     async def get(self, path: str, include_body: bool = True) -> None:
 
@@ -109,7 +113,7 @@ class PageHandler(StaticFileHandler):
         return await super().get(path, include_body=include_body)
 
 
-class ConfigController(ExtensionHandlerMixin, JupyterHandler):
+class ConfigController(JupyterHandler):
     """
     """
     @staticmethod
@@ -241,11 +245,12 @@ class ConfigController(ExtensionHandlerMixin, JupyterHandler):
             }
         )
 
-class ConfigHandler(ExtensionHandlerMixin, JupyterHandler):
+class ConfigHandler(JupyterHandler):
     """
     Provide config via an endpoint
     """
 
+    @allow_unauthenticated
     def get(self):
         # If BASE_URL is not provided in the environment, assume that the base url is the same location that
         # is handling this request, as reported by the request headers.
@@ -260,16 +265,15 @@ class ConfigHandler(ExtensionHandlerMixin, JupyterHandler):
             ws_scheme = "ws"
         ws_url = base_url.replace(base_scheme, ws_scheme)
 
-        extension_config = self.extensionapp.extension_config
-        beaker_app: BeakerApp|None = extension_config.get("app", None)
+        beaker_app: BeakerApp|None = self.config.get("app", None)
 
         config_data = {
-            # "appendToken": True,
             "appUrl": os.environ.get("APP_URL", base_url),
             "baseUrl": base_url,
             "wsUrl": os.environ.get("JUPYTER_WS_URL", ws_url),
             "token": config.jupyter_token,
             "config_type": config.config_type,
+            "defaultKernel": self.kernel_spec_manager.get_default_kernel_name(),
             "extra": {}
         }
         if hasattr(config, "send_notebook_state"):
@@ -288,10 +292,15 @@ class ConfigHandler(ExtensionHandlerMixin, JupyterHandler):
         return self.write(config_data)
 
 
-class ContextHandler(ExtensionHandlerMixin, JupyterHandler):
+class ContextHandler(JupyterHandler):
     """
     Provide information about llm contexts via an endpoint
     """
+    provisioners: EntryPoints
+
+    def __init__(self, application, request, **kwargs):
+        super().__init__(application, request, **kwargs)
+        self.provisioners = entry_points(group="jupyter_client.kernel_provisioners")
 
     def get(self):
         """Get the main page for the application's interface."""
@@ -299,27 +308,62 @@ class ContextHandler(ExtensionHandlerMixin, JupyterHandler):
         contexts: dict[str, BeakerContext] = autodiscover("contexts")
         possible_subkernels: dict[str, BeakerSubkernel] = autodiscover("subkernels")
         subkernel_by_kernel_index = {subkernel.KERNEL_NAME: subkernel for subkernel in possible_subkernels.values()}
-        installed_kernels = [
-            subkernel_by_kernel_index[kernel_name] for kernel_name in ksm.find_kernel_specs().keys()
-            if kernel_name in subkernel_by_kernel_index
-        ]
+        subkernel_by_language_index = {subkernel.JUPYTER_LANGUAGE: subkernel for subkernel in possible_subkernels.values()}
+        kernels = ksm.get_all_specs()
+
+        installed_kernels = {}
+        for kernel_long_name, kernel_details in kernels.items():
+            kernelspec = kernel_details.get("spec", {})
+            kernel_name = kernelspec.get("name", kernel_long_name)
+            kernel_language = kernelspec.get("language", kernel_name)
+
+            if kernel_language in subkernel_by_language_index:
+                installed_kernels[kernel_long_name] = {
+                    "kernelspec": kernel_details,
+                    "subkernel": subkernel_by_language_index[kernel_language],
+                }
+
         contexts = sorted(contexts.items(), key=lambda item: (item[1].WEIGHT, item[0]))
 
         # Extract data from auto-discovered contexts and subkernels to provide options
-        context_data = {
-            context_slug: {
+        context_data = {}
+        for context_slug, context in contexts:
+            acceptable_subkernels = context.available_subkernels()
+            available_subkernels = [
+                subkernel
+                for subkernel in acceptable_subkernels
+                if subkernel in set(
+                    subkernel["subkernel"].SLUG for subkernel in installed_kernels.values()
+                )
+            ]
+
+            context_data[context_slug] = {
                 "languages": [
                     {
                         "slug": subkernel_slug,
-                        "subkernel": getattr(possible_subkernels.get(subkernel_slug), "KERNEL_NAME")
+                        "subkernel": subkernel_slug,
+                        "display": None,
                     }
-                    for subkernel_slug in context.available_subkernels()
-                    if subkernel_slug in set(subkernel.SLUG for subkernel in installed_kernels)
+                    for subkernel_slug in available_subkernels
                 ],
-                "defaultPayload": context.default_payload()
+                "subkernels": {},
+                "defaultPayload": context.default_payload(),
             }
-            for context_slug, context in contexts
-        }
+            subkernels = context_data[context_slug]["subkernels"]
+            for kernel_name, kernel_info in installed_kernels.items():
+                if kernel_info["subkernel"].SLUG in acceptable_subkernels:
+                    display_name = kernel_info["subkernel"].DISPLAY_NAME
+                    provisioner_info = kernel_info.get("provisioner", None)
+                    if provisioner_info:
+                        display_name += f" ({provisioner_info['name']})"
+                    subkernels[kernel_name] = {
+                        "language": kernel_info["kernelspec"]["spec"]["language"],
+                        "slug": kernel_info["subkernel"].SLUG,
+                        "display_name": display_name,
+                        "weight": kernel_info["subkernel"].WEIGHT,
+                    }
+
+
         return self.write(context_data)
 
 
@@ -408,14 +452,7 @@ class ExportAsHandler(JupyterHandler):
         self.finish(output)
 
 
-class SummaryHandler(ExtensionHandlerMixin, JupyterHandler):
-    async def post(self):
-        payload = json.loads(self.request.body)
-        summary = await summarize(**payload)
-        return self.write(summary)
-
-
-class StatsHandler(ExtensionHandlerMixin, JupyterHandler):
+class StatsHandler(JupyterHandler):
     """
     """
 
@@ -505,10 +542,12 @@ class StatsHandler(ExtensionHandlerMixin, JupyterHandler):
         return self.write(json.dumps(output))
 
 
-def register_handlers(app: LabServerApp):
+from jupyter_server.serverapp import ServerApp
+def register_handlers(app: ServerApp):
     pages = []
 
-    beaker_app: BeakerApp = app.extension_config.get("app", None)
+    # TODO: fix beaker app registration
+    beaker_app: BeakerApp = app.config.get("app", None)
     if beaker_app and beaker_app.asset_dir:
         if os.path.isdir(beaker_app.asset_dir):
             app.handlers.append((f"/assets/{beaker_app.slug}/(.*)", StaticFileHandler, {"path": beaker_app.asset_dir}))
@@ -564,7 +603,6 @@ def register_handlers(app: LabServerApp):
     app.handlers.append(("/config", ConfigHandler))
     app.handlers.append(("/stats", StatsHandler))
     app.handlers.append((r"/(favicon.ico|beaker.svg)$", StaticFileHandler, {"path": Path(app.ui_path)}))
-    app.handlers.append((r"/summary", SummaryHandler))
     app.handlers.append((r"/export/(?P<format>\w+)", ExportAsHandler)),
     app.handlers.append((r"/((?:static|themes)/.*)", StaticFileHandler, {"path": Path(app.ui_path)})),
     app.handlers.append((page_regex, PageHandler, {"path": app.ui_path, "default_filename": "index.html"}))

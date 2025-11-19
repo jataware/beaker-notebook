@@ -101,7 +101,7 @@ import InputText from 'primevue/inputtext';
 import InputGroup from 'primevue/inputgroup';
 import Button from 'primevue/button';
 import ProviderSelector from '../components/misc/ProviderSelector.vue';
-import sum from 'hash-sum';
+import hashSum from 'hash-sum';
 
 import {default as ConfigPanel, getConfigAndSchema, dropUnchangedValues, objectifyTables, tablifyObjects, saveConfig} from '../components/panels/ConfigPanel.vue';
 import SideMenu, { type MenuPosition } from '../components/sidemenu/SideMenu.vue';
@@ -114,6 +114,18 @@ const toast = useToast();
 
 const lastSaveChecksum = ref<string>();
 const mainRef = ref();
+const notebookInfo = ref<{
+    id: string;
+    name: string;
+    created: string;
+    last_modified: string;
+    size: number;
+    type?: string;
+    session_id?: string;
+    content?: any;
+    checksum?: string;
+    metadata?: {[key: string]: any};
+}>(null);
 
 // TODO -- WARNING: showToast is only defined locally, but provided/used everywhere. Move to session?
 export interface ShowToastOptions {
@@ -240,18 +252,15 @@ const connectionFailure = (error: Error) => {
     });
 }
 
+// Wrapper to allow removal from beforeunload event
+const saveSnapshotWrapper = () => {
+    saveSnapshot();
+}
+
 onMounted(async () => {
     const session: Session = beakerSession.value.session;
     await session.sessionReady;  // Ensure content service is up
-
-    var notebookData: {[key: string]: any};
-    try {
-        notebookData = JSON.parse(localStorage.getItem("notebookData")) || {};
-    }
-    catch (e) {
-        console.error(e);
-        notebookData = {};
-    }
+    const sessionId = session.sessionId;
 
     // Connect listener for authentication message
     session.session.ready.then(() => {
@@ -259,29 +268,12 @@ onMounted(async () => {
         sessionContext.iopubMessage.connect(iopubMessage);
     });
 
-    const sessionId = session.sessionId;
+    await loadSnapshot();
 
-    const sessionData = notebookData[sessionId];
-    if (sessionData) {
-        nextTick(async () => {
-            if (sessionData.filename !== undefined) {
-
-                const contentsService = session.services.contents;
-                const result = await contentsService.get(sessionData.filename)
-                lastSaveChecksum.value = sessionData.checksum;
-                emit('open-file', result.content, result.path, {selectedCell: sessionData.selectedCell});
-            }
-            else if (sessionData.data !== undefined) {
-                emit('open-file', sessionData.data, undefined, {selectedCell: sessionData.selectedCell});
-            }
-            if (sessionData.selectedCell !== undefined && beakerSession.value.notebookComponent) {
-                nextTick(() => beakerSession.value.notebookComponent.selectCell(sessionData.selectedCell));
-            }
-        });
-    }
-    saveInterval.value = setInterval(snapshot, 30000);
-    window.addEventListener("beforeunload", snapshot);
+    saveInterval.value = setInterval(saveSnapshot, 10000);
+    window.addEventListener("beforeunload", saveSnapshotWrapper);
 });
+
 
 const iopubMessage = (_sessionConn, msg) => {
     if (msg.header.msg_type === "llm_auth_failure") {
@@ -308,72 +300,181 @@ const setAgentModel = async (modelConfig = null, rerunLastCommand = false) => {
 onUnmounted(() => {
     clearInterval(saveInterval.value);
     saveInterval.value = null;
-    window.removeEventListener("beforeunload", snapshot);
+    window.removeEventListener("beforeunload", saveSnapshotWrapper);
 });
 
-const snapshot = async () => {
-    var notebookData: {[key: string]: any};
-    try {
-        notebookData = JSON.parse(localStorage.getItem("notebookData")) || {};
-    }
-    catch (e) {
-        console.error(e);
-        notebookData = {};
-    }
+const saveSnapshot = async (ignoreSession: boolean = false) => {
+    const session: Session = beakerSession.value?.session;
+    const sessionId = session?.sessionId ;
 
-    const session: Session = beakerSession.value.session;
-    const sessionId = session.sessionId ;
-
-    if (!Object.keys(notebookData).includes(sessionId)) {
-        notebookData[sessionId] = {};
-    }
-    const sessionData = notebookData[sessionId];
+    // TODO: Check session id matches
+    const notebookData: {[key: string]: any} = {
+        ...(notebookInfo.value || {}),
+    };
 
     // Only save state if there is state to save
     if (session.notebook) {
-        sessionData['data'] = session.notebook.toIPynb();
-        const notebookComponent = beakerSession.value.notebookComponent;
-        if (notebookComponent) {
-            sessionData['selectedCell'] = notebookComponent.selectedCellId
+        if (!ignoreSession) {
+            notebookData.content = session.notebook.toIPynb();
         }
 
-        if (props.savefile && typeof props.savefile === "string") {
+        const notebookChecksum: string = hashSum(notebookData.content);
+        const notebookComponent = beakerSession.value.notebookComponent;
 
-            const notebookContent = session.notebook.toIPynb();
-            const notebookChecksum: string = sum(notebookContent);
-
-            if (!lastSaveChecksum.value || lastSaveChecksum.value != notebookChecksum) {
-                lastSaveChecksum.value = notebookChecksum;
-
-                const contentsService = session.services.contents;
-                const path = props.savefile;
-                const result = await contentsService.save(path, {
-                    type: "notebook",
-                    content: notebookContent,
-                    format: 'text',
-                });
-                emit("notebook-autosaved", result.path);
-                showToast({
-                    title: "Autosave",
-                    detail: `Auto-saved notebook to file ${props.savefile}.`,
-                });
-                sessionData['filename'] = result.path;
-                sessionData['checksum'] = notebookChecksum;
-            }
+        if (notebookChecksum === notebookData.checksum) {
+            // No changes since last save
+            return;
         }
         else {
-            const notebookContent = session.notebook.toIPynb();
-            const notebookChecksum: string = sum(notebookContent);
-            sessionData['filename'] = undefined;
-            sessionData['data'] = notebookContent;
-            sessionData['checksum'] = notebookChecksum;
+            notebookData.checksum = notebookChecksum;
         }
-        localStorage.setItem("notebookData", JSON.stringify(notebookData));
+
+        if (notebookComponent) {
+            notebookData.selectedCell = notebookComponent.selectedCellId
+        }
+
+        if (!notebookData.filename && (props.savefile && typeof props.savefile === "string")) {
+            notebookData.filename = props.savefile;
+        }
+
+        if (notebookData.selectedCell) {
+            // Store selected cell in notebook metadata before saving
+            notebookData.content.metadata = notebookData.content.metadata || {};
+            notebookData.content.metadata.selected_cell = notebookData.selectedCell;
+        }
+
+        if (notebookInfo.value?.type === "browserStorage" && notebookData.id) {
+            const localRecordString = JSON.stringify(notebookData);
+            window.localStorage.setItem(notebookData.id, localRecordString);
+            notebookInfo.value = {
+                ...notebookInfo.value,
+                checksum: notebookChecksum,
+            };
+        }
+        else {
+            const notebookId = notebookInfo.value?.id || "";
+            const saveRequest = await fetch(`/beaker/notebook/${notebookId}?session=${session.sessionId}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(notebookData),
+            });
+            if (saveRequest.ok) {
+                const response = await saveRequest.json();
+                notebookInfo.value = {
+                    ...notebookInfo.value,
+                    metadata: response,
+                    checksum: notebookChecksum
+                }
+            }
+        }
     }
 };
 
+const loadSnapshot = async () => {
+    const session: Session = beakerSession.value.session;
+    await session.sessionReady;  // Ensure content service is up
+    const sessionId = session.sessionId;
+
+    try {
+        const notebookInfoResponse = await fetch(`/beaker/notebook/?session=${session.sessionId}`);
+        if (notebookInfoResponse.ok) {
+                const response = await notebookInfoResponse.json();
+                const content = response.content;
+                const metadata = {
+                    ...response,
+                    content: undefined,
+                };
+                const checksum = hashSum(content)
+                notebookInfo.value = {
+                    ...notebookInfo.value,
+                    content,
+                    metadata,
+                    checksum,
+                };
+
+        }
+    }
+    catch (e) {
+        console.error(e);
+        notebookInfo.value = {
+            id: sessionId,
+            name: sessionId,
+            created: "",
+            last_modified: "",
+            size: 0,
+            session_id: sessionId,
+        };
+    }
+
+    const notebookData: {[key: string]: any} = {
+        ...(notebookInfo.value || {}),
+    };
+
+    if (notebookInfo.value?.type === "browserStorage") {
+        // Notebook is stored in browser local storage, load it from there
+        const fullNotebookData = localStorage.getItem("notebookData");
+        const fullData = JSON.parse(fullNotebookData || "null");
+        const localRecord = JSON.parse(window.localStorage.getItem(notebookData.id) || "null");
+
+        const hasLocalRecord = notebookData.id in window.localStorage;
+        const hasLegacyRecord = fullData && sessionId in fullData;
+
+        if (hasLegacyRecord && !hasLocalRecord) {
+            console.log(`Migrating notebook data for session ${sessionId} from full localStorage to per-notebook storage.`);
+            notebookData.content = fullData[sessionId]?.data || undefined;
+            notebookData.selectedCell = fullData[sessionId]?.selectedCell || undefined;
+            if (fullData[sessionId]?.name) {
+                notebookData.name = fullData[sessionId]?.name;
+            }
+
+            notebookInfo.value = {
+                id: notebookData.id,
+                name: notebookData.name,
+                created: notebookData.created,
+                last_modified: notebookData.last_modified,
+                size: notebookData.size,
+                type: "browserStorage",
+                content: notebookData.content,
+                session_id: sessionId,
+            };
+            saveSnapshot(true).then(() => {
+                const fullData = JSON.parse(fullNotebookData || "null");
+                delete fullData[sessionId];
+                window.localStorage.setItem("notebookData", JSON.stringify(fullData));
+            }).then(async () => {
+                await loadSnapshot();
+            });
+            return;
+        }
+        else if (hasLocalRecord && hasLegacyRecord) {
+            // Remove legacy record
+            delete fullData[sessionId];
+            window.localStorage.setItem("notebookData", JSON.stringify(fullData));
+        }
+        else {
+            notebookData.content = localRecord?.content || undefined;
+            notebookData.selectedCell = localRecord?.selectedCell || undefined;
+            if (localRecord?.name) {
+                notebookData.name = localRecord?.name;
+            }
+        }
+    }
+
+    if (notebookData && notebookData.content) {
+        emit('open-file', notebookData.content, notebookData.name, {selectedCell: notebookData.selectedCell});
+    }
+
+    if (notebookData.selectedCell !== undefined) {
+        nextTick(() => {
+            beakerSession.value.notebookComponent?.selectCell(notebookData.selectedCell);
+        });
+    }
+    return notebookData;
+};
+
 const providerConfig = () => {
-    // console.log();
 }
 
 defineExpose({

@@ -48,6 +48,8 @@ class BeakerKernel(KernelProxyManager):
         "file_extension": ".txt",
     }
 
+    session_config: dict[str, str]
+    beaker_session: str
     jupyter_server: Optional[str]
     kernel_id: Optional[str]
     connection_file: Optional[str]
@@ -61,6 +63,8 @@ class BeakerKernel(KernelProxyManager):
     running_actions: dict[str, Awaitable]
 
     def __init__(self, session_config, kernel_id=None, connection_file=None):
+        self.session_config = session_config
+        self.beaker_session = session_config.get("beaker_session", None)
         self.jupyter_server = session_config.get("server", config.jupyter_server)
         self.kernel_id = kernel_id
         self.connection_file = connection_file
@@ -71,7 +75,7 @@ class BeakerKernel(KernelProxyManager):
         self.subkernel_execution_tracking = {}
         self.running_actions = {}
         context_args = session_config.get("context", {})
-        super().__init__(session_config, session_id=f"{kernel_id}_session")
+        super().__init__(session_config, session_id=(self.beaker_session or self.kernel_id))
         self.register_magic_commands()
         self.add_base_intercepts()
         self.context = None
@@ -148,6 +152,20 @@ class BeakerKernel(KernelProxyManager):
         self.server.intercept_message(
             "shell", "execute_request", self.handle_magic_word
         )
+
+    def api_auth(self) -> str:
+        import hashlib
+        import time
+
+        preamble = "beaker-kernel"
+        nonce = str(int(time.time()))
+        kernel_id = self.kernel_id
+        key = self.session_config.get("key")
+
+        hash_source = f"{kernel_id}{nonce}{key}".encode()
+        hash_value = hashlib.md5(hash_source).hexdigest()
+
+        return f"{preamble}:{kernel_id}:{nonce}:{hash_value}"
 
     async def handle_magic_word(self, server, target_stream, data):
         message = JupyterMessage.parse(data)
@@ -317,7 +335,7 @@ class BeakerKernel(KernelProxyManager):
         with open(self.connection_file, "w") as connection_file:
             json.dump(run_info, connection_file, indent=2)
 
-    async def set_context(self, context_name, context_info, language="python3", parent_header={}):
+    async def set_context(self, context_name, context_info, language="python3", subkernel=None, parent_header={}):
 
         context_cls = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
@@ -336,14 +354,16 @@ class BeakerKernel(KernelProxyManager):
 
         context_config = {
             "language": language,
+            "subkernel": subkernel,
             "context_info": context_info
         }
         self.context = context_cls(beaker_kernel=self, config=context_config)
         await self.context.setup(context_info=context_info, parent_header=parent_header)
         subkernel = self.context.subkernel
         kernel_setup_func = getattr(subkernel, "setup", None)
-        with execution_context(type="setup", name=context_name, parent_header=parent_header):
-            await ensure_async(kernel_setup_func())
+        if kernel_setup_func is not None:
+            with execution_context(type="setup", name=context_name, parent_header=parent_header):
+                await ensure_async(kernel_setup_func())
         await self.update_connection_file(context={"name": context_name, "config": context_info})
         await self.send_preview(parent_header=parent_header)
         await self.send_kernel_state_info(parent_header=parent_header)
@@ -427,7 +447,7 @@ class BeakerKernel(KernelProxyManager):
     def _interrupt(self, interrupt_subkernel=True):
         if interrupt_subkernel:
             try:
-                subkernel_id = self.context.subkernel.jupyter_id
+                subkernel_id = self.context.subkernel.kernel_id
                 print(f"Interrupting connected subkernel: {subkernel_id}")
                 requests.post(
                     f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{subkernel_id}/interrupt",
@@ -659,6 +679,7 @@ class BeakerKernel(KernelProxyManager):
         context_name = content.get("context")
         context_info = content.get("context_info", {})
         language = content.get("language", "python3")
+        subkernel = content.get("subkernel", None)
         enable_debug = content.get("debug", None)
         verbose = content.get("verbose", None)
 
@@ -672,7 +693,13 @@ class BeakerKernel(KernelProxyManager):
 
         parent_header = copy.deepcopy(message.header)
         if content:
-            await self.set_context(context_name, context_info, language=language, parent_header=parent_header)
+            await self.set_context(
+                context_name,
+                context_info,
+                language=language,
+                subkernel=subkernel,
+                parent_header=parent_header
+            )
 
         # Send context_response
         context_response_content = await self.context.get_info()

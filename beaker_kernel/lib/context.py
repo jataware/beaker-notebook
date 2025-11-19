@@ -252,25 +252,56 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         return content
 
     def get_subkernel(self):
-        config = beaker_config
-        language = self.config.get("language", "python3")
-        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{language}`")
-        kernel_opts = {
-            subkernel.KERNEL_NAME: subkernel
-            for subkernel in autodiscover("subkernels").values()
-        }
-        subkernel_opts = {
-            subkernel.SLUG: subkernel
-            for subkernel in autodiscover("subkernels").values()
-        }
-        if language not in kernel_opts and language in subkernel_opts:
-            language = subkernel_opts[language].KERNEL_NAME
+        language = self.config.get("language", None)
+        subkernel_slug = self.config.get("subkernel", None)
 
-        url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
+        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{subkernel_slug}`")
+        if not subkernel_slug and language:
+            kernel_opts = {
+                subkernel.KERNEL_NAME: subkernel
+                for subkernel in autodiscover("subkernels").values()
+            }
+            subkernel_opts = {
+                subkernel.SLUG: subkernel
+                for subkernel in autodiscover("subkernels").values()
+            }
+            if language not in kernel_opts and language in subkernel_opts:
+                language = subkernel_opts[language].KERNEL_NAME
+            subkernel_slug = language
+
+        subkernels = autodiscover("subkernels")
+        subkernel_by_lang = {
+           sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
+        }
+
+        urlbase = self.beaker_kernel.jupyter_server
+
+        kernelspec_req = requests.get(
+            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_slug}"),
+            headers={
+                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
+            },
+        )
+        if kernelspec_req.status_code == 400:
+            raise ValueError(f"Can't find kernelspec for {subkernel_slug}")
+        elif kernelspec_req.status_code >= 500:
+            raise RuntimeError(f"Error fetching kernelspec for {subkernel_slug}: {kernelspec_req.json()}")
+
+        kernelspec = kernelspec_req.json()
+        kernel_lang = kernelspec.get('spec', {}).get("language", None)
+        subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
+
+        # url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
+        url = urllib.parse.urljoin(urlbase, "/api/kernels")
+        path = self.beaker_kernel.session_config.get("beaker_session", None)
+        if path is None:
+            path = self.beaker_kernel.session_config.get("jupyter_session", "")
         res = requests.post(
             url,
-            json={"name": language, "path": ""},
-            headers={"Authorization": f"token {config.jupyter_token}"},
+            json={"name": subkernel_slug, "path": path},
+            headers={
+                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
+            },
         )
         kernel_info = res.json()
         self.beaker_kernel.update_running_kernels()
@@ -283,7 +314,9 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             raise ValueError("Unknown kernel " + subkernel_id)
         if kernels[matching] == self.beaker_kernel.server.config:
             raise ValueError("Refusing loopback connection")
-        subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
+
+        # subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
+        subkernel = subkernel_cls(subkernel_id, kernels[matching], self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
 
@@ -358,6 +391,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         payload = {
             "language": self.subkernel.DISPLAY_NAME,
             "subkernel": self.subkernel.KERNEL_NAME,
+            "subkernel_kernel": self.config.get("subkernel", None),
             "actions": action_details,
             "custom_messages": custom_messages,
             "procedures": list(self.templates.keys()),

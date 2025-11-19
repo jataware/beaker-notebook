@@ -1,13 +1,13 @@
-from beaker_kernel.service.base import BaseBeakerServerApp
+from beaker_kernel.service.base import BaseBeakerApp
+from beaker_kernel.service.auth.notebook import NotebookAuthorizer, NotebookIdentityProvider
 
 
-def _jupyter_server_extension_points():
-    return [{"module": "beaker_kernel.service.notebook", "app": BeakerNotebookApp}]
+class BeakerNotebookApp(BaseBeakerApp):
 
-
-class BeakerNotebookApp(BaseBeakerServerApp):
-    pass
-
+    defaults = {
+        "authorizer_class": NotebookAuthorizer,
+        "identity_provider_class": NotebookIdentityProvider,
+    }
 
 if __name__ == "__main__":
     BeakerNotebookApp.launch_instance()
