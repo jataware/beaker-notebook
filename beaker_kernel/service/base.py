@@ -43,21 +43,17 @@ class CreateSessionWithContextHandler(APIHandler):
         if model is None:
             raise web.HTTPError(400, "No JSON body provided")
 
-        # extract context parameters
         context = model.get('context')
         context_info = model.get('context_info')
         language = model.get('language', 'python3')
 
-        logger.info(f"[SAAS-LABS DEBUG] creating session with context: {context}, language: {language}")
-
-        # prepare context dict for kernel manager
         if context or context_info or language:
             context_dict = {
                 'default_context': context,
                 'default_context_payload': context_info or {},
                 'language': language,
             }
-            # Store in kernel manager's pending context
+            # store in kernel manager's pending context
             if hasattr(self.kernel_manager, '_pending_kernel_context'):
                 self.kernel_manager._pending_kernel_context['next'] = context_dict
 
@@ -70,14 +66,9 @@ class CreateSessionWithContextHandler(APIHandler):
             'kernel_id': model.get('kernel', {}).get('id'),
         }
 
-        logger.info(f"[SAAS-LABS DEBUG] creating session with path: {session_kwargs['path']}, name: {session_kwargs['name']}")
-
         try:
             session = await self.session_manager.create_session(**session_kwargs)
 
-            logger.info(f"[SAAS-LABS DEBUG] session created successfully - id: {session.get('id')}, path: {session.get('path')}, kernel_id: {session.get('kernel', {}).get('id')}, kernel execution_state: {session.get('kernel', {}).get('execution_state')}")
-
-            # Build the location header manually
             location = f"/api/sessions/{session['id']}"
             self.set_header('Location', location)
             self.set_header('Content-Type', 'application/json')
@@ -91,7 +82,7 @@ class CreateSessionWithContextHandler(APIHandler):
 
 class BeakerKernelManager(AsyncIOLoopKernelManager):
 
-    # longer wait_time for shutdown before killing processed due to potentially needing to shutdown both the subkernel
+    # Longer wait_time for shutdown before killing processed due to potentially needing to shutdown both the subkernel
     # and the beaker kernel.
     shutdown_wait_time = 10.0
 
@@ -130,16 +121,17 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             server=self.app.public_url,
             **kwargs
         )
-        # set file to be owned by and modifiable by the beaker user so the beaker user can modify the file.
+        # Set file to be owned by and modifiable by the beaker user so the beaker user can modify the file.
         os.chmod(self.connection_file, 0o0775)
         shutil.chown(self.connection_file, user=self.app.agent_user)
 
     async def _async_pre_start_kernel(self, **kw):
+        # Fetch values from super()
         cmd, kw = await super()._async_pre_start_kernel(**kw)
 
         env = kw.pop("env", {})
 
-        # update user, env variables, and home directory based on type of kernel being started.
+        # Update user, env variables, and home directory based on type of kernel being started.
         if self.kernel_name == "beaker_kernel":
             user = self.app.agent_user
         else:
@@ -158,6 +150,7 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             kw["extra_groups"] = group_list[1:]
         kw["cwd"] = self.app.working_dir
 
+        # Update keyword args that are passed to Popen()
         kw["env"] = env
 
         return cmd, kw
@@ -185,9 +178,9 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
         else:
             os.chmod(self.connection_dir, 0o0755)
         super().__init__(**kwargs)
-        # Storage for pending kernel context during session creation
+        # storage for pending kernel context during session creation
         self._pending_kernel_context = {}
-        # Storage for kernel contexts by kernel_id (persists for kernel lifetime)
+        # storage for kernel contexts by kernel_id (persists for kernel lifetime)
         self._kernel_contexts = {}
 
     @property
@@ -330,11 +323,11 @@ class BaseBeakerServerApp(LabServerApp):
 
     def initialize_handlers(self):
         """
+        Bypass initializing the default handler since we don't need to use the webserver, just the websockets
         Initialize handlers including custom routes.
         """
         self.handlers.append((r"/summary", SummaryHandler))
 
-        # add custom session creation handler
         self.handlers.append((r"/api/sessions/create-with-context", CreateSessionWithContextHandler))
 
         register_handlers(self)

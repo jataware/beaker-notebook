@@ -155,7 +155,7 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
         """Get Cognito region from config or default to us-east-1"""
         if self.cognito_region:
             return self.cognito_region
-        
+
         # Default to us-east-1 if not set
         return "us-east-1"
 
@@ -165,7 +165,7 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
             if self.verify_jwt_signature:
                 self.log.warning("Cannot verify Cognito ID token: user_pool_id not set")
             return None
-        
+
         if pyjwt is None:
             if self.verify_jwt_signature:
                 self.log.warning("Cannot verify Cognito ID token: pyjwt not installed")
@@ -176,14 +176,14 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
             header_data = jwt_data.split('.')[0]
             header = json.loads(base64.urlsafe_b64decode(header_data + '==').decode('utf-8'))
             kid = header.get('kid')
-            
+
             if not kid:
                 self.log.warning("JWT header missing 'kid' claim")
                 return None
 
             # Get region
             region = self._get_cognito_region()
-            
+
             # Fetch JWKS
             try:
                 jwks = self._get_cognito_jwks(self.user_pool_id, region)
@@ -202,11 +202,11 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
                     from cryptography.hazmat.primitives.asymmetric import rsa
                     from cryptography.hazmat.backends import default_backend
                     import cryptography.hazmat.primitives.serialization as serialization
-                    
+
                     # Extract RSA components from JWK
                     n = int.from_bytes(base64.urlsafe_b64decode(key['n'] + '=='), 'big')
                     e = int.from_bytes(base64.urlsafe_b64decode(key['e'] + '=='), 'big')
-                    
+
                     # Build RSA public key
                     public_key = rsa.RSAPublicNumbers(e, n).public_key(default_backend())
                     break
@@ -224,7 +224,7 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
                 # Decode without verification first to get audience
                 unverified = pyjwt.decode(jwt_data, options={"verify_signature": False})
                 expected_audience = unverified.get('aud') or self.user_pool_id
-                
+
                 payload = pyjwt.decode(
                     jwt_data,
                     public_key,
@@ -286,13 +286,13 @@ class CognitoAppManagedIdentityHeadersProvider(IdentityProvider):
             )
             name = token_payload.get('name') or username
             display_name = token_payload.get('given_name') or token_payload.get('name') or username
-            
+
             return User(
                 username=username,
                 name=name,
                 display_name=display_name,
             )
-        
+
         # Fallback: create basic User from user_id if no token payload
         return User(
             username=user_id,
