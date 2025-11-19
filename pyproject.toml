@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "beaker-kernel"
 version = "1.14.0"
-description = ""
+description = "Beaker is a general-purpose, AI-powered Jupyter kernel framework designed for data science, research, and computational workflows. It provides a flexible context system that enables domain-specific customization through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
