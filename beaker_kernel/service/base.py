@@ -210,10 +210,6 @@ class BaseBeakerServerApp(LabServerApp):
         super().initialize_handlers()
 
     def initialize_settings(self):
-        # Override to allow cross domain websockets
-        self.settings["allow_origin"] = "*"
-        self.settings["disable_check_xsrf"] = True
-
         beaker_app_slug = os.environ.get("BEAKER_APP", None)
         if beaker_app_slug:
             cls: type[BeakerApp] = import_dotted_class(beaker_app_slug)
