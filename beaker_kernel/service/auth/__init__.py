@@ -94,6 +94,7 @@ class BeakerIdentityProvider(IdentityProvider):
                 result = fn(self, handler)
                 if inspect.isawaitable(result):
                     result = await result
+                current_user.set(result)
                 return result
         return get_user
 
