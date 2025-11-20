@@ -91,6 +91,7 @@ def find_mappings(resource_type: ResourceType) -> typing.Generator[typing.Dict[s
 class AutodiscoveryItems(Mapping[str, type]):
     raw: EntryPoints
     mapping: dict[str, EntryPoint]
+    rehydrated: dict[str, type]
 
     # Temporary transitional storage for use while migrating from json files to entrypoints
     raw_jsons: dict[str, type|dict[str, str]]
@@ -109,19 +110,16 @@ class AutodiscoveryItems(Mapping[str, type]):
                     yield (key, self._mapping[key])
                 except Exception as err:
                     output = [
-                        f"Unable to load autodiscovery item '{key}'. Error: {err}",
-                         "  Exception traceback when loading item:",
-                        f"  ================ Traceback Start ================",
+                        f"Warning: Error while attempting to load autodiscovered item '{key}':",
                     ]
-                    indented_tb = [f"    {line}" for line in format_exc().splitlines()]
+                    indented_tb = [f"  {line}" for line in format_exc().splitlines()[-3:]]
                     output.extend(indented_tb)
-                    output.append(
-                        f"  ================ Traceback Done =================",
-                    )
+                    output.append("")
                     logger.warning("\n".join(output))
                     continue
 
     def __init__(self, entrypoints_instance: EntryPoints):
+        self.rehydrated = {}
         self.raw = entrypoints_instance
         self.mapping = {
             item.name: item for item in self.raw
@@ -129,15 +127,19 @@ class AutodiscoveryItems(Mapping[str, type]):
         self.raw_jsons = {}
 
     def __getitem__(self, key):
+        if key in self.rehydrated:
+            return self.rehydrated[key]
+
         # Loading from etrypoints is the new preferred method.
         # Load class from entrypoint
         item: EntryPoint = self.mapping.get(key, None)
         if item:
             item = item.load()
+            self.rehydrated[key] = item
             return item
 
         # Fallback to loading from old json file
-        item = self.mapping.get(key, self.raw_jsons.get(key))
+        item = self.raw_jsons.get(key)
         if isinstance(item, (str, bytes, os.PathLike)) and os.path(path := os.fspath(item)) and path.endswith('.json'):
             with open(path) as jsonfile:
                 item = json.load(jsonfile)
@@ -155,7 +157,7 @@ class AutodiscoveryItems(Mapping[str, type]):
                         "mapping_file": mapping_file,
                         **item
                     })
-                self.mapping[key] = discovered_class
+                self.rehydrated[key] = discovered_class
                 return discovered_class
             case _:
                 raise ValueError(f"Unable to handle autodiscovery item '{item}' (type '{item.__class__}')")

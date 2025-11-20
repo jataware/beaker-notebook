@@ -2,6 +2,7 @@ import ast
 import importlib
 import importlib.util
 import json
+import os
 import os.path
 import shutil
 import sys
@@ -31,6 +32,7 @@ class BeakerBuildHook(BuildHookInterface):
     PLUGIN_NAME = "beaker"
 
     def __init__(self, root: str, config: dict[str, Any], build_config: Any, metadata: ProjectMetadata, directory: str, target_name: str, app: Application | None = None) -> None:
+        os.environ["BUILD_ACTIVE"] = "TRUE"
         super().__init__(root, config, build_config, metadata, directory, target_name, app)
         self.inserted_paths = set()
 
