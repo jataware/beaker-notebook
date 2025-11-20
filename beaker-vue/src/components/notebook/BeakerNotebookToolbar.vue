@@ -153,6 +153,7 @@ import OpenNotebookButton from "../misc/OpenNotebookButton.vue";
 import { downloadFileDOM, getDateTimeString } from '../../util';
 import StreamlineExportDialog from "../misc/StreamlineExportDialog.vue"
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
+import { fetch } from '@/util/fetch';
 
 const session = inject<BeakerSession>('session');
 const notebook = inject<BeakerNotebookComponentType>('notebook');

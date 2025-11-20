@@ -82,6 +82,7 @@ import Toolbar from "primevue/toolbar";
 import Button from "primevue/button";
 import CodeEditor from "../misc/CodeEditor.vue";
 import BeakerMimeBundle from "../render/BeakerMimeBundle.vue";
+import { fetch } from '@/util/fetch';
 
 const codeEditorRef = ref();
 const pdfPreviewRef = ref();

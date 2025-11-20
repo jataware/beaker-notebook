@@ -101,6 +101,7 @@ import InputText from 'primevue/inputtext';
 import InputGroup from 'primevue/inputgroup';
 import Button from 'primevue/button';
 import ProviderSelector from '../components/misc/ProviderSelector.vue';
+import { fetch } from '../util/fetch';
 import hashSum from 'hash-sum';
 
 import {default as ConfigPanel, getConfigAndSchema, dropUnchangedValues, objectifyTables, tablifyObjects, saveConfig} from '../components/panels/ConfigPanel.vue';
