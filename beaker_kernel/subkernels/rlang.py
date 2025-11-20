@@ -18,6 +18,7 @@ class RSubkernel(BeakerSubkernel):
     DISPLAY_NAME = "R"
     SLUG = "rlang"
     KERNEL_NAME = "ir"
+    JUPYTER_LANGUAGE = "R"
     DATAFRAME_TYPE_NAME = "data.frame"
 
     WEIGHT = 60

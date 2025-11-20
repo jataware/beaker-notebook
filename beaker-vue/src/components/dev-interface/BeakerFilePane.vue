@@ -70,6 +70,7 @@ import Panel from 'primevue/panel';
 import Column from 'primevue/column';
 import DataTable from 'primevue/datatable';
 import cookie from 'cookie';
+import { fetch } from '@/util/fetch';
 
 import { ContentsManager } from '@jupyterlab/services';
 

@@ -1,7 +1,7 @@
 import abc
 import asyncio
 import json
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, ClassVar
 import hashlib
 import shutil
 from tempfile import mkdtemp
@@ -356,6 +356,7 @@ class BeakerSubkernel(abc.ABC):
     DISPLAY_NAME: str
     SLUG: str
     KERNEL_NAME: str
+    JUPYTER_LANGUAGE: str
 
     WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
 
@@ -371,6 +372,8 @@ class BeakerSubkernel(abc.ABC):
 
     FETCH_STATE_CODE: str = ""
 
+    tasks: ClassVar[set[asyncio.Task]] = set()
+
     @classmethod
     @abc.abstractmethod
     def parse_subkernel_return(cls, execution_result) -> Any:
@@ -381,7 +384,7 @@ class BeakerSubkernel(abc.ABC):
         return [tool for tool, condition in self.TOOLS if condition()]
 
     def __init__(self, jupyter_id: str, subkernel_configuration: dict, context: BeakerContext):
-        self.jupyter_id = jupyter_id
+        self.kernel_id = jupyter_id
         self.connected_kernel = ProxyKernelClient(subkernel_configuration, session_id=context.beaker_kernel.session_id)
         self.context = context
 
@@ -392,21 +395,29 @@ class BeakerSubkernel(abc.ABC):
     async def lint_code(self, cells: AnalysisCodeCells):
         pass
 
+    async def shutdown(self, kernel_id) -> bool:
+        try:
+            logger.info(f"Shutting down connected subkernel {kernel_id}")
+            res = requests.delete(
+                f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{kernel_id}",
+                headers={"Authorization": f"token {config.jupyter_token}"},
+            )
+            if res.status_code == 204:
+                return True
+        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
+            return False
 
     def cleanup(self):
-        if self.jupyter_id is not None:
-            try:
-                print(f"Shutting down connected subkernel {self.jupyter_id}")
-                res = requests.delete(
-                    f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{self.jupyter_id}",
-                    headers={"Authorization": f"token {config.jupyter_token}"},
-                    timeout=0.5,
-                )
-                if res.status_code == 204:
-                    self.jupyter_id = None
-            except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
-                message = f"Error while shutting down subkernel: {err}\n  Subkernel or server may have already been shut down."
-                logger.error(message, exc_info=err)
+        def finish_cleanup(task: asyncio.Task):
+            success = task.result()
+            if success:
+                self.kernel_id = None
+            self.tasks.discard(task)
+
+        if self.kernel_id is not None:
+            task = asyncio.create_task(self.shutdown(self.kernel_id))
+            self.tasks.add(task)
+            task.add_done_callback(finish_cleanup)
 
     def format_kernel_state(self, state: dict) -> dict:
         return state
@@ -425,7 +436,7 @@ class CheckpointableBeakerSubkernel(BeakerSubkernel):
     def __init__(self, jupyter_id: str, subkernel_configuration: dict, context):
         super().__init__(jupyter_id, subkernel_configuration, context)
         self.checkpoints_enabled = is_checkpointing_enabled()
-        self.storage_prefix = os.path.join(config.checkpoint_storage_path, self.jupyter_id)
+        self.storage_prefix = os.path.join(config.checkpoint_storage_path, self.kernel_id)
         self.checkpoints : list[Checkpoint] = []
         if self.checkpoints_enabled:
             os.makedirs(self.storage_prefix, exist_ok=True, mode=0o777)

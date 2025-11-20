@@ -4,6 +4,7 @@
 /*.ipynb
 **/.cache
 **/.ipython
+**/.notebooks/
 
 # Gradle
 .gradle/

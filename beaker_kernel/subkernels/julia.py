@@ -27,6 +27,7 @@ class JuliaSubkernel(BeakerSubkernel):
     """
     DISPLAY_NAME = "Julia"
     SLUG = "julia"
+    JUPYTER_LANGUAGE = "julia"
     KERNEL_NAME = get_kernel_name()
 
 # varinfo / filter / display

@@ -10,11 +10,6 @@ if TYPE_CHECKING:
     from beaker_kernel.service.notebook import BeakerNotebookApp
 
 
-def set_config_from_app(app: "BeakerNotebookApp"):
-    os.environ.setdefault("JUPYTER_SERVER", app.connection_url)
-    os.environ.setdefault("JUPYTER_TOKEN", app.identity_provider.token)
-
-
 @click.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
@@ -23,16 +18,21 @@ def notebook(ctx, extra_args, beakerapp_cls=None):
     Start Beaker in local mode and opens a notebook.
     """
     from beaker_kernel.service.notebook import BeakerNotebookApp
+    from beaker_kernel.lib.config import config
+    from jupyter_core.utils import ensure_event_loop
     app = None
+    loop = ensure_event_loop()
     try:
-        app = BeakerNotebookApp.initialize_server(argv=extra_args)
-        set_config_from_app(app)
+        app = BeakerNotebookApp.instance(**{"IdentityProvider.token": config.jupyter_token})
+        app.initialize(argv=extra_args)
+        config.jupyter_server = app.connection_url
         app.start()
     except (InterruptedError, KeyboardInterrupt, EOFError) as err:
         print(err)
     finally:
         if app:
             app.stop()
+        loop.close()
 
 
 @click.group(name="dev", invoke_without_command=True)
@@ -55,16 +55,19 @@ def dev(ctx: click.Context, no_open_notebook):
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.option("--open-notebook", "-n", is_flag=True, default=False, type=bool, help="Open a notebook in a webbrowser.")
 def serve(open_notebook, extra_args):
+    from jupyter_core.utils import ensure_event_loop
     from beaker_kernel.service.dev import BeakerNotebookApp
 
+    loop = ensure_event_loop()
     try:
-        app = BeakerNotebookApp.initialize_server(argv=extra_args)
-        set_config_from_app(app)
+        app = BeakerNotebookApp.instance()
+        app.initialize(argv=extra_args)
         if open_notebook:
             webbrowser.open(app.public_url)
         app.start()
     finally:
         app.stop()
+        loop.close()
 
 
 @dev.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})

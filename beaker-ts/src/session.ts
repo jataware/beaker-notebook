@@ -18,7 +18,7 @@ import { BeakerRenderer, IBeakerRendererOptions } from './render';
 export interface IBeakerSessionOptions {
     settings: any;
     name: string;
-    kernelName: string;
+    kernelName?: string;
     sessionId?: string;
     rendererOptions?: IBeakerRendererOptions;
     messageHandler?: Slot<any, any>;
@@ -80,9 +80,9 @@ export class BeakerSession {
             specsManager: this._services.kernelspecs,
             name: options?.name,
             path: options?.sessionId,
-            kernelPreference: {
+            kernelPreference: options?.kernelName ? {
                 name: options?.kernelName,
-            },
+            } : undefined,
         });
 
         // Track all messages from kernels. The disconnect on newValue is in case the kernel connection is reused, to

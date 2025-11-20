@@ -13,6 +13,8 @@ import beaker_kernel
 from beaker_kernel.service.notebook import BeakerNotebookApp
 from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.config import config
+from beaker_kernel.service.auth.dummy import DummyAuthorizer, DummyIdentityProvider
+
 
 
 # Global notebook storage for notebook that lives for lifetime of service
@@ -22,15 +24,12 @@ logger = logging.getLogger(__file__)
 app_subprocess = None
 
 
-def _jupyter_server_extension_points():
-    return [{"module": "beaker_kernel.service.dev", "app": DevBeakerJupyterApp}]
-
-
 class DevBeakerJupyterApp(BeakerNotebookApp):
-    def initialize_settings(self):
-        # Override to allow cross domain websockets
-        self.settings["allow_origin"] = "*"
-        self.settings["disable_check_xsrf"] = True
+
+    defaults = {
+        "authorizer_class": DummyAuthorizer,
+        "identity_provider_class": DummyIdentityProvider,
+    }
 
 
 class BeakerWatchDog(watchdog_events.FileSystemEventHandler):
