@@ -143,10 +143,12 @@ class BeakerSessionManager(SessionManager):
             path = os.path.relpath(virtual_home_dir, self.kernel_manager.root_dir)
 
         kernel_env = self.get_kernel_env(path, name)
+        # pass session_id to start_kernel so it can look up context
         kernel_id = await self.kernel_manager.start_kernel(
             path=path,
             kernel_name=kernel_name,
             env=kernel_env,
+            session_id=session_id,
         )
         return cast(str, kernel_id)
 
@@ -309,12 +311,19 @@ class CreateSessionWithContextHandler(APIHandler):
             }
             session_kwargs["context"] = context_dict
             # store in kernel manager's pending context
-            #if hasattr(self.kernel_manager, '_pending_kernel_context'):
-            #    self.kernel_manager._pending_kernel_context['next'] = context_dict
-
+            # use 'next' as temporary key, will be moved to session_id after session creation
+            if hasattr(self.kernel_manager, '_pending_kernel_context'):
+                self.kernel_manager._pending_kernel_context['next'] = context_dict
 
         try:
             session = await self.session_manager.create_session(**session_kwargs)
+            
+            # Move context from 'next' to session_id for more reliable matching
+            if (context or context_info or language) and hasattr(self.kernel_manager, '_pending_kernel_context'):
+                session_id = session.get('id')
+                if session_id and 'next' in self.kernel_manager._pending_kernel_context:
+                    context_dict = self.kernel_manager._pending_kernel_context.pop('next')
+                    self.kernel_manager._pending_kernel_context[session_id] = context_dict
 
             location = f"/api/sessions/{session['id']}"
             self.set_header('Location', location)
@@ -323,6 +332,9 @@ class CreateSessionWithContextHandler(APIHandler):
             self.finish(json.dumps(session, default=str))
 
         except Exception as e:
+            # Clean up pending context if session creation fails
+            if (context or context_info or language) and hasattr(self.kernel_manager, '_pending_kernel_context'):
+                self.kernel_manager._pending_kernel_context.pop('next', None)
             logger.error(f"Error creating session with context: {e}", exc_info=True)
             raise web.HTTPError(500, str(e)) from e
 
@@ -362,11 +374,10 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
         return self.parent.parent
 
     def write_connection_file(self, **kwargs: object) -> None:
-#<<<<<<< HEAD
         """Write kernel connection file with Beaker-specific context.
 
         Extends the standard connection file with Beaker session information,
-        server URL, and default context from the Beaker application.
+        server URL, and context (either session-specific or default from BeakerApp).
 
         Parameters
         ----------
@@ -379,39 +390,28 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             kwargs["beaker_session"] = beaker_session
         if jupyter_session:
             kwargs["jupyter_session"] = jupyter_session
-        beaker_app: BeakerApp = self.beaker_config.get("app", None)
-        default_context = beaker_app and beaker_app._default_context
-        if default_context:
-            app_context_dict = default_context.asdict()
-            kwargs['context'] = {
-                "default_context": default_context.slug,
-                "default_context_payload": default_context.payload,
-            }
-            if app_context_dict:
-                kwargs["context"].update(**app_context_dict)
-#=======
-#        # check if there's a pending context stored in the mapping manager
-#        session_context = None
-#        if hasattr(self.parent, '_current_context'):
-#            session_context = self.parent._current_context
-#
-#        # if no session-specific context, fall back to BeakerApp's default context
-#        if not session_context:
-#            beaker_app: BeakerApp = self.beaker_config.get("app", None)
-#            default_context = beaker_app and beaker_app._default_context
-#            if default_context:
-#                app_context_dict = default_context.asdict()
-#                session_context = {
-#                    "default_context": default_context.slug,
-#                    "default_context_payload": default_context.payload,
-#                }
-#                if app_context_dict:
-#                    session_context.update(**app_context_dict)
-#
-#        # add context to kwargs for connection file
-#        if session_context:
-#            kwargs['context'] = session_context
-#>>>>>>> origin/labs-beakerhub-api-changes-v2
+        
+        # Check if there's a session-specific context stored in the mapping manager
+        session_context = None
+        if hasattr(self.parent, '_current_context') and self.parent._current_context:
+            session_context = self.parent._current_context
+
+        # If no session-specific context, fall back to BeakerApp's default context
+        if not session_context:
+            beaker_app: BeakerApp = self.beaker_config.get("app", None)
+            default_context = beaker_app and beaker_app._default_context
+            if default_context:
+                app_context_dict = default_context.asdict()
+                session_context = {
+                    "default_context": default_context.slug,
+                    "default_context_payload": default_context.payload,
+                }
+                if app_context_dict:
+                    session_context.update(**app_context_dict)
+
+        # Add context to kwargs for connection file
+        if session_context:
+            kwargs['context'] = session_context
 
         super().write_connection_file(
             server=self.app.public_url,
@@ -520,12 +520,11 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
         super().__init__(**kwargs)
         if hasattr(self.kernel_spec_manager, "get_default_kernel_name"):
             self.default_kernel_name = self.kernel_spec_manager.get_default_kernel_name()
-#=======
-#        # storage for pending kernel context during session creation
-#        self._pending_kernel_context = {}
-#        # storage for kernel contexts by kernel_id (persists for kernel lifetime)
-#        self._kernel_contexts = {}
-#>>>>>>> origin/labs-beakerhub-api-changes-v2
+        # storage for pending kernel context during session creation
+        # keyed by session_path or 'next' for fallback
+        self._pending_kernel_context = {}
+        # temporary storage for current kernel context during startup
+        self._current_context = None
 
     @property
     def beaker_config(self):
@@ -588,7 +587,36 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     async def _async_start_kernel(self, *, kernel_id = None, path = None, **kwargs):
         kwargs.setdefault('session_path', path)
-        return await super()._async_start_kernel(kernel_id=kernel_id, path=path, **kwargs)
+        
+        # Check for pending context for this session
+        context_dict = None
+        session_id = kwargs.pop('session_id', None)
+        session_path = kwargs.get('session_path', path)
+        
+        # Try to find context by session_id first (most reliable)
+        if session_id and session_id in self._pending_kernel_context:
+            context_dict = self._pending_kernel_context.pop(session_id)
+        elif session_path and session_path in self._pending_kernel_context:
+            # Fallback to session_path if session_id not found
+            context_dict = self._pending_kernel_context.pop(session_path)
+        elif 'next' in self._pending_kernel_context:
+            # Use 'next' as last resort fallback
+            context_dict = self._pending_kernel_context.pop('next')
+        
+        # Store context temporarily so BeakerKernelManager.write_connection_file can access it
+        # We don't pass it through kwargs because those get passed to Popen which doesn't understand 'context'
+        if context_dict:
+            self._current_context = context_dict
+        else:
+            self._current_context = None
+        
+        try:
+            result = await super()._async_start_kernel(kernel_id=kernel_id, path=path, **kwargs)
+            return result
+        finally:
+            # Clean up the temporary context after kernel startup
+            self._current_context = None
+    
     start_kernel = _async_start_kernel
 
     def pre_start_kernel(self, kernel_name: str, kwargs: dict):
