@@ -525,8 +525,7 @@ class BaseBeakerApp(ServerApp):
     ui_path = Unicode(help="Working directory for kernel execution and file operations", config=True)
     log_requests = traitlets.Bool(False, help="Enable request logging", config=True)
 
-    allow_origin = traitlets.Unicode("*", config=True)
-    disable_check_xsrf = traitlets.Bool(True)
+    disable_check_xsrf = traitlets.Bool(False)
     open_browser = traitlets.Bool(False, config=True)
     extension_url = traitlets.Unicode("/", config=True)
     connection_dir = traitlets.Unicode("", config=True)

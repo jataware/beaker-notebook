@@ -27,7 +27,10 @@ def _jupyter_server_extension_points():
 
 
 class DevBeakerJupyterApp(BeakerNotebookApp):
-    pass
+    def initialize_settings(self):
+        # Override to allow cross domain websockets
+        self.settings["allow_origin"] = "*"
+        self.settings["disable_check_xsrf"] = True
 
 
 class BeakerWatchDog(watchdog_events.FileSystemEventHandler):
