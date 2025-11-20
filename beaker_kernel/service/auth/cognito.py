@@ -4,6 +4,7 @@ import base64
 import boto3
 import json
 import requests
+import os
 from traitlets import Unicode, Bool
 
 from jupyter_server.auth.authorizer import Authorizer, AllowAllAuthorizer
@@ -14,6 +15,11 @@ try:
     import jwt as pyjwt
 except ImportError:
     pyjwt = None
+
+try:
+    from botocore.exceptions import ClientError
+except ImportError:
+    ClientError = None
 
 class CognitoHeadersIdentityProvider(BeakerIdentityProvider):
 
@@ -119,11 +125,12 @@ class CognitoHeadersIdentityProvider(BeakerIdentityProvider):
         return user
 
 
+# TODO remove Headers from class name. Not now since we're using this name in BeakerHub.
 class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
     """
     Identity provider for app-managed authentication via cookies.
-    Reads JWT tokens directly from httpOnly cookies set by BeakerHub.
-    Simpler than header-based auth - no need for custom X-Beaker-* headers.
+    Reads JWT tokens from httpOnly cookies set by auth.
+    Supports automatic token refresh using refresh tokens when access/id tokens expire.
     """
 
     user_pool_id = Unicode(
@@ -138,11 +145,98 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
         help="AWS Cognito Region (optional, auto-detected from user_pool_id if not set)",
     )
 
+    cognito_client_id = Unicode(
+        default_value="",
+        config=True,
+        help="AWS Cognito Client ID (required for token refresh)",
+    )
+
     verify_jwt_signature = Bool(
         default_value=True,
         config=True,
         help="Whether the jwt signature should be verified",
     )
+
+    enable_token_refresh = Bool(
+        default_value=True,
+        config=True,
+        help="Whether to automatically refresh expired tokens using refresh token",
+    )
+
+    fqdn = Unicode(
+        default_value="",
+        config=True,
+        help="Fully qualified domain name (e.g., 'labs.beakerhub.com'). Used to determine if __Host- cookie prefix should be used.",
+    )
+
+    def _is_localhost(self) -> bool:
+        """Check if FQDN is localhost or 127.0.0.1"""
+        fqdn = self.fqdn.lower() if self.fqdn else ""
+        return "localhost" in fqdn or "127.0.0.1" in fqdn
+
+    def _get_cookie_prefix(self) -> str:
+        """
+        Get cookie prefix based on environment.
+
+        Returns '__Host-' for production (non-localhost) environments.
+        Returns empty string for localhost.
+
+        The __Host- prefix provides enhanced security:
+        - Prevents cookie injection from subdomains
+        - Requires secure=True (HTTPS)
+        - Requires path="/"
+        """
+        return "" if self._is_localhost() else "__Host-"
+
+    def _get_cookie(self, handler, key: str) -> str | None:
+        """
+        Get cookie value with automatic __Host- prefix handling.
+
+        Args:
+            handler: Tornado request handler
+            key: Cookie name (without prefix, e.g., 'access_token')
+
+        Returns:
+            Cookie value or None if not found
+        """
+        prefix = self._get_cookie_prefix()
+        cookie_name = f"{prefix}{key}"
+
+        try:
+            # Try using get_cookie method (newer Tornado versions)
+            value = handler.get_cookie(cookie_name)
+            return value
+        except Exception as e:
+            # Fallback for older Tornado versions
+            cookie_obj = handler.request.cookies.get(cookie_name)
+            value = cookie_obj.value if cookie_obj else None
+            return value
+
+    def _set_cookie(self, handler, key: str, value: str, max_age: int = 3600) -> None:
+        """
+        Set cookie with automatic __Host- prefix handling and security settings.
+
+        Args:
+            handler: Tornado request handler
+            key: Cookie name (without prefix, e.g., 'access_token')
+            value: Cookie value (the JWT token)
+            max_age: Cookie expiration in seconds (default: 1 hour)
+        """
+        prefix = self._get_cookie_prefix()
+        cookie_name = f"{prefix}{key}"
+        is_localhost = self._is_localhost()
+
+        handler.set_cookie(
+            name=cookie_name,
+            value=value,
+            expires_days=None,  # Use max_age instead
+            domain=None,  # Required for __Host- prefix
+            path="/",  # Required for __Host- prefix
+            secure=not is_localhost,  # HTTPS only in production
+            httponly=True,  # JavaScript cannot access
+            samesite="Lax",  # CSRF protection
+            max_age=max_age,
+        )
 
     @lru_cache
     def _get_cognito_jwks(self, user_pool_id: str, region: str) -> dict:
@@ -159,6 +253,86 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
 
         # Default to us-east-1 if not set
         return "us-east-1"
+
+    def _refresh_tokens(self, refresh_token: str) -> tuple[str | None, str | None, dict | None]:
+        """
+        Refresh access and id tokens using refresh token.
+
+        Args:
+            refresh_token: The refresh token from cookies
+
+        Returns:
+            Tuple of (new_access_token, new_id_token, user_info) or (None, None, None) on failure
+        """
+        if not self.enable_token_refresh:
+            self.log.debug("Token refresh is disabled")
+            return None, None, None
+
+        if not self.cognito_client_id:
+            self.log.warning("Cannot refresh tokens: cognito_client_id not configured")
+            return None, None, None
+
+        if ClientError is None:
+            self.log.warning("Cannot refresh tokens: botocore not installed")
+            return None, None, None
+
+        try:
+            self.log.info("Attempting to refresh tokens with Cognito")
+            region = self._get_cognito_region()
+            cognito_client = boto3.client('cognito-idp', region_name=region)
+
+            auth_response = cognito_client.initiate_auth(
+                ClientId=self.cognito_client_id,
+                AuthFlow='REFRESH_TOKEN_AUTH',
+                AuthParameters={
+                    'REFRESH_TOKEN': refresh_token
+                }
+            )
+
+            auth_result = auth_response.get('AuthenticationResult', {})
+            new_access_token = auth_result.get('AccessToken')
+            new_id_token = auth_result.get('IdToken')
+
+            if not new_access_token or not new_id_token:
+                self.log.error("Cognito refresh did not return new tokens")
+                return None, None, None
+
+            self.log.info("Token refresh: Cognito returned new tokens, validating them")
+
+            # Verify the new tokens
+            id_token_payload = None
+            if self.verify_jwt_signature:
+                id_token_payload = self._verify_cognito_id_token(new_id_token)
+                if id_token_payload is None:
+                    self.log.error("Token refresh: new ID token validation failed")
+                    return None, None, None
+            else:
+                # If verification disabled, still decode to extract user info
+                try:
+                    if pyjwt:
+                        id_token_payload = pyjwt.decode(new_id_token, options={"verify_signature": False})
+                except Exception as e:
+                    self.log.error(f"Token refresh: failed to decode new ID token: {e}")
+                    return None, None, None
+
+            # Extract user info from new ID token
+            user_info = {
+                "sub": id_token_payload.get("sub"),
+                "email": id_token_payload.get("email"),
+                "cognito_username": id_token_payload.get("cognito:username"),
+            }
+
+            self.log.info(f"Token refresh successful for user: {user_info.get('email')}")
+            return new_access_token, new_id_token, user_info
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            error_message = e.response.get('Error', {}).get('Message', str(e))
+            self.log.error(f"Cognito refresh failed - {error_code}: {error_message}")
+            return None, None, None
+        except Exception as e:
+            self.log.error(f"Unexpected error during token refresh: {type(e).__name__} - {str(e)}")
+            return None, None, None
 
     def _verify_cognito_id_token(self, jwt_data: str) -> dict | None:
         """Verify Cognito ID token using JWKS"""
@@ -303,27 +477,35 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
 
 
     async def get_user(self, handler) -> BeakerUser | None:
-        """Main entry point - handles app-level authentication via cookies"""
-        # read JWT tokens from cookies (set by BeakerHub)
-        try:
-            id_token = handler.get_cookie('id_token')
-            access_token = handler.get_cookie('access_token')
-        except:
-            # fallback for different tornado versions
-            id_token = handler.request.cookies.get('id_token')
-            access_token = handler.request.cookies.get('access_token')
+        """
+        Main entry point - handles app-level authentication via cookies.
+        Automatically refreshes expired tokens using refresh token if available.
+        """
+        # Read JWT tokens from cookies with __Host- prefix support
+        id_token = self._get_cookie(handler, 'id_token')
+        access_token = self._get_cookie(handler, 'access_token')
+        refresh_token = self._get_cookie(handler, 'refresh_token')
 
         jwt_data = id_token
         user_id = None  # will be extracted from jwt_data
 
         # Verify and decode ID token if provided
         token_payload = None
-        if jwt_data:
+        token_expired = False
+
+        # Check if tokens are missing (cookies expired due to max_age) or invalid
+        if not id_token or not access_token:
+            # Tokens missing - cookies likely expired
+            self.log.debug("Access or ID token missing (cookies may have expired)")
+            token_expired = True
+        elif jwt_data:
+            # Tokens present - verify them
             if self.verify_jwt_signature:
                 token_payload = self._verify_cognito_id_token(jwt_data)
                 if token_payload is None:
-                    # Verification failed and was required
-                    return None
+                    # Verification failed - might be expired
+                    self.log.debug("ID token verification failed, might be expired")
+                    token_expired = True
             else:
                 # Verification disabled, but still decode to extract user info
                 try:
@@ -331,44 +513,53 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
                         token_payload = pyjwt.decode(jwt_data, options={"verify_signature": False})
                 except Exception as e:
                     self.log.debug(f"Could not decode token (verification disabled): {e}")
+                    token_expired = True
 
-        # If no user_id, try extracting from token payload
+        # If tokens are missing/expired and we have a refresh token, try to refresh
+        if token_expired and refresh_token and self.enable_token_refresh:
+            self.log.info("Attempting automatic token refresh")
+            new_access_token, new_id_token, user_info = self._refresh_tokens(refresh_token)
+
+            if new_access_token and new_id_token and user_info:
+                self.log.info(f"Token refresh successful for user: {user_info.get('email')}")
+
+                # Update cookies with new tokens
+                # Access and ID tokens typically expire in 1 hour
+                self._set_cookie(handler, 'access_token', new_access_token, max_age=3600)
+                self._set_cookie(handler, 'id_token', new_id_token, max_age=3600)
+
+                # Create user from refreshed token info
+                user_id = user_info.get('sub')
+
+                # Decode the new ID token to get full payload
+                try:
+                    if pyjwt:
+                        token_payload = pyjwt.decode(new_id_token, options={"verify_signature": False})
+                except Exception as e:
+                    self.log.warning(f"Could not decode refreshed token: {e}")
+                    token_payload = None
+
+                # Create user with refreshed data
+                user = self._get_user(user_id, token_payload)
+                return user
+            else:
+                self.log.warning("Token refresh failed - refresh token invalid or expired")
+                return None
+
+        # If no valid token payload and no refresh attempted, fail auth
+        if not token_payload:
+            self.log.debug("No valid token payload available - authentication failed")
+            return None
+
+        # Extract user_id from token payload
         if not user_id:
-            if token_payload:
-                user_id = token_payload.get('sub') or token_payload.get('username')
-            elif jwt_data:
-                user_id = self._get_user_id_from_token(jwt_data)
+            user_id = token_payload.get('sub') or token_payload.get('username')
 
-        # if no user_id from headers/jwt, check for token-based auth (for internal requests)
-        # this allows beaker-kernel internal API calls to work with jupyter token
-        # SECURITY: this fallback is safe because:
-        # 1. BeakerHub requires authentication on all /api/ routes via JWTAuthMiddleware
-        # 2. If authenticated, BeakerHub always sets X-Beaker-* headers (checked above)
-        # 3. Token fallback only triggers when NO user headers present (internal kernel calls)
         if not user_id:
-            # check if request has valid jupyter token (query param or Authorization header)
-            token_from_query = handler.get_argument('token', None)
-            token_from_header = None
-            auth_header = handler.request.headers.get('Authorization', '')
-            if auth_header.startswith('token ') or auth_header.startswith('Token '):
-                token_from_header = auth_header.split(' ', 1)[1]
-
-            provided_token = token_from_query or token_from_header
-            if provided_token:
-                # compare with configured jupyter token
-                import os
-                expected_token = os.environ.get('JUPYTER_TOKEN', '')
-                if expected_token and provided_token == expected_token:
-                    # create a system user for token-authenticated requests
-                    return BeakerUser(
-                        username='system',
-                        name='System',
-                        display_name='System (Token Auth)',
-                    )
-
-            # no valid authentication found
+            self.log.debug("Could not extract user_id from token")
             return None
 
         # Create user from token payload (self-contained, no pool access needed)
         user = self._get_user(user_id, token_payload)
+        self.log.info(f"Authentication successful for user: {user.username}")
         return user

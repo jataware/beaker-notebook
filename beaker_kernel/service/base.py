@@ -309,9 +309,8 @@ class CreateSessionWithContextHandler(APIHandler):
                 'default_context_payload': context_info or {},
                 'language': language,
             }
-            session_kwargs["context"] = context_dict
-            # store in kernel manager's pending context
-            # use 'next' as temporary key, will be moved to session_id after session creation
+            # Store in kernel manager's pending context
+            # Use 'next' as temporary key, will be moved to session_id after session creation
             if hasattr(self.kernel_manager, '_pending_kernel_context'):
                 self.kernel_manager._pending_kernel_context['next'] = context_dict
 
