@@ -260,18 +260,6 @@ class BeakerKernelSpecManager(kernelspec.KernelSpecManager):
         if spec is None:
             raise kernelspec.NoSuchKernel(kernel_name)
 
-        # spec = super().get_kernel_spec(kernel_name)
-        # if kernel_name == "beaker_kernel":
-        #     return spec
-        # elif self.parent.provisioner_class:
-        #     provisioner_obj = {
-        #         "provisioner_name": "beaker-docker-provisioner",
-        #         "config": {
-        #             "image": "beaker-kernel-python",
-        #             "max_cpus": 4,
-        #         },
-        #     }
-        #     spec.metadata["kernel_provisioner"] = provisioner_obj
         return spec
 
 class CreateSessionWithContextHandler(APIHandler):
@@ -529,7 +517,6 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
     def beaker_config(self):
         return getattr(self.parent, 'beaker_config', None)
 
-#<<<<<<< HEAD
     def cwd_for_path(self, path, **kwargs):
         user: BeakerUser = current_user.get()
         if user:
@@ -537,49 +524,6 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
             return super().cwd_for_path(user_home, **kwargs)
         else:
             return super().cwd_for_path(path, **kwargs)
-#=======
-#    async def remove_kernel(self, kernel_id):
-#        """Override to clean up stored context when kernel is removed"""
-#        if kernel_id in self._kernel_contexts:
-#            del self._kernel_contexts[kernel_id]
-#        return await super().remove_kernel(kernel_id)
-#
-#    async def start_kernel(self, kernel_id=None, path=None, **kwargs):
-#        """
-#        Override start_kernel to inject context info into kernel_kwargs.
-#        """
-#        # Check if there's pending context for this kernel
-#        context_dict = None
-#        if kernel_id and kernel_id in self._pending_kernel_context:
-#            context_dict = self._pending_kernel_context.pop(kernel_id)
-#        elif kernel_id and kernel_id in self._kernel_contexts:
-#            # Kernel already exists, use its stored context
-#            context_dict = self._kernel_contexts[kernel_id]
-#        elif 'next' in self._pending_kernel_context:
-#            # Use 'next' as a fallback when kernel_id is not yet assigned
-#            context_dict = self._pending_kernel_context.pop('next')
-#
-#        # Store context in a temporary attribute so BeakerKernelManager can access it
-#        # We don't pass it through kwargs because those get passed to Popen which doesn't understand 'context'
-#        if context_dict:
-#            self._current_context = context_dict
-#        else:
-#            self._current_context = None
-#
-#        try:
-#            # Call parent's start_kernel (without context in kwargs to avoid Popen error)
-#            result = await super().start_kernel(kernel_id=kernel_id, path=path, **kwargs)
-#
-#            # Store context for this kernel so subsequent starts/restarts use the same context
-#            if context_dict and result:
-#                self._kernel_contexts[result] = context_dict
-#
-#            return result
-#        finally:
-#            # Clean up the temporary context
-#            self._current_context = None
-#
-#>>>>>>> origin/labs-beakerhub-api-changes-v2
 
     def get_home_for_user(self, user: BeakerUser) -> os.PathLike:
         return user.home_dir
@@ -587,7 +531,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
     async def _async_start_kernel(self, *, kernel_id = None, path = None, **kwargs):
         kwargs.setdefault('session_path', path)
         
-        # Check for pending context for this session
+        # check for pending context for this session
         context_dict = None
         session_id = kwargs.pop('session_id', None)
         session_path = kwargs.get('session_path', path)
@@ -602,8 +546,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
             # Use 'next' as last resort fallback
             context_dict = self._pending_kernel_context.pop('next')
         
-        # Store context temporarily so BeakerKernelManager.write_connection_file can access it
-        # We don't pass it through kwargs because those get passed to Popen which doesn't understand 'context'
+        # store context temporarily so BeakerKernelManager.write_connection_file can access it
         if context_dict:
             self._current_context = context_dict
         else:
@@ -613,7 +556,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
             result = await super()._async_start_kernel(kernel_id=kernel_id, path=path, **kwargs)
             return result
         finally:
-            # Clean up the temporary context after kernel startup
+            # clean up the temporary context after kernel startup
             self._current_context = None
     
     start_kernel = _async_start_kernel
@@ -909,7 +852,6 @@ class BaseBeakerApp(ServerApp):
             if 'jupyter' in cls.__module__ or 'nbformat' in cls.__module__ or 'traitlets' in cls.__module__:
                 return 1, cls.__module__, cls.__name__
             return 0, cls.__module__, cls.__name__
-            # return cls.__name__
 
         classes = self.classes if classes is None else classes
 
