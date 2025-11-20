@@ -13,6 +13,8 @@ import beaker_kernel
 from beaker_kernel.app.notebook_app import BeakerNotebookApp
 from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.config import config
+from beaker_kernel.service.auth.dummy import DummyAuthorizer, DummyIdentityProvider
+
 
 logger = logging.getLogger(__file__)
 
@@ -20,7 +22,11 @@ app_subprocess = None
 
 
 class DevBeakerJupyterApp(BeakerNotebookApp):
-    pass
+
+    defaults = {
+        "authorizer_class": DummyAuthorizer,
+        "identity_provider_class": DummyIdentityProvider,
+    }
 
 
 class BeakerWatchDog(watchdog_events.FileSystemEventHandler):

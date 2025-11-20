@@ -111,16 +111,4 @@ class BeakerKernelSpecManager(kernelspec.KernelSpecManager):
         if spec is None:
             raise kernelspec.NoSuchKernel(kernel_name)
 
-        # spec = super().get_kernel_spec(kernel_name)
-        # if kernel_name == "beaker_kernel":
-        #     return spec
-        # elif self.parent.provisioner_class:
-        #     provisioner_obj = {
-        #         "provisioner_name": "beaker-docker-provisioner",
-        #         "config": {
-        #             "image": "beaker-kernel-python",
-        #             "max_cpus": 4,
-        #         },
-        #     }
-        #     spec.metadata["kernel_provisioner"] = provisioner_obj
         return spec

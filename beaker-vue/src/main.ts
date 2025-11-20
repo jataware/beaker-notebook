@@ -12,6 +12,8 @@ import { vKeybindings } from './directives/keybindings';
 import { vAutoScroll } from './directives/autoscroll';
 import BeakerThemePlugin from './plugins/theme';
 import BeakerAppConfigPlugin from './plugins/appconfig';
+import { fetch, client } from './util/fetch';
+import * as cookie from 'cookie';
 
 import App from './App.vue';
 import createRouter from './router';
@@ -25,6 +27,8 @@ const baseUrl = PageConfig.getBaseUrl();
 const confUrl = URLExt.join(baseUrl, '/config') + `?q=${Date.now().toString()}`;
 const configResponse = await fetch(confUrl);
 const config = await configResponse.json();
+const baseHost = URLExt.parse(config.baseUrl).host;
+
 
 const app = createApp(App, {config});
 const router = createRouter(config);
@@ -53,5 +57,9 @@ app.directive('tooltip', Tooltip);
 app.directive('focustrap', FocusTrap);
 app.directive('keybindings', vKeybindings);
 app.directive('autoscroll', vAutoScroll);
+
+const cookies = cookie.parse(document.cookie);
+const xsrfCookie = cookies._xsrf;
+client.setDefaultHeaders(baseHost, {"X-XSRFToken": xsrfCookie})
 
 app.mount('#app');

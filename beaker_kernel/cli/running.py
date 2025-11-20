@@ -10,11 +10,6 @@ if TYPE_CHECKING:
     from beaker_kernel.app.notebook_app import BeakerNotebookApp
 
 
-def set_config_from_app(app: "BeakerNotebookApp"):
-    os.environ.setdefault("JUPYTER_SERVER", app.connection_url)
-    os.environ.setdefault("JUPYTER_TOKEN", app.identity_provider.token)
-
-
 @click.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
@@ -31,7 +26,6 @@ def notebook(ctx, extra_args, beakerapp_cls=None):
         app = BeakerNotebookApp.instance(**{"IdentityProvider.token": config.jupyter_token})
         app.initialize(argv=extra_args)
         config.jupyter_server = app.connection_url
-        set_config_from_app(app)
         app.start()
     except (InterruptedError, KeyboardInterrupt, EOFError) as err:
         print(err)
@@ -67,7 +61,6 @@ def serve(open_notebook, extra_args):
     loop = ensure_event_loop()
     try:
         app = BeakerNotebookApp.instance()
-        set_config_from_app(app)
         app.initialize(argv=extra_args)
         if open_notebook:
             webbrowser.open(app.public_url)
