@@ -62,7 +62,6 @@ def find_api_handlers(base=None) -> Generator[tuple[str, Any, str], None, None]:
             s = f'beaker_kernel.service.api.{f[:-3]}'
             mod = importlib.import_module(s)
             if "handlers" in dir(mod):
-                logger.warning(f"Found handlers in {s}")
                 for handlers in getattr(mod, "handlers"):
                     yield handlers
 

@@ -1,5 +1,6 @@
 import click
 import importlib
+import os
 
 from beaker_kernel.lib.autodiscovery import find_mappings, autodiscover
 
@@ -13,6 +14,9 @@ class BeakerCli(click.Group):
 
         self.subcommands = {}
         self.apps = {}
+
+        if os.environ.get("BUILD_ACTIVE", "FALSE").upper() == "TRUE":
+            return
 
         # Register commands from extensions
         for group_name, entry in autodiscover("commands").items():

@@ -22,9 +22,6 @@ from jupyter_client import kernelspec
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 from jupyter_server.serverapp import ServerApp
-from jupyter_server.base.handlers import APIHandler
-from jupyterlab_server import LabServerApp
-from tornado import web
 
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.autodiscovery import autodiscover
@@ -626,8 +623,7 @@ class BaseBeakerApp(ServerApp):
     ui_path = Unicode(help="Working directory for kernel execution and file operations", config=True)
     log_requests = traitlets.Bool(False, help="Enable request logging", config=True)
 
-    allow_origin = traitlets.Unicode("*", config=True)
-    disable_check_xsrf = traitlets.Bool(True)
+    disable_check_xsrf = traitlets.Bool(False)
     open_browser = traitlets.Bool(False, config=True)
     extension_url = traitlets.Unicode("/", config=True)
     connection_dir = traitlets.Unicode("", config=True)

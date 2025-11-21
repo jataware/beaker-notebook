@@ -451,7 +451,9 @@ class BeakerKernel(KernelProxyManager):
                 print(f"Interrupting connected subkernel: {subkernel_id}")
                 requests.post(
                     f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{subkernel_id}/interrupt",
-                    headers={"Authorization": f"token {config.jupyter_token}"},
+                    headers={
+                        "X-AUTH-BEAKER": self.api_auth()
+                    },
                     timeout=0.5,
                 )
             except requests.exceptions.HTTPError as err:

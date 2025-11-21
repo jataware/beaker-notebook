@@ -63,6 +63,7 @@ import { ProgressSpinner, Button, Divider, ToggleSwitch, InputGroup, InputGroupA
 import { getDateTimeString, downloadFileDOM } from "@/util";
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
 import contentDisposition from "content-disposition";
+import { fetch } from '@/util/fetch';
 
 const showOverlay = inject<(contents: string, header?: string) => void>('show_overlay');
 

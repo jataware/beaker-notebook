@@ -400,7 +400,9 @@ class BeakerSubkernel(abc.ABC):
             logger.info(f"Shutting down connected subkernel {kernel_id}")
             res = requests.delete(
                 f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{kernel_id}",
-                headers={"Authorization": f"token {config.jupyter_token}"},
+                headers={
+                    "X-AUTH-BEAKER": self.context.beaker_kernel.api_auth()
+                },
             )
             if res.status_code == 204:
                 return True

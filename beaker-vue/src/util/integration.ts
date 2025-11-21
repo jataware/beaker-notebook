@@ -1,3 +1,5 @@
+import { fetch } from '@/util/fetch';
+
 export interface IntegrationResource {
     // names must be coherent with python resource class
     resource_type: string
