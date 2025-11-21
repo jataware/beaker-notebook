@@ -234,7 +234,7 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
             path="/",  # Required for __Host- prefix
             secure=not is_localhost,  # HTTPS only in production
             httponly=True,  # JavaScript cannot access
-            samesite="Lax",  # CSRF protection
+            samesite="Strict",  # CSRF protection
             max_age=max_age,
         )
 
