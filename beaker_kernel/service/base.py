@@ -22,6 +22,8 @@ from jupyter_client import kernelspec
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 from jupyter_server.serverapp import ServerApp
+from jupyter_server.base.handlers import APIHandler
+from tornado import web
 
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.autodiscovery import autodiscover
