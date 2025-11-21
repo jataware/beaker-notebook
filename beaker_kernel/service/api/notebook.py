@@ -81,7 +81,6 @@ class NotebookHandler(JupyterHandler):
         #     self.write(notebooks)
 
     async def post(self, notebook_id=None):
-        user = self.get_current_user()
         notebook_id = notebook_id or None
         session = self.get_query_argument("session", None)
         name = self.get_query_argument("name", None)
