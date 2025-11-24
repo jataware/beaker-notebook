@@ -140,9 +140,9 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
     )
 
     cognito_region = Unicode(
-        default_value="",
+        default_value="us-east-1",
         config=True,
-        help="AWS Cognito Region (optional, auto-detected from user_pool_id if not set)",
+        help="AWS Cognito Region (optional)",
     )
 
     cognito_client_id = Unicode(
@@ -248,11 +248,7 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
 
     def _get_cognito_region(self) -> str:
         """Get Cognito region from config or default to us-east-1"""
-        if self.cognito_region:
-            return self.cognito_region
-
-        # Default to us-east-1 if not set
-        return "us-east-1"
+        return self.cognito_region
 
     def _refresh_tokens(self, refresh_token: str) -> tuple[str | None, str | None, dict | None]:
         """
@@ -561,5 +557,5 @@ class CognitoAppManagedIdentityHeadersProvider(BeakerIdentityProvider):
 
         # Create user from token payload (self-contained, no pool access needed)
         user = self._get_user(user_id, token_payload)
-        self.log.info(f"Authentication successful for user: {user.username}")
+        # self.log.info(f"Authentication successful for user: {user.username}")
         return user

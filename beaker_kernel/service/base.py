@@ -131,14 +131,24 @@ class BeakerSessionManager(SessionManager):
             Session information from parent class
         """
         user: BeakerUser = current_user.get()
+        logger.debug(f"start_kernel_for_session: user={user}, user_type={user.__class__.__name__ if user else None}")
+
         if user:
             virtual_home_root = self.parent.virtual_home_root
             virtual_home_dir = os.path.join(virtual_home_root, user.home_dir)
+            logger.debug(f"Setting up virtual home directory: {virtual_home_dir}")
 
             subkernel_user = self.parent.subkernel_user
             if not os.path.isdir(virtual_home_dir):
                 os.makedirs(virtual_home_dir, exist_ok=True)
-                shutil.chown(virtual_home_dir, user=subkernel_user, group=subkernel_user)
+                # Try to change ownership if running as root/privileged user
+                try:
+                    shutil.chown(virtual_home_dir, user=subkernel_user, group=subkernel_user)
+                    logger.debug(f"Changed ownership of {virtual_home_dir} to {subkernel_user}")
+                except (PermissionError, LookupError) as e:
+                    # Not running as root or user doesn't exist - skip ownership change
+                    # This is fine for single-user or same-user multi-tenant setups
+                    logger.debug(f"Skipping ownership change for {virtual_home_dir}: {e}")
             path = os.path.relpath(virtual_home_dir, self.kernel_manager.root_dir)
 
         kernel_env = self.get_kernel_env(path, name)
@@ -260,6 +270,23 @@ class BeakerKernelSpecManager(kernelspec.KernelSpecManager):
             raise kernelspec.NoSuchKernel(kernel_name)
 
         return spec
+
+class XSRFTokenHandler(APIHandler):
+    """
+    Handler to retrieve XSRF token for client-side requests.
+
+    GET /api/xsrf-token returns the XSRF token that should be included
+    in POST/PUT/DELETE requests via X-XSRFToken header or _xsrf field.
+    """
+
+    @web.authenticated
+    async def get(self):
+        """GET /api/xsrf-token - Get XSRF token for authenticated requests"""
+        self.finish({
+            'token': self.xsrf_token.decode('utf-8'),
+            'user': self.current_user.username if hasattr(self.current_user, 'username') else None,
+        })
+
 
 class CreateSessionWithContextHandler(APIHandler):
     """
@@ -723,6 +750,7 @@ class BaseBeakerApp(ServerApp):
         """Bypass initializing the default handler since we don't need to use the webserver, just the websockets."""
         self.handlers = []
         register_handlers(self)
+        self.handlers.append((r"/api/xsrf-token", XSRFTokenHandler))
         self.handlers.append((r"/api/sessions/create-with-context", CreateSessionWithContextHandler))
         self.web_app.add_handlers(".*", self.handlers)
 
