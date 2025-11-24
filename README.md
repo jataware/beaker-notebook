@@ -25,6 +25,28 @@ beaker notebook
 
 Your notebook server will start up and Beaker will be ready to use at [`localhost:8888`](http://localhost:8888).
 
+## Optional: Enable Cognito Authentication
+
+To optionally enable Cognito authentication, create a `beaker_config.py` file in your Jupyter config directory and configure it as follows:
+
+```python
+c = get_config()  # noqa
+
+c.BeakerServerApp.identity_provider_class = 'beaker_kernel.service.auth.cognito.CognitoAppManagedIdentityHeadersProvider'
+
+# Cognito configuration for identity provider
+c.CognitoAppManagedIdentityHeadersProvider.user_pool_id = 'us-east-1_XXXXXXXXX'  # Your Cognito User Pool ID
+c.CognitoAppManagedIdentityHeadersProvider.cognito_region = 'us-east-1'
+c.CognitoAppManagedIdentityHeadersProvider.cognito_client_id = 'your-client-id'
+c.CognitoAppManagedIdentityHeadersProvider.fqdn = 'localhost'
+
+# Optional: Configure root directories
+c.ServerApp.root_dir = '/some-path'  # Set to your desired root directory
+c.BaseBeakerApp.virtual_home_root = 'some-path/beaker-data'  # Set to your desired virtual home
+```
+
+Replace the placeholder values (`xxx` for user-specific paths and your actual Cognito credentials) with your own configuration.
+
 ## Quick demo
 
 Here is a quick demo of using Beaker to interact with a [free weather API](https://open-meteo.com/en/docs), fetch some data, perform some data transformations and a bit of analysis. This is really just scratching the surface of what you can do with Beaker, but it gives you a sense of the kinds of things it can do.
