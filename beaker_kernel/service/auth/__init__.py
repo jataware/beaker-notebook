@@ -94,6 +94,20 @@ class BeakerIdentityProvider(IdentityProvider):
                 result = fn(self, handler)
                 if inspect.isawaitable(result):
                     result = await result
+
+                # Ensure result is a BeakerUser with home_dir attribute
+                if result and not isinstance(result, BeakerUser):
+                    # Convert standard User to BeakerUser
+                    logging.debug(f"Converting {type(result).__name__} to BeakerUser")
+                    result = BeakerUser(
+                        username=result.username,
+                        name=result.name,
+                        display_name=getattr(result, 'display_name', result.name),
+                        initials=getattr(result, 'initials', None),
+                        avatar_url=getattr(result, 'avatar_url', None),
+                        color=getattr(result, 'color', None),
+                    )
+
                 current_user.set(result)
                 return result
         return get_user
