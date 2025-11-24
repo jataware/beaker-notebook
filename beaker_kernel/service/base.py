@@ -1,3 +1,4 @@
+import dotenv
 import getpass
 import inspect
 import logging
@@ -373,6 +374,9 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             kw["cwd"] = home_dir
             env["HOME"] = home_dir
         else:
+            user_envfile = self.app.USER_ENV_FILE or "./user.env"
+            if os.path.exists("./user.env"):
+                env.update(dotenv.dotenv_values("./user.env"))
             kernel_user = self.app.subkernel_user
             home_dir = kw.get("cwd")
 
