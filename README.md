@@ -47,6 +47,8 @@ c.BaseBeakerApp.virtual_home_root = 'some-path/beaker-data'  # Set to your desir
 
 Replace the placeholder values (`xxx` for user-specific paths and your actual Cognito credentials) with your own configuration.
 
+If integration with a reverse proxy for using the same host for cognito authentication and beaker-kernel, ensure to update the .env value JUPYTER_BASE_URL to match the client-facing host (domain:port).
+
 ## Quick demo
 
 Here is a quick demo of using Beaker to interact with a [free weather API](https://open-meteo.com/en/docs), fetch some data, perform some data transformations and a bit of analysis. This is really just scratching the surface of what you can do with Beaker, but it gives you a sense of the kinds of things it can do.
