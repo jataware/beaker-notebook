@@ -1,2 +1,11 @@
+export * as assets from './assets';
 export * as components from './components';
+export * as composables from './composables';
+export * as directives from './directives';
 export * as pages from './pages';
+export * as plugins from './plugins';
+export * as stores from './stores';
+export * as themes from './themes';
+export * as utils from './util';
+export * as router from './router';
+export * as renderers from './renderers';

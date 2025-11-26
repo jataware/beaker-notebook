@@ -17,7 +17,7 @@
             </button>
         </div>
 
-        <div ref="finalResponseElement" class="final-response p-steppanel" v-html="finalResponse">
+        <div ref="finalResponseElement" class="final-response p-steppanel" v-html="finalResponse" @click="handleImageClick">
 
         </div>
     </div>
@@ -29,6 +29,8 @@ import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import { useWorkflows } from '../../composables/useWorkflows';
 import { marked } from "marked";
 import { DocumentExporter } from '../../utils/exportUtils';
+import { ImageZoomDialog } from "../render";
+import { useDialog } from "primevue";
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const { attachedWorkflow, attachedWorkflowFinalResponse } = useWorkflows(beakerSession);
@@ -68,6 +70,47 @@ const exportToDocx = async () => {
         console.error('Error exporting DOCX:', error);
     } finally {
         isExporting.value = false;
+    }
+};
+
+const dialog = useDialog();
+const overlay = ref();
+const handleImageClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.tagName.toLowerCase() === 'img') {
+        event.preventDefault();
+        event.stopPropagation();
+        const img = target as HTMLImageElement;
+        overlay.value = dialog.open(
+            ImageZoomDialog,
+            {
+                // Data used within the dialog to render the image.
+                data: {
+                    imageSrc: img.src,
+                    imageAlt: img.alt || 'Zoomed image',
+                },
+                props: {
+                    modal: true,
+                    draggable: false,
+                    showHeader: false,
+                    closeButtonProps: {
+                        class: "my-close-props",
+                    },
+                    style: {
+                        width: "95vw",
+                        maxHeight: "calc(95vh - 3rem)",
+                        height: "100%",
+                        position: "relative",
+                        top: "1.5rem",
+                    },
+                    contentStyle: {
+                        display: "flex",
+                        flex: "1",
+                        padding: "var(--p-overlay-modal-padding)",
+                    }
+                }
+            }
+        );
     }
 };
 
@@ -169,6 +212,19 @@ const exportToDocx = async () => {
     td {
         padding: 0.2rem;
         border: 1px solid var(--p-datatable-body-cell-border-color);
+    }
+
+    img {
+        border-radius: 0.25rem;
+        max-width: 100%;
+        cursor: pointer;
+        transition: box-shadow 0.6s ease;
+        padding: 1px;
+
+        &:hover {
+            box-sizing: border-box;
+            box-shadow: inset 0 0 0 1px var(--p-surface-500);
+        }
     }
 }
 

@@ -130,7 +130,7 @@ import DebugPanel from '../components/panels/DebugPanel.vue'
 
 import IntegrationEditor from '../components/misc/IntegrationEditor.vue';
 import IntegrationPanel from '../components/panels/IntegrationPanel.vue';
-import { listResources, listIntegrations, type IntegrationInterfaceState, type IntegrationResourceMap, updateResource, addResource, updateIntegration, addIntegration, deleteResource } from '@/util/integration';
+import { listResources, listIntegrations, type IntegrationInterfaceState, updateResource, addResource, updateIntegration, addIntegration, deleteResource } from '@/util/integration';
 import ExamplesPanel from '../components/panels/ExamplesPanel.vue';
 
 const beakerNotebookRef = ref<BeakerNotebookComponentType>();

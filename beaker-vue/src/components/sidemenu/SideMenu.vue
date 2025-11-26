@@ -26,7 +26,7 @@
                     ></Button>
                 </div>
             </div>
-            <div v-show="expanded" role="menu" class="sidemenu-panel-container">
+            <div v-show="isExpanded" role="menu" class="sidemenu-panel-container">
                 <component
                     v-for="(panel, index) in panels"
                     :key="`panel-${index}`"
@@ -35,7 +35,7 @@
                     :selected="selectedTabIndex === index"
                 />
             </div>
-            <div v-if="expanded && !staticSize"
+            <div v-if="isExpanded && !staticSize"
                 class="sidemenu-gutter"
                 @mousedown.prevent="startDragHandle"
                 ref="gutterRef"
@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="tsx">
-import { ref, watch, computed, getCurrentInstance, useSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
+import { ref, watch, computed, getCurrentInstance, useSlots, defineSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
 import { type VNode } from "vue";
 
 import Button from 'primevue/button';
@@ -56,7 +56,7 @@ import SideMenuPanel from "./SideMenuPanel.vue";
 export type MenuPosition = "right" | "left";
 export type HighlightType = "full" | "shadow" | "line";
 
-interface SideMenuProps {
+export interface SideMenuProps {
     style?: {[key: string]: string};
     expanded?: boolean,
     position?: MenuPosition;
@@ -91,7 +91,9 @@ const emit = defineEmits([
 const AUTO_CLOSE_MARGIN = 50;
 const MINIMIZE_INDICATION_WIDTH = 8;
 
-const slots = useSlots();
+const slots = defineSlots<{
+    default: () => any,
+}>();
 
 const selectedTabIndex = ref<number|null>(props.expanded ? 0 : null);
 const panelWidth = ref<number|null>(null);
@@ -114,7 +116,7 @@ let minWidth: number;
 let menuWidth: number;
 let closedWidth: number;
 
-const expanded = computed(() => {
+const isExpanded = computed(() => {
     return selectedTabIndex.value !== null;
 });
 
@@ -139,7 +141,7 @@ const panelsByPosition = computed(() => {
 });
 
 const containerStyle = computed(() => {
-    if (expanded.value) {
+    if (isExpanded.value) {
         let width: string;
         if (panelWidth.value !== null) {
             width = `${panelWidth.value}px`;
@@ -168,7 +170,7 @@ const containerStyle = computed(() => {
     }
 });
 
-watch(expanded, () => {
+watch(isExpanded, () => {
     nextTick(() => {
         const offsetParent = instance.vnode.el.offsetParent;
         const backoff = offsetParent.scrollWidth - offsetParent.offsetWidth;
@@ -187,14 +189,14 @@ const startDragHandle = (evt: MouseEvent) => {
         try {
             document.removeEventListener("mousemove", listeners.value.move);
         }
-        catch (e) {null}
+        catch (e) {}
         listeners.value.move = null;
     }
     if (listeners.value.end !== null) {
         try {
             document.removeEventListener("mouseup", listeners.value.end);
         }
-        catch (e) {null}
+        catch (e) {}
         listeners.value.end = null;
     }
     listeners.value.move = document.addEventListener("mousemove", moveDragHandle);

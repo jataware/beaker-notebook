@@ -39,13 +39,13 @@
             </InputGroup>
         </div>
         <Divider></Divider>
-        
+
         <div class="workflow-content">
             <div class="workflow-list">
                 <Card
                     v-for="workflow, id in searchResults"
                     class="workflow-card"
-                    :class="{ 
+                    :class="{
                         'selected-card': selectedWorkflowId === id,
                         'current-card': id === attachedWorkflowId
                     }"
@@ -66,7 +66,7 @@
                     </template>
                 </Card>
             </div>
-            
+
             <div class="workflow-preview" v-if="selectedWorkflow">
                 <!-- Scrollable content area -->
                 <div class="preview-content-scrollable">
@@ -84,7 +84,7 @@
                                     <h4>Description</h4>
                                     <p>{{ selectedWorkflow.human_description }}</p>
                                 </div>
-                                
+
                                 <Divider v-if="selectedWorkflow.example_prompt" />
                                 <div v-if="selectedWorkflow.example_prompt" class="mb-4">
                                     <h4 class="text-lg font-semibold mb-2">Example Usage</h4>
@@ -92,7 +92,7 @@
                                         {{ selectedWorkflow.example_prompt }}
                                     </div>
                                 </div>
-                                
+
                                 <Divider v-if="selectedWorkflow.stages?.length" />
                                 <div v-if="selectedWorkflow.stages?.length" class="section">
                                     <h4>Workflow Stages</h4>
@@ -109,10 +109,10 @@
                         </template>
                     </Card>
                 </div>
-                
+
                 <!-- Floating action gutter - positioned absolutely within the preview panel -->
                 <div class="floating-action-gutter">
-                    <Button 
+                    <Button
                         :label="selectedWorkflowId === attachedWorkflowId ? 'Already Active' : `Start ${selectedWorkflow.title}`"
                         :disabled="selectedWorkflowId === attachedWorkflowId"
                         @click="confirmSelection"
@@ -122,7 +122,7 @@
                     />
                 </div>
             </div>
-            
+
             <div class="workflow-preview empty-preview" v-else>
                 <Card class="preview-card">
                     <template #content>
@@ -195,6 +195,8 @@ const searchResults = computed<{[key in string]: any}>(() => {
 
 <style scoped>
 .workflow-dialog {
+    display: flex;
+    flex-direction: column;
     width: 80vw;
     max-width: 1200px;
     height: 80vh;
@@ -222,7 +224,6 @@ const searchResults = computed<{[key in string]: any}>(() => {
     flex: 1;
     gap: 1.5rem;
     min-height: 0;
-    height: 60vh;
 }
 
 .workflow-list {
@@ -238,6 +239,7 @@ const searchResults = computed<{[key in string]: any}>(() => {
     cursor: pointer;
     transition: all 0.15s ease;
     border: 2px solid transparent;
+    margin-top: 0.25rem;
 }
 
 .workflow-card:hover {
@@ -275,6 +277,7 @@ const searchResults = computed<{[key in string]: any}>(() => {
 
 .preview-card {
     height: auto;
+    margin: 0.25rem;
 }
 
 .floating-action-gutter {
@@ -356,20 +359,20 @@ const searchResults = computed<{[key in string]: any}>(() => {
         width: 95vw;
         height: 90vh;
     }
-    
+
     .workflow-content {
         flex-direction: column;
     }
-    
+
     .workflow-list {
         max-height: 40vh;
     }
-    
+
     .workflow-preview {
         min-width: unset;
         flex: 1;
     }
-    
+
     .sticky-footer-absolute {
         padding: 0.75rem;
     }

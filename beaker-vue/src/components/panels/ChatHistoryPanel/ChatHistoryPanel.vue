@@ -73,6 +73,32 @@
             </div> -->
         </div>
         <h4>Messages</h4>
+        <div class="add-message-section" v-if="showPreambleInput">
+            <div class="add-message-input">
+                <textarea
+                    v-model="preambleText"
+                    placeholder="Add a preamble message to chat history..."
+                    rows="3"
+                    class="message-textarea"
+                ></textarea>
+            </div>
+            <div class="add-message-actions">
+                <Button
+                    @click="clearPreamble"
+                    severity="danger"
+                >
+                    Clear Message
+                </Button>
+                <Button
+                    @click="setPreamble"
+                    :disabled="!preambleText.trim()"
+                    class="save-message-btn"
+                    severity="success"
+                >
+                    Save Message
+                </Button>
+            </div>
+        </div>
         <div class="chat-history-records">
             <ChatHistoryMessage
                 v-for="record, index in props.chatHistory?.records"
@@ -87,8 +113,10 @@
 
 <script lang="ts" setup>
 
-import { ref, computed } from "vue";
+import { ref, computed, inject, watch } from "vue";
 import ChatHistoryMessage from "./ChatHistoryMessage.vue";
+import Button from "primevue/button";
+import type { BeakerSessionComponentType } from "../../session/BeakerSession.vue";
 
 
 export interface IMessage {
@@ -142,9 +170,45 @@ export interface ChatHistoryProps {
 
 const props = defineProps<ChatHistoryProps>()
 
-const emit = defineEmits([
-    // 'clearLogs'
-]);
+const showPreambleInput = ref<boolean>(false);
+const preambleText = ref('');
+const beakerSession = inject<BeakerSessionComponentType>('beakerSession');
+const showToast: (...args) => void = inject('show_toast');
+
+const clearPreamble = async () => {
+    const action = beakerSession.session.executeAction(
+        "set_user_preamble",
+        { message_text: "" }
+    );
+    const reply = await action.done;
+    if (reply?.content?.status === "ok") {
+        preambleText.value = '';
+        showToast({title: 'Upload complete', detail: "Preamble message cleared", severity: 'success', life: 4000});
+    }
+    else {
+        showToast({title: 'Upload complete', detail: "Error clearing preamble message.", severity: 'error', life: 4000});
+    }
+};
+
+
+const setPreamble = async () => {
+    if (preambleText.value.trim() && beakerSession?.session) {
+        const action = beakerSession.session.executeAction(
+            "set_user_preamble",
+            { message_text: preambleText.value.trim() }
+        );
+        const reply = await action.done;
+        console.log({response: reply});
+        if (reply?.content?.status === "ok") {
+            preambleText.value = '';
+            showToast({title: 'Upload complete', detail: "Preamble message set.", severity: 'success', life: 4000});
+        }
+        else {
+            showToast({title: 'Upload complete', detail: "Error setting preamble message.", severity: 'error', life: 4000});
+        }
+    }
+};
+
 
 const contextWindowUsage = computed(() => {
     const contextWindow = props.chatHistory?.model?.context_window;
@@ -341,4 +405,48 @@ const displayNumber = (rawValue: number): string => {
     margin-left: 0.5em;
 }
 
+.add-message-section {
+    margin: 1rem 0.5rem;
+    padding: 1rem;
+    border: 1px solid var(--p-surface-d);
+    border-radius: 0.5rem;
+    background-color: var(--p-surface-a);
+}
+
+.add-message-input {
+    margin-bottom: 0.75rem;
+}
+
+.message-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 0.75rem;
+    border: 1px solid var(--p-surface-c);
+    border-radius: 0.375rem;
+    background-color: var(--p-surface-0);
+    color: var(--p-text-color);
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    resize: vertical;
+
+    &:focus {
+        outline: none;
+        border-color: var(--p-primary-color);
+        box-shadow: 0 0 0 1px var(--p-primary-color);
+    }
+
+    &::placeholder {
+        color: var(--p-text-color-secondary);
+    }
+}
+
+.add-message-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.save-message-btn {
+    margin-left: 0.5rem;
+}
 </style>

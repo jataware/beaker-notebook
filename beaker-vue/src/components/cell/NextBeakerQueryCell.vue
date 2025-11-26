@@ -231,6 +231,9 @@ const setupStickyBehavior = () => {
     }
 
     let ticking = false;
+    let stickyDebounceTimeout: number | null = null;
+    let lastScrollTop = 0;
+    let stickyTransition = false;
 
     const updateStickyPosition = () => {
         if (!queryCellRef.value || !isSticky.value) return;
@@ -255,20 +258,65 @@ const setupStickyBehavior = () => {
                     return;
                 }
 
+                // Prevent rapid state changes during transition
+                if (stickyTransition) {
+                    ticking = false;
+                    return;
+                }
+
+                const currentScrollTop = cellContainer.scrollTop;
+                const scrollDirection = currentScrollTop > lastScrollTop ? 'down' : 'up';
+                lastScrollTop = currentScrollTop;
+
                 const cellRect = beakerCell.getBoundingClientRect();
                 const containerRect = cellContainer.getBoundingClientRect();
-
-                if (cellRect.top < (containerRect.top - 30) && !isSticky.value) {
+                
+                const isFirstCell = beakerCell === cellContainer.querySelector('.beaker-cell');
+                
+                // divergent thresholds to prevent rapid switching
+                const threshold = isSticky.value ? 10 : 40;
+                
+                if (cellRect.top < (containerRect.top - threshold) && !isSticky.value && scrollDirection === 'down') {
+                    if (stickyDebounceTimeout) {
+                        window.clearTimeout(stickyDebounceTimeout);
+                    }
+                    
+                    stickyTransition = true;
                     isSticky.value = true;
                     updateStickyPosition();
+                    
+                    // transition after CSS animation completes
+                    setTimeout(() => {
+                        stickyTransition = false;
+                    }, 25);
 
-                } else if (cellRect.top >= containerRect.top && isSticky.value) {
-                    isSticky.value = false;
+                } else if (
+                    (cellRect.top >= (containerRect.top + threshold) && isSticky.value && scrollDirection === 'up') ||
+                    (isFirstCell && cellContainer.scrollTop <= 5 && isSticky.value)
+                ) {
+                    // done with rapid toggling prevention
+                    if (stickyDebounceTimeout) {
+                        window.clearTimeout(stickyDebounceTimeout);
+                    }
+                    
+                    stickyDebounceTimeout = window.setTimeout(() => {
+                        if (!queryCellRef.value) return;
+                        
+                        stickyTransition = true;
+                        isSticky.value = false;
 
-                    queryCellRef.value.style.removeProperty('--sticky-top');
-                    queryCellRef.value.style.removeProperty('--sticky-left');
-                    queryCellRef.value.style.removeProperty('--sticky-right');
-                } else if (isSticky.value) {
+                        queryCellRef.value.style.removeProperty('--sticky-top');
+                        queryCellRef.value.style.removeProperty('--sticky-left');
+                        queryCellRef.value.style.removeProperty('--sticky-right');
+                        
+                        setTimeout(() => {
+                            stickyTransition = false;
+                        }, 50);
+                        
+                        stickyDebounceTimeout = null;
+                    }, 40);
+
+                } else if (isSticky.value && !stickyTransition) {
                     updateStickyPosition();
                 }
 
@@ -280,9 +328,14 @@ const setupStickyBehavior = () => {
 
     let resizeObserver: ResizeObserver | null = null;
     if (window.ResizeObserver) {
+        // only observe width changes; prevent potential height-based feedback loops
+        let lastWidth = cellContainer.getBoundingClientRect().width;
+        
         resizeObserver = new ResizeObserver(() => {
-            if (isSticky.value) {
+            const currentWidth = cellContainer.getBoundingClientRect().width;
+            if (Math.abs(currentWidth - lastWidth) > 1 && isSticky.value) { 
                 updateStickyPosition();
+                lastWidth = currentWidth;
             }
         });
         resizeObserver.observe(cellContainer);
@@ -294,6 +347,9 @@ const setupStickyBehavior = () => {
         cellContainer.removeEventListener('scroll', handleScroll);
         if (resizeObserver) {
             resizeObserver.disconnect();
+        }
+        if (stickyDebounceTimeout) {
+            window.clearTimeout(stickyDebounceTimeout);
         }
     };
 };
@@ -427,7 +483,9 @@ onBeforeUnmount(() => {
             margin: 0.1rem 0.25rem 0.33rem 0rem !important;
         }
 
-        animation: stickySlideDown 0.2s ease-out;
+        // Animation is cool, and all, but disabled for now in case
+        // it contributed to the jitter (fast sticky unsticky mode toggling)
+        // animation: stickySlideDown 0.2s ease-out;
     }
 }
 

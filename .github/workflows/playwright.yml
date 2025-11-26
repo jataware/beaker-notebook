@@ -1,0 +1,62 @@
+name: Playwright Tests
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ dev, main ]
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+    # node / python
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+    - name: python-setup
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    # pip install dependencies for building beaker
+    - name: install-dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install hatch uv
+    # install npm packages in ts packages
+    - name: beaker-vue npm ci
+      working-directory: beaker-vue
+      run: npm ci
+    - name: beaker-ts npm ci
+      working-directory: beaker-ts
+      run: npm ci
+    # make beaker package
+    - name: make build
+      run: make build
+    # install
+    - name: install beaker
+      # uv for CI speed at the cost of diverging from
+      # dependency resolution backtracking in pip
+      run: uv pip install --system -e .
+    # install playwright
+    - name: Install Playwright Browsers
+      working-directory: beaker-vue
+      shell: bash
+      run: npx playwright install --with-deps
+    # run beaker
+    - name: Run Beaker
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        beaker notebook &
+        sleep 15
+    # with beaker listening on localhost:8888, run tests
+    - name: Run Playwright tests
+      working-directory: beaker-vue
+      run: npx playwright test
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: beaker-vue/playwright-report/
+        retention-days: 30

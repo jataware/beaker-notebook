@@ -1,8 +1,11 @@
-export * as sidemenu from './sidemenu';
-export * as misc from './misc';
-export * as render from './render';
-export * as notebook from './notebook';
-export * as dev_interface from './dev-interface';
-export * as cell from './cell';
 export * as agent from './agent';
+export * as cell from './cell';
+export * as chatInterface from './chat-interface';
+export * as dev_interface from './dev-interface';
+export * as icons from './icons';
+export * as misc from './misc';
+export * as notebook from './notebook';
+export * as panels from './panels';
+export * as render from './render';
 export * as session from './session';
+export * as sidemenu from './sidemenu';

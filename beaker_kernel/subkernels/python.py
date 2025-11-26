@@ -18,6 +18,7 @@ class PythonSubkernel(CheckpointableBeakerSubkernel):
     """
     DISPLAY_NAME = "Python 3"
     SLUG = "python3"
+    JUPYTER_LANGUAGE = "python"
     KERNEL_NAME = "python3"
 
     WEIGHT = 20

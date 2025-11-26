@@ -19,7 +19,7 @@ interface UseNotebookInterfaceReturn {
     sideMenuRef: Ref<any>;
     rightSideMenuRef: Ref<any>;
     agentQueryRef: Ref<any>;
-    
+
     // state
     connectionStatus: Ref<string>;
     debugLogs: Ref<object[]>;
@@ -31,7 +31,7 @@ interface UseNotebookInterfaceReturn {
     contextPreviewData: Ref<any>;
     kernelStateInfo: Ref<any>;
     copiedCell: Ref<IBeakerCell | null>;
-    
+
     // computed
     activeQueryCells: ComputedRef<Array<{
         id: string;
@@ -42,7 +42,7 @@ interface UseNotebookInterfaceReturn {
     awaitingInputQuestion: ComputedRef<string | null>;
     beakerSession: ComputedRef<BeakerSessionComponentType>;
     defaultRenderers: IMimeRenderer<BeakerRenderOutput>[];
-    
+
     // functions
     createHeaderNav: (currentPage: string) => NavOption[];
     createNotebookKeyBindings: Function;
@@ -54,7 +54,7 @@ interface UseNotebookInterfaceReturn {
     handleNotebookSaved: (path: string) => Promise<void>;
     scrollToCell: (cellId: string) => void;
     restartSession: () => Promise<void>;
-    
+
     // injections
     theme: any;
     toggleDarkMode: () => void;
@@ -70,7 +70,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
     const rightSideMenuRef = ref();
     const agentQueryRef = ref();
     const kernelStateInfo = ref();
-    
+
     const connectionStatus = ref('connecting');
     const debugLogs = ref<object[]>([]);
     const rawMessages = ref<object[]>([]);
@@ -81,17 +81,17 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
     const contextPreviewData = ref<any>();
     const keyBindingState = {};
     const copiedCell = ref<IBeakerCell | null>(null);
-    
+
     const { theme, toggleDarkMode } = inject<IBeakerTheme>('theme');
     const beakerApp = inject<any>("beakerAppConfig");
-    
+
     const beakerSession = computed<BeakerSessionComponentType>(() => {
         return beakerInterfaceRef?.value?.beakerSession;
     });
-    
+
     const activeQueryCells = computed(() => {
         if (!beakerSession.value?.session?.notebook?.cells) return [];
-        
+
         return beakerSession.value.session.notebook.cells
             .filter(cell => cell.cell_type === 'query')
             .map(cell => ({
@@ -103,21 +103,21 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
 
     const awaitingInputCell = computed(() => {
         const cells = beakerSession.value?.session?.notebook?.cells ?? [];
-        return cells.find(cell => 
+        return cells.find(cell =>
             cell.cell_type === 'query' && cell.status === 'awaiting_input'
         ) || null;
     });
 
     const awaitingInputQuestion = computed(() => {
         if (!awaitingInputCell.value) return null;
-        
+
         // find the last user_question event to get the question text
         const events = awaitingInputCell.value.events || [];
         const lastQuestionEvent = [...events].reverse().find(event => event.type === 'user_question');
-        
+
         return lastQuestionEvent?.content || 'The agent is waiting for your response.';
     });
-    
+
     const defaultRenderers: IMimeRenderer<BeakerRenderOutput>[] = [
         ...standardRendererFactories.map((factory: any) => new JupyterMimeRenderer(factory)).map(wrapJupyterRenderer),
         JavascriptRenderer,
@@ -126,10 +126,10 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         MarkdownRenderer,
         TableRenderer
     ];
-    
+
     const createHeaderNav = (currentPage: string): NavOption[] => {
         const nav = [];
-        
+
         if (currentPage !== 'chat') {
             nav.push({
                 type: 'link',
@@ -138,7 +138,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
                 label: 'Navigate to chat view',
             });
         }
-        
+
         if (currentPage !== 'notebook') {
             nav.push({
                 type: 'link',
@@ -147,7 +147,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
                 label: 'Navigate to notebook view',
             });
         }
-        
+
         nav.push(...[
             {
                 type: 'button',
@@ -174,11 +174,11 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         ]);
         return nav;
     };
-    
+
     const prevCellKey = () => {
         beakerNotebookRef.value?.selectPrevCell();
     };
-    
+
     const nextCellKey = () => {
         const lastCell = beakerNotebookRef.value.notebook.cells[beakerNotebookRef.value.notebook.cells.length-1];
         if (beakerNotebookRef.value.selectedCell().cell.id === lastCell.id) {
@@ -188,19 +188,19 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             beakerNotebookRef.value?.selectNextCell();
         }
     };
-    
+
     const scrollToCell = (cellId: string) => {
         const cellElement = document.querySelector(`[cell-id="${cellId}"]`);
         if (cellElement) {
-            cellElement.scrollIntoView({ 
-                behavior: 'smooth', 
-                block: 'center' 
+            cellElement.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
             });
-            
+
             beakerNotebookRef.value?.selectCell(cellId);
         }
     };
-    
+
     const createNotebookKeyBindings = () => ({
         "keydown.enter.ctrl.prevent.capture.in-cell": () => {
             beakerNotebookRef.value?.selectedCell().execute();
@@ -323,7 +323,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             }
         },
     });
-    
+
     const createIopubMessageHandler = () => (msg) => {
         if (msg.header.msg_type === "preview") {
             contextPreviewData.value = msg.content;
@@ -366,7 +366,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             })
         }
     };
-    
+
     const anyMessageHandler = (msg, direction) => {
         rawMessages.value.push({
             type: direction,
@@ -374,22 +374,28 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             timestamp: msg.header.date,
         });
     };
-    
+
     const unhandledMessageHandler = (msg) => {
         console.log("Unhandled message received", msg);
     };
-    
+
     const statusChangedHandler = (newStatus) => {
         connectionStatus.value = newStatus == 'idle' ? 'connected' : newStatus;
     };
-    
+
     const loadNotebook = (notebookJSON: any, filename: string) => {
         console.log("Loading notebook", notebookJSON);
-        
+
         const notebook = beakerNotebookRef.value;
         beakerSession.value?.session.loadNotebook(notebookJSON);
+        if (notebookJSON?.metadata?.chat_history) {
+            beakerSession.value?.session.executeAction(
+                "set_agent_history",
+                notebookJSON?.metadata?.chat_history
+            );
+        }
         saveAsFilename.value = filename;
-        
+
         const cellIds = notebook.notebook.cells.map((cell) => cell.id);
         if (!cellIds.includes(notebook.selectedCellId)) {
             nextTick(() => {
@@ -397,7 +403,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             });
         }
     };
-    
+
     const handleNotebookSaved = async (path: string) => {
         saveAsFilename.value = path;
         if (path) {
@@ -414,7 +420,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         )
         await resetFuture;
     };
-    
+
     // at least one cell
     watch(
         () => beakerNotebookRef?.value?.notebook.cells,
@@ -425,7 +431,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         },
         {deep: true},
     );
-    
+
     return {
         // refs
         beakerNotebookRef,
@@ -435,7 +441,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         sideMenuRef,
         rightSideMenuRef,
         agentQueryRef,
-        
+
         // state
         connectionStatus,
         debugLogs,
@@ -450,11 +456,11 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         activeQueryCells,
         awaitingInputCell,
         awaitingInputQuestion,
-        
+
         // computed
         beakerSession,
         defaultRenderers,
-        
+
         // functions
         createHeaderNav,
         createNotebookKeyBindings,
@@ -466,7 +472,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
         handleNotebookSaved,
         scrollToCell,
         restartSession,
-        
+
         // injections
         theme,
         toggleDarkMode,

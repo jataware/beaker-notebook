@@ -3,9 +3,9 @@
         <div id="agent-prompt">
             {{ isAwaitingInput ? 'The agent has a question:' : 'How can the agent help?' }}
         </div>
-        
+
         <div v-if="isAwaitingInput && awaitingInputQuestion" class="agent-question">
-            <div class="question-text">{{ awaitingInputQuestion }}</div>
+            <div class="question-text" v-html="questionMarkdown"></div>
         </div>
 
         <div id="agent-inner-input">
@@ -40,6 +40,7 @@ import { useWorkflows } from '../../composables/useWorkflows';
 import { BeakerSession } from 'beaker-kernel';
 import { type BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import { type BeakerNotebookComponentType } from '../notebook/BeakerNotebook.vue';
+import { marked } from "marked";
 
 const props = defineProps([
     "runCellCallback",
@@ -110,7 +111,7 @@ const handleResponse = () => {
     if (!response.value.trim() || !props.awaitingInputCell) {
         return;
     }
-    
+
     props.awaitingInputCell.respond(response.value, session);
     response.value = "";
 }
@@ -120,13 +121,13 @@ const focusTextArea = () => {
     if (!textAreaRef.value) {
         return false;
     }
-    
+
     const target = textAreaRef.value.$el;
     if (target && target.tagName === 'TEXTAREA') {
         target.focus();
         return true;
     }
-    
+
     return false;
 };
 
@@ -143,6 +144,8 @@ watch(isAwaitingInput, (newValue) => {
 const { workflows, attachedWorkflowId, attachedWorkflow } = useWorkflows(beakerSession);
 
 const placeholder = computed(() => attachedWorkflow?.value?.example_prompt ? attachedWorkflow.value.example_prompt : "Ask the AI or request an operation.")
+
+const questionMarkdown = computed(() => marked.parse(props?.awaitingInputQuestion ?? ""))
 
 </script>
 
@@ -164,7 +167,7 @@ const placeholder = computed(() => attachedWorkflow?.value?.example_prompt ? att
 
 .agent-question {
     margin-bottom: 0.5rem;
-    padding: 0.5rem;
+    padding: 0 0.5rem;
     background: var(--p-surface-b);
     border-left: 3px solid var(--p-primary-color);
 }

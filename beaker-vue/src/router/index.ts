@@ -23,14 +23,14 @@ export interface Route {
 export type Pages = { [key: Slug]: Page}
 export type Routes = { [key: Slug]: Route }
 
-const defaultRouteMap: Routes = {
+export const defaultRouteMap: Routes = {
     "notebook": {
       "path": "/notebook",
       "component": () => import('@/pages/NextNotebookInterface.vue'),
       "role": "home",
     },
     "next-notebook": {
-      "path": "/legacy", 
+      "path": "/legacy",
       "component": () => import('@/pages/NotebookInterface.vue'),
       "role": "alt",
     },
@@ -57,7 +57,7 @@ const defaultRouteMap: Routes = {
     },
 }
 
-const reformatRoutes = (routeMap: Routes) => {
+export const reformatRoutes = (routeMap: Routes) => {
   const hasHomeRouteDefined = Object.hasOwn(routeMap, "/");
   return Object.entries(routeMap).map(([slug, routeObject]) => {
     const result: RouteRecordRaw = {
@@ -76,8 +76,8 @@ const reformatRoutes = (routeMap: Routes) => {
   });
 }
 
-const convertPagesToRoutes = (pages: Pages): Routes => {
-  let pageRoutes = {};
+export const convertPagesToRoutes = (pages: Pages): Routes => {
+  const pageRoutes = {};
   Object.values(pages).map((pageDef) => {
     if (Object.hasOwn(defaultRouteMap, pageDef.slug)) {
       const routeDef = {...defaultRouteMap[pageDef.slug]};
@@ -90,8 +90,8 @@ const convertPagesToRoutes = (pages: Pages): Routes => {
   return pageRoutes;
 }
 
-const createRouter = (config) => {
-  let routeMap = config?.appConfig?.pages
+export const createRouter = (config) => {
+  const routeMap = config?.appConfig?.pages
     ? convertPagesToRoutes(config.appConfig.pages)
     : { ...defaultRouteMap };
 

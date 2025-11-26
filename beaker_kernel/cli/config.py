@@ -1,3 +1,5 @@
+import importlib
+import inspect
 import os
 import toml
 from collections import deque
@@ -8,7 +10,7 @@ from typing import Mapping, Sequence, Any, get_origin, get_args
 import click
 
 from beaker_kernel.lib.config import locate_config, config, ConfigClass, Table, recursiveOptionalUpdate, Choice
-from beaker_kernel.lib.autodiscovery import LIB_LOCATIONS
+from beaker_kernel.lib.utils import import_dotted_class
 
 
 SENSITIVE_STR_REPR = "*" * 8

@@ -6,7 +6,6 @@ import asyncio
 from queue import Empty
 
 from jupyter_server.base.handlers import JupyterHandler
-from jupyter_server.extension.handler import ExtensionHandlerMixin
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 
@@ -167,7 +166,7 @@ class BeakerAPIMixin:
 
 # Integration Handler
 
-class IntegrationHandler(BeakerAPIMixin, ExtensionHandlerMixin, JupyterHandler):
+class IntegrationHandler(BeakerAPIMixin, JupyterHandler):
     """
     Handles fetching and adding integrations.
     """
@@ -225,7 +224,7 @@ class IntegrationHandler(BeakerAPIMixin, ExtensionHandlerMixin, JupyterHandler):
             raise tornado.web.HTTPError(status_code=500, log_message=str(e))
 
 
-class IntegrationResourceHandler(BeakerAPIMixin, ExtensionHandlerMixin, JupyterHandler):
+class IntegrationResourceHandler(BeakerAPIMixin, JupyterHandler):
     """
     Handles fetching and adding resources belonging to an integration.
     """

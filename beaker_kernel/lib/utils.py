@@ -10,6 +10,7 @@ import traceback
 import typing
 import warnings
 from frozendict import frozendict
+from collections import namedtuple
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from functools import wraps, update_wrapper
 from importlib import import_module
@@ -22,6 +23,8 @@ from archytas.exceptions import AuthenticationError
 from .jupyter_kernel_proxy import ( KERNEL_SOCKETS, KERNEL_SOCKETS_NAMES,
                                    JupyterMessage, JupyterMessageTuple)
 
+
+BeakerEntryPoint = namedtuple("BeakerEntryPoint", ("type", "import_string"))
 
 logger = logging.getLogger(__name__)
 

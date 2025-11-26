@@ -63,6 +63,7 @@ import { ProgressSpinner, Button, Divider, ToggleSwitch, InputGroup, InputGroupA
 import { getDateTimeString, downloadFileDOM } from "@/util";
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
 import contentDisposition from "content-disposition";
+import { fetch } from '@/util/fetch';
 
 const showOverlay = inject<(contents: string, header?: string) => void>('show_overlay');
 
@@ -125,7 +126,7 @@ const handleStreamlineExport = (format: string, mimetype: string, options?: obje
         }
     ).then(async (result) => {
         if (result.status === 200) {
-            const data = await result.text();
+            const data = new Blob([await result.text()]);
             const dispositionHeader = result.headers.get("content-disposition")
             const disposition = contentDisposition.parse(dispositionHeader);
             const filename = disposition.parameters.filename;

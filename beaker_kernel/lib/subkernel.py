@@ -1,7 +1,7 @@
 import abc
 import asyncio
 import json
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, ClassVar
 import hashlib
 import shutil
 from tempfile import mkdtemp
@@ -44,7 +44,7 @@ async def run_code_summarizer(message: "ToolMessage", chat_history: "ChatHistory
     size_threshold = 800
     excision_text_template = "...skipping {} characters..."
     split_percentage = 0.7
-    text = message.text()
+    text = message.text
     message_len = len(text)
     calling_record, tool_call = chat_history.get_tool_caller(message.tool_call_id)
     calling_message: AIMessage = calling_record.message
@@ -70,7 +70,6 @@ async def run_code_summarizer(message: "ToolMessage", chat_history: "ChatHistory
         code_excision_end = code_len - (size_threshold - code_excision_start - len(code_excision_text))
 
         message.additional_kwargs["orig_code"] = code
-        tool_call["_orig_code"] = code
         shortened_code = "".join([
             code[:code_excision_start],
             code_excision_text,
@@ -126,12 +125,18 @@ async def attach_workflow(workflow_title: str, agent: AgentRef):
     return f"Successfully set the attached workflow to {workflow_title}."
 
 @tool()
-async def mark_workflow_stage(stage_name: str, state: str, results: str, agent: AgentRef):
+async def update_workflow_stage(stage_name: str, state: str, results: str, agent: AgentRef):
     """
     Updates the information about a workflow stage.
 
-    This should be used directly after finishing each stage of a workflow,
+    This must be used directly after finishing each stage of a workflow,
     and at the start of a new stage.
+
+    You may additionally use this if the user requests redoing a stage after providing additional information,
+    such as: "Try that again, but with..." or "That didn't quite work, please fix it"
+    that would impact the result of a stage of the workflow that has already completed.
+    After following the user's request, ensure to provide the new results when updating the stage to be
+    "finished" again.
 
     Args:
         stage_name (str): The name of the stage to mark as completed to the user.
@@ -156,21 +161,33 @@ async def mark_workflow_stage(stage_name: str, state: str, results: str, agent: 
             results_markdown=results,
         )
 
-    # summarize all of the results so far in a final format, if we just finished a step
-    try:
-        if state == 'finished':
-            workflow_prompt = agent.context.workflows[agent.context.current_workflow_state["workflow_id"]].output_prompt
-            if workflow_prompt:
-                workflow_results = [
-                    f"### {stage_name}: \n\n{progress}\n\n"
-                    for stage_name,progress in agent.context.current_workflow_state["progress"].items()
-                ]
-                agent.context.current_workflow_state["final_response"] = await agent.oneshot(workflow_prompt, workflow_results)
-    except Exception as e:
-        logger.error(f"Summarization for the workflow stage failed: {e}")
-
     agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
     return "Successfully marked stage."
+
+@tool()
+async def update_workflow_output(results: str, agent: AgentRef):
+    """
+    Updates the overall output of the workflow.
+
+    This tool must be called whenever a workflow stage completes, or whenever
+    redoing a task would impact the "final output" of a workflow.
+
+    The final output of the workflow must be formatted according to the
+    `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>`
+    block of the active workflow.
+
+    Args:
+        results (str): The results of the entire workflow, all stages included, given
+                       the state of the notebook and user operations as well -
+                       which should be formatted according to the
+                       `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>` block of the active workflow.
+
+    Returns:
+        str: Information about the operation.
+    """
+    agent.context.current_workflow_state["final_response"] = results
+    agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+    return "Successfully set workflow output."
 
 @tool(autosummarize=True, summarizer=run_code_summarizer)
 async def run_code(code: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
@@ -339,6 +356,7 @@ class BeakerSubkernel(abc.ABC):
     DISPLAY_NAME: str
     SLUG: str
     KERNEL_NAME: str
+    JUPYTER_LANGUAGE: str
 
     WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
 
@@ -348,10 +366,13 @@ class BeakerSubkernel(abc.ABC):
         # if the lambda below contains self -- self.context.workflows won't be
         # populated at the check time in tools(self)... so checking in context makes more sense.
         (attach_workflow, lambda: True),
-        (mark_workflow_stage, lambda: True)
+        (update_workflow_stage, lambda: True),
+        (update_workflow_output, lambda: True)
     ]
 
     FETCH_STATE_CODE: str = ""
+
+    tasks: ClassVar[set[asyncio.Task]] = set()
 
     @classmethod
     @abc.abstractmethod
@@ -363,7 +384,7 @@ class BeakerSubkernel(abc.ABC):
         return [tool for tool, condition in self.TOOLS if condition()]
 
     def __init__(self, jupyter_id: str, subkernel_configuration: dict, context: BeakerContext):
-        self.jupyter_id = jupyter_id
+        self.kernel_id = jupyter_id
         self.connected_kernel = ProxyKernelClient(subkernel_configuration, session_id=context.beaker_kernel.session_id)
         self.context = context
 
@@ -374,21 +395,31 @@ class BeakerSubkernel(abc.ABC):
     async def lint_code(self, cells: AnalysisCodeCells):
         pass
 
+    async def shutdown(self, kernel_id) -> bool:
+        try:
+            logger.info(f"Shutting down connected subkernel {kernel_id}")
+            res = requests.delete(
+                f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{kernel_id}",
+                headers={
+                    "X-AUTH-BEAKER": self.context.beaker_kernel.api_auth()
+                },
+            )
+            if res.status_code == 204:
+                return True
+        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
+            return False
 
     def cleanup(self):
-        if self.jupyter_id is not None:
-            try:
-                print(f"Shutting down connected subkernel {self.jupyter_id}")
-                res = requests.delete(
-                    f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{self.jupyter_id}",
-                    headers={"Authorization": f"token {config.jupyter_token}"},
-                    timeout=0.5,
-                )
-                if res.status_code == 204:
-                    self.jupyter_id = None
-            except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
-                message = f"Error while shutting down subkernel: {err}\n  Subkernel or server may have already been shut down."
-                logger.error(message, exc_info=err)
+        def finish_cleanup(task: asyncio.Task):
+            success = task.result()
+            if success:
+                self.kernel_id = None
+            self.tasks.discard(task)
+
+        if self.kernel_id is not None:
+            task = asyncio.create_task(self.shutdown(self.kernel_id))
+            self.tasks.add(task)
+            task.add_done_callback(finish_cleanup)
 
     def format_kernel_state(self, state: dict) -> dict:
         return state
@@ -407,7 +438,7 @@ class CheckpointableBeakerSubkernel(BeakerSubkernel):
     def __init__(self, jupyter_id: str, subkernel_configuration: dict, context):
         super().__init__(jupyter_id, subkernel_configuration, context)
         self.checkpoints_enabled = is_checkpointing_enabled()
-        self.storage_prefix = os.path.join(config.checkpoint_storage_path, self.jupyter_id)
+        self.storage_prefix = os.path.join(config.checkpoint_storage_path, self.kernel_id)
         self.checkpoints : list[Checkpoint] = []
         if self.checkpoints_enabled:
             os.makedirs(self.storage_prefix, exist_ok=True, mode=0o777)

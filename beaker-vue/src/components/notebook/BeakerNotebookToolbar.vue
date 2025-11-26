@@ -153,6 +153,7 @@ import OpenNotebookButton from "../misc/OpenNotebookButton.vue";
 import { downloadFileDOM, getDateTimeString } from '../../util';
 import StreamlineExportDialog from "../misc/StreamlineExportDialog.vue"
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
+import { fetch } from '@/util/fetch';
 
 const session = inject<BeakerSession>('session');
 const notebook = inject<BeakerNotebookComponentType>('notebook');
@@ -216,7 +217,7 @@ const exportAsTypes = ref<MenuItem[]>([
     }
 ]);
 
-const handleExport = (format: string, mimetype: string) => {
+const handleExport = async (format: string, mimetype: string) => {
 
     const url = URLExt.join(PageConfig.getBaseUrl(), 'export', format);
 
@@ -225,7 +226,7 @@ const handleExport = (format: string, mimetype: string) => {
     const processedNotebookData = processNotebookForExport(notebook.notebook);
     const tempNotebook = new BeakerNotebook();
     tempNotebook.fromJSON(processedNotebookData);
-    
+
     // ensure all cells are proper BeakerBaseCell instances before calling toIPynb
     if (tempNotebook.content.cells && Array.isArray(tempNotebook.content.cells)) {
         tempNotebook.content.cells = tempNotebook.content.cells.map((cell: any) => {
@@ -242,9 +243,14 @@ const handleExport = (format: string, mimetype: string) => {
             }
         });
     }
-    
+
+    if (format === "full_context_notebook") {
+        const history = await session.executeAction("get_agent_history", {}).done;
+        tempNotebook.content.metadata.chat_history = history.content.return;
+    }
+
     const exportNotebook = tempNotebook.toIPynb();
-    
+
     fetch(
         url,
         {
@@ -259,7 +265,7 @@ const handleExport = (format: string, mimetype: string) => {
         }
     ).then(async (result) => {
         if (result.status === 200) {
-            const data = await result.text();
+            const data = await result.blob();
             const dispositionHeader = result.headers.get("content-disposition")
             const disposition = contentDisposition.parse(dispositionHeader);
             const filename = disposition.parameters.filename;
@@ -272,7 +278,7 @@ const handleExport = (format: string, mimetype: string) => {
     }).catch((reason) => console.error(reason));
 }
 
-const exportAction = (format: string, mimetype: string) => {
+const exportAction = async (format: string, mimetype: string) => {
     if (!saveAsFilename.value) {
         resetSaveAsFilename();
     }
@@ -282,7 +288,7 @@ const exportAction = (format: string, mimetype: string) => {
         const processedNotebookData = processNotebookForExport(notebook.notebook);
         const tempNotebook = new BeakerNotebook();
         tempNotebook.fromJSON(processedNotebookData);
-        
+
         if (tempNotebook.content.cells && Array.isArray(tempNotebook.content.cells)) {
             tempNotebook.content.cells = tempNotebook.content.cells.map((cell: any) => {
                 if (cell.cell_type === 'raw') {
@@ -298,9 +304,9 @@ const exportAction = (format: string, mimetype: string) => {
                 }
             });
         }
-        
+
         const exportNotebook = tempNotebook.toIPynb();
-        
+
         dialog.open(
             StreamlineExportDialog,
             {
@@ -316,7 +322,7 @@ const exportAction = (format: string, mimetype: string) => {
         );
     }
     else {
-        handleExport(format, mimetype);
+        await handleExport(format, mimetype);
     }
 }
 
@@ -339,7 +345,7 @@ const processNotebookForExport = (notebookData: any) => {
             return cell;
         });
     }
-    
+
     if (clonedNotebook.content && clonedNotebook.content.cells && Array.isArray(clonedNotebook.content.cells)) {
         clonedNotebook.content.cells = clonedNotebook.content.cells.map((cell: any) => {
             // handle query cells with flattened=true metadata - remove events array
@@ -370,7 +376,11 @@ const refreshExportTypes = async () => {
         return true
     }).map(([format, formatInfo]) => {
         const mimetype = formatInfo.output_mimetype;
-        const label = format === "streamline" ? "notebook (AI ✨)" : format;
+        const labelMap = {
+            streamline: "notebook (AI ✨)",
+            full_context_notebook: "notebook (full agent context)",
+        }
+        const label = labelMap[format] ?? format;
         return {
             label,
             tooltip: mimetype,
@@ -455,7 +465,7 @@ function downloadNotebook() {
     const processedNotebookData = processNotebookForExport(notebook.notebook);
     const tempNotebook = new BeakerNotebook();
     tempNotebook.fromJSON(processedNotebookData);
-    
+
     if (tempNotebook.content.cells && Array.isArray(tempNotebook.content.cells)) {
         tempNotebook.content.cells = tempNotebook.content.cells.map((cell: any) => {
             if (cell.cell_type === 'raw') {
@@ -474,7 +484,7 @@ function downloadNotebook() {
 
     const exportNotebook = tempNotebook.toIPynb();
 
-    const data = JSON.stringify(exportNotebook, null, 2);
+    const data = new Blob([JSON.stringify(exportNotebook, null, 2)]);
 
     const filename = `Beaker-Notebook_${getDateTimeString()}.ipynb`;
     const mimeType = 'application/x-ipynb+json';
@@ -515,7 +525,7 @@ function downloadNotebook() {
         align-items: center;
         gap: 0.5rem;
         margin-left: 0.75rem;
-        
+
         .truncate-label {
             font-size: 0.875rem;
             color: var(--p-text-color);

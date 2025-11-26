@@ -2,7 +2,7 @@
   "extends": "@vue/tsconfig/tsconfig.lib.json",
   "compilerOptions": {
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "target": "ESNext",
     "strict": false,
     "jsx": "preserve",
@@ -26,17 +26,11 @@
   },
 
   "include": [
+    "node_modules/vue/jsx.d.ts",
     "env.d.ts",
-    "src/components/**/*.ts",
-    "src/components/**/*.tsx",
-    "src/components/**/*.vue",
-    "src/directives/**/*.ts",
-    "src/directives/**/*.tsx",
-    "src/directives/**/*.vue",
-    "src/plugins/**/*.ts",
-    "src/plugins/**/*.tsx",
-    "src/plugins/**/*.vue",
-    "src/util/**/*.ts"
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.vue"
   ],
   "exclude": [
     "node_modules/**"

@@ -16,7 +16,7 @@ export default defineConfigWithVueTs(
     files: ['**/*.{ts,mts,tsx,vue}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**', 'extractRoutes.ts']),
+  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
 
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
@@ -39,5 +39,16 @@ export default defineConfigWithVueTs(
       'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
       'no-debugger': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
     },
+  },
+
+  {
+    // Ignore errors/warnings around using require() to import since the .ts files in utils/
+    // are actually node scripts rather than intended for bundling.
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "ts(80005)": "off",
+    },
+    files: ['utils/**/*.ts']
   }
+
 )

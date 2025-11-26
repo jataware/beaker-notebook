@@ -134,8 +134,13 @@ class BeakerContext:
                     self.attach_workflow(workflow_id)
         if not self.workflows:
             logger.warning("Context has no workflows: disabling tools.")
-            self.agent.disable("attach_workflow")
-            self.agent.disable("mark_workflow_stage")
+            workflow_tools = [
+                "attach_workflow",
+                "update_workflow_stage",
+                "update_workflow_output"
+            ]
+            for workflow_tool in workflow_tools:
+                self.agent.disable(workflow_tool)
 
     def __init_subclass__(cls):
         subclass_autocontext = getattr(cls, "auto_context", None)
@@ -183,6 +188,10 @@ class BeakerContext:
         if callable(getattr(self.agent, 'setup', None)):
             await self.agent.setup(self.config["context_info"], parent_header=parent_header)
 
+        preamble = await self.default_preamble()
+        if preamble:
+            self.agent.chat_history.set_user_preamble_text(preamble)
+
     def cleanup(self):
         self.subkernel.cleanup()
         for msg_type, intercept_func, stream in self.intercepts:
@@ -194,6 +203,9 @@ class BeakerContext:
             msg_type, stream = getattr(method, "_intercept")
             self.intercepts.append((msg_type, method, stream))
             self.beaker_kernel.add_intercept(msg_type=msg_type, func=method, stream=stream)
+
+    async def default_preamble(self) -> Optional[str]:
+        return None
 
     async def auto_context(self):
         parts = []
@@ -240,25 +252,56 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         return content
 
     def get_subkernel(self):
-        config = beaker_config
-        language = self.config.get("language", "python3")
-        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{language}`")
-        kernel_opts = {
-            subkernel.KERNEL_NAME: subkernel
-            for subkernel in autodiscover("subkernels").values()
-        }
-        subkernel_opts = {
-            subkernel.SLUG: subkernel
-            for subkernel in autodiscover("subkernels").values()
-        }
-        if language not in kernel_opts and language in subkernel_opts:
-            language = subkernel_opts[language].KERNEL_NAME
+        language = self.config.get("language", None)
+        subkernel_slug = self.config.get("subkernel", None)
 
-        url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
+        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{subkernel_slug}`")
+        if not subkernel_slug and language:
+            kernel_opts = {
+                subkernel.KERNEL_NAME: subkernel
+                for subkernel in autodiscover("subkernels").values()
+            }
+            subkernel_opts = {
+                subkernel.SLUG: subkernel
+                for subkernel in autodiscover("subkernels").values()
+            }
+            if language not in kernel_opts and language in subkernel_opts:
+                language = subkernel_opts[language].KERNEL_NAME
+            subkernel_slug = language
+
+        subkernels = autodiscover("subkernels")
+        subkernel_by_lang = {
+           sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
+        }
+
+        urlbase = self.beaker_kernel.jupyter_server
+
+        kernelspec_req = requests.get(
+            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_slug}"),
+            headers={
+                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
+            },
+        )
+        if kernelspec_req.status_code == 400:
+            raise ValueError(f"Can't find kernelspec for {subkernel_slug}")
+        elif kernelspec_req.status_code >= 500:
+            raise RuntimeError(f"Error fetching kernelspec for {subkernel_slug}: {kernelspec_req.json()}")
+
+        kernelspec = kernelspec_req.json()
+        kernel_lang = kernelspec.get('spec', {}).get("language", None)
+        subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
+
+        # url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
+        url = urllib.parse.urljoin(urlbase, "/api/kernels")
+        path = self.beaker_kernel.session_config.get("beaker_session", None)
+        if path is None:
+            path = self.beaker_kernel.session_config.get("jupyter_session", "")
         res = requests.post(
             url,
-            json={"name": language, "path": ""},
-            headers={"Authorization": f"token {config.jupyter_token}"},
+            json={"name": subkernel_slug, "path": path},
+            headers={
+                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
+            },
         )
         kernel_info = res.json()
         self.beaker_kernel.update_running_kernels()
@@ -271,7 +314,9 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             raise ValueError("Unknown kernel " + subkernel_id)
         if kernels[matching] == self.beaker_kernel.server.config:
             raise ValueError("Refusing loopback connection")
-        subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
+
+        # subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
+        subkernel = subkernel_cls(subkernel_id, kernels[matching], self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
 
@@ -346,6 +391,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         payload = {
             "language": self.subkernel.DISPLAY_NAME,
             "subkernel": self.subkernel.KERNEL_NAME,
+            "subkernel_kernel": self.config.get("subkernel", None),
             "actions": action_details,
             "custom_messages": custom_messages,
             "procedures": list(self.templates.keys()),
@@ -484,15 +530,95 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         """
         Returns all of the history for the LLM agent.
         """
-        kernel_state_future = self.get_subkernel_state()
-        notebook_state_future = self.beaker_kernel.request_notebook_state(parent_message=message)
-        kernel_state, notebook_state = await asyncio.gather(kernel_state_future, notebook_state_future)
-        with self.prepare_state(kernel_state, notebook_state):
-            agent_messages = await self.agent.all_messages()
-            json_messages = [msg.model_dump_json() for msg in agent_messages]
-            return json_messages
+        ## Handling de/serialization of langchain messages should live in Archytas instead.
+        from langchain_core.load import dumps
+
+        # kernel_state_future = self.get_subkernel_state()
+        # notebook_state_future = self.beaker_kernel.request_notebook_state(parent_message=message)
+        # kernel_state, notebook_state = await asyncio.gather(kernel_state_future, notebook_state_future)
+        # with self.prepare_state(kernel_state, notebook_state):
+
+        # auto_context will be set by the agent - only rehydrate system + user/AI messages
+        # otherwise `await self.agent.all_messages()` would be easy here
+        messages = []
+        if self.agent.chat_history.system_message:
+            messages.append(dumps(self.agent.chat_history.system_message.message))
+
+        for record in self.agent.chat_history.raw_records:
+            history_message = record.message
+            messages.append(dumps(history_message))
+
+        return messages
     get_agent_history._default_payload = '{}'
 
+    @action()
+    async def set_agent_history(self, message):
+        """
+        Sets the message history of the agent to the contents of the message,
+        updating chat history as well.
+        """
+        from langchain_core.load import loads
+        from archytas.chat_history import ChatHistory
+
+        system = message.content.pop(0)
+        history_messages = [loads(history_message)
+                            for history_message in message.content]
+        self.agent.chat_history = ChatHistory(history_messages)
+        self.agent.chat_history.set_system_message(loads(system))
+
+        if getattr(self, "auto_context", None) is not None:
+            self.agent.set_auto_context("Default context", self.auto_context)
+            self.agent.chat_history.auto_context_message._model = self.agent.model
+            # ensure hashes don't align and content updates
+            self.agent.chat_history.auto_context_message.content = ""
+            await self.agent.chat_history.auto_context_message.update_content()
+        await self.agent.chat_history.token_estimate(model=self.agent.model)
+        await self.beaker_kernel.send_chat_history(parent_header=message.header)
+
+    get_agent_history._default_payload = '{}'
+
+    @action()
+    async def set_user_preamble(self, message):
+        content = message.content
+        new_message_text: str = content.get("message_text", "")
+
+        if not self.agent or not self.agent.chat_history:
+            self.send_response(
+                stream="iopub",
+                msg_or_type="stream",
+                content={
+                    "name": "stderr",
+                    "text": "Error: No active context or chat history available"
+                },
+                parent_header=message.header,
+            )
+            return {"success": False, "error": "No active context"}
+
+        # Create a HumanMessage and add it to chat history
+        preamble_text = new_message_text.strip()
+        self.agent.chat_history.set_user_preamble_text(preamble_text)
+
+        # Send success response
+        self.send_response(
+            stream="iopub",
+            msg_or_type="stream",
+            content={
+                "name": "stdout",
+                "text": f"Message added to chat history: {new_message_text.strip()}"
+            },
+            parent_header=message.header,
+        )
+
+        # Send updated chat history
+        await self.beaker_kernel.send_chat_history(message.header)
+
+        return {"success": True, "message": "Message added to chat history"}
+
+    set_user_preamble._default_payload = """\
+{
+    "message_text": ""
+}
+"""
 
     @action(default_payload='{}')
     async def get_preview(self, message):

@@ -1,15 +1,19 @@
 {
   "name": "beaker-kernel",
-  "version": "1.13.0",
+  "version": "1.14.0",
+  "type": "module",
   "description": "Beaker kernel library",
   "repository": {
     "url": "git+https://github.com/jataware/beaker-kernel.git"
   },
   "scripts": {
-    "build": "tsc"
+    "build": "run-s type-check build-lib",
+    "build-lib": "vite build",
+    "type-check": "tsc --noEmit"
   },
-  "main": "dist/",
-  "types": "dist/",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
     "dist/",
     "src/"
@@ -27,6 +31,9 @@
     "@types/json-schema": "^7.0.15",
     "@types/node-fetch": "^2.6.6",
     "@types/uuid": "^9.0.7",
-    "typescript": "^5.8.0"
+    "npm-run-all2": "^7.0.2",
+    "typescript": "^5.8.0",
+    "vite": "^7.1.5",
+    "vite-plugin-dts": "^4.5.4"
   }
 }

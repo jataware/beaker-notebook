@@ -41,9 +41,9 @@ const output = Object.fromEntries(routes.map((route) => [
 
 const routeJson = JSON.stringify(output, undefined, 2);
 
-console.log("Writing route json files...");
-console.log("  dist/routes.json");
-fs.writeFileSync(path.resolve('dist/routes.json'), routeJson);
-console.log("  dist/html/routes.json");
-fs.writeFileSync(path.resolve('dist/html/routes.json'), routeJson);
+console.log("Writing route json file(s)...");
+// console.log("  dist/routes.json");
+// fs.writeFileSync(path.resolve('dist/routes.json'), routeJson);
+console.log("  html/routes.json");
+fs.writeFileSync(path.resolve('html/routes.json'), routeJson);
 console.log("Done.")

@@ -145,6 +145,7 @@ import Select from 'primevue/select';
 import Toast from 'primevue/toast';
 import { useConfirm } from 'primevue/useconfirm';
 import { useToast } from 'primevue/usetoast';
+import { fetch } from '@/util/fetch';
 
 const props = defineProps([
   "config"

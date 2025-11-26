@@ -360,7 +360,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
             os.makedirs(resource_location)
         resource_path = resource_location / (resource.filepath or resource.name)
         if action in ["add", "update"]:
-            resource_path.write_text(spec.to_yaml())
+            resource_path.write_text(resource.content or "")
         elif action == "remove":
             os.remove(resource_path)
 

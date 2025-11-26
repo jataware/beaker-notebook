@@ -1,3 +1,15 @@
+export { default as BeakerHeader } from './BeakerHeader.vue';
 export { default as CodeEditor } from './CodeEditor.vue';
+export { default as ConfigEntryComponent } from './ConfigEntryComponent.vue';
 export { default as ContainedTextArea } from './ContainedTextArea.vue';
+export { default as DebugLogMessage } from './DebugLogMessage.vue';
+export { default as FooterDrawer } from './FooterDrawer.vue';
+export { default as InlineInput } from './InlineInput.vue';
+export { default as IntegrationEditor } from './IntegrationEditor.vue';
+export { default as JSONMessage } from './JSONMessage.vue';
+export { default as OpenNotebookButton } from './OpenNotebookButton.vue';
+export { default as ProviderSelector } from './ProviderSelector.vue';
+export { default as StreamlineExportDialog } from './StreamlineExportDialog.vue';
 export { default as SvgPlaceholder } from './SvgPlaceholder.vue';
+export { default as WorkflowSelectDialog } from './WorkflowSelectDialog.vue';
+export { default as AnnotationButton } from './buttons/AnnotationButton.vue';

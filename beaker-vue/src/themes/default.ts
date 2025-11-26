@@ -92,6 +92,85 @@ const BeakerTheme: Preset = definePreset(Aura, {
     },
     css: ({dt}) => `
 :root {
+  font-family:Lato, Helvetica, sans-serif;
+  --font-family:Lato, Helvetica, sans-serif;
+  font-size: 12pt;
+  font-weight: 400;
+}
+
+/* lato-300 - latin-ext_latin */
+@font-face {
+  font-family: "Lato";
+  font-style: normal;
+  font-weight: 300;
+  src: local("Lato Light"), local("Lato-Light"), url("/themes/fonts/lato-v17-latin-ext_latin-300.woff2") format("woff2"), url("/themes/fonts/lato-v17-latin-ext_latin-300.woff") format("woff");
+  /* Chrome 6+, Firefox 3.6+, IE 9+, Safari 5.1+ */
+}
+/* lato-regular - latin-ext_latin */
+@font-face {
+  font-family: "Lato";
+  font-style: normal;
+  font-weight: 400;
+  src: local("Lato Regular"), local("Lato-Regular"), url("/themes/fonts/lato-v17-latin-ext_latin-regular.woff2") format("woff2"), url("/themes/fonts/lato-v17-latin-ext_latin-regular.woff") format("woff");
+  /* Chrome 6+, Firefox 3.6+, IE 9+, Safari 5.1+ */
+}
+/* lato-700 - latin-ext_latin */
+@font-face {
+  font-family: "Lato";
+  font-style: normal;
+  font-weight: 700;
+  src: local("Lato Bold"), local("Lato-Bold"), url("/themes/fonts/lato-v17-latin-ext_latin-700.woff2") format("woff2"), url("/themes/fonts/lato-v17-latin-ext_latin-700.woff") format("woff");
+  /* Chrome 6+, Firefox 3.6+, IE 9+, Safari 5.1+ */
+}
+
+@font-face {
+  font-family: 'Ubuntu Mono';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ubuntumono/v19/KFOhCneDtsqEr0keqCMhbCc_CsE.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Ubuntu Mono';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ubuntumono/v19/KFO8CneDtsqEr0keqCMhbCc_Mn33tYg.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Ubuntu Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ubuntumono/v19/KFOjCneDtsqEr0keqCMhbBc9.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Ubuntu Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ubuntumono/v19/KFO-CneDtsqEr0keqCMhbC-BL-Hy.ttf) format('truetype');
+}
+
+.monospace {
+  font-family: 'Ubuntu Mono', 'Courier New', Courier, monospace;
+}
+
+.pre {
+    white-space: pre-wrap;
+}
+
+.p-button-icon.beaker-zoom {
+    &::after {
+        content: "\e908";
+        font-size: 50%;
+        position: absolute;
+        right: 38%;
+        top: 45%;
+    }
+}
+
+:root {
     /* Define missing CSS custom properties for backward compatibility */
     --highlight-text-color: ${dt('primary.color')};
     --text-color: ${dt('text.color')};

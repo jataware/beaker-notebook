@@ -1,17 +1,14 @@
-import os
-
-from beaker_kernel.service.base import BaseBeakerServerApp, logger
+from beaker_kernel.service.base import BaseBeakerApp
 
 
-def _jupyter_server_extension_points():
-    return [{"module": "beaker_kernel.service.server", "app": BeakerServerApp}]
-
-
-class BeakerServerApp(BaseBeakerServerApp):
-    log_requests = True
-    app_traits = {
-        "allow_root": True,
+class BeakerServerApp(BaseBeakerApp):
+    defaults = {
+        "log_requests": True,
         "ip": "0.0.0.0",
+        "allow_root": True,
+        "MultiKernelManager": {
+            "cull_idle_timeout": 3600,
+        }
     }
 
 

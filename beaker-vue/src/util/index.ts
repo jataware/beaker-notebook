@@ -33,18 +33,15 @@ export function getDateTimeString() {
 /**
  *
  **/
-export function downloadFileDOM(data: string, filename: string, mimeType: string) {
-    const rawData = null;
-    const blob = new Blob([data], {type: mimeType});
-
+export function downloadFileDOM(data: Blob, filename: string, mimeType: string) {
     const nav = (window.navigator as any);
 
     if (nav.msSaveOrOpenBlob) {
-        nav.msSaveBlob(blob, filename);
+        nav.msSaveBlob(data, filename);
     }
     else {
         const elem = window.document.createElement('a');
-        elem.href = window.URL.createObjectURL(blob);
+        elem.href = window.URL.createObjectURL(data);
         elem.download = filename;
         document.body.appendChild(elem);
         elem.click();
@@ -131,3 +128,7 @@ export function atEndOfInput(input: object) {
     }
     return false;
 }
+
+export * from './annotations';
+export * from './autocomplete';
+export * from './integration';

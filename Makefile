@@ -7,13 +7,13 @@ init:
 
 .PHONY:build
 build:
-	rm -r beaker-ts/dist/* beaker-vue/dist/* beaker_kernel/service/ui/* || true
+	rm -r beaker-ts/dist/* beaker-vue/dist/* beaker-vue/html/* beaker_kernel/service/ui/* || true
 	make beaker_kernel/service/ui/index.html
 	hatch build
 
 .PHONY:clean
 clean:
-	rm -r beaker-ts/dist/* beaker-vue/dist/* build/* dist/* beaker_kernel/service/ui/* || true
+	rm -r beaker-ts/dist/* beaker-vue/dist/* beaker-vue/html/* build/* dist/* beaker_kernel/service/ui/* || true
 
 
 .PHONY:docs-up
@@ -45,7 +45,7 @@ beaker-vue/node_modules:beaker-vue/package*.json
 beaker_kernel/service/ui/index.html:beaker-vue/node_modules beaker-vue/**
 	(cd beaker-ts/ && npm install && npm run build) && \
 	(cd beaker-vue/ && npm install && npm run build) && \
-	rsync -r --exclude="*.map" beaker-vue/dist/html/* beaker_kernel/service/ui/
+	rsync -r --exclude="*.map" beaker-vue/html/* beaker_kernel/service/ui/
 	#rm -r beaker_kernel/service/ui/* || true; \
 
 .PHONY:changed-files
