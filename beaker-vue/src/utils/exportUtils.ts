@@ -248,13 +248,35 @@ export class DocumentExporter {
         break;
 
       case 'p':
-        const textRuns = this.extractFormattedTextRuns(element);
-        if (textRuns.length > 0) {
-          elements.push(new Paragraph({
-            children: textRuns,
-            style: "Normal",
-            spacing: { before: 120, after: 120 }
-          }));
+        // Check if paragraph contains images (common with markdown-rendered images)
+        const imagesInParagraph = element.querySelectorAll('img');
+        if (imagesInParagraph.length > 0) {
+          // Process all images in the paragraph
+          for (const img of Array.from(imagesInParagraph)) {
+            await this.processImageElement(img as HTMLImageElement, elements);
+          }
+          // Then process any remaining text content (excluding images)
+          const textContent = element.cloneNode(true) as Element;
+          const imgClones = textContent.querySelectorAll('img');
+          imgClones.forEach(img => img.remove());
+          const textRuns = this.extractFormattedTextRuns(textContent);
+          if (textRuns.length > 0) {
+            elements.push(new Paragraph({
+              children: textRuns,
+              style: "Normal",
+              spacing: { before: 120, after: 120 }
+            }));
+          }
+        } else {
+          // No image, process as normal paragraph
+          const textRuns = this.extractFormattedTextRuns(element);
+          if (textRuns.length > 0) {
+            elements.push(new Paragraph({
+              children: textRuns,
+              style: "Normal",
+              spacing: { before: 120, after: 120 }
+            }));
+          }
         }
         break;
 

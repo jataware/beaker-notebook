@@ -45,7 +45,7 @@ const finalResponse = computed(() => {
         response = "### No workflow output yet\nThis panel will be populated as the workflow stages complete."
     }
     response = response.split('\n').filter(line => !line.match(/^[|\s]+$/)).join('\n');
-    let parsedResponse = marked.parse(response);
+    const parsedResponse = marked.parse(response);
     
     return parsedResponse;
 });
@@ -155,17 +155,18 @@ const handleImageClick = (event: MouseEvent) => {
     }
 
     .export-button-text {
+        display: inline;
         transition: opacity 0.3s;
     }
 }
 
-:global(.sidemenu.right) {
-    &:has(.workflow-container) {
-        container-type: inline-size;
-    }
+.workflow-container {
+    container-type: inline-size;
+    container-name: workflow-panel;
 }
 
-@container (max-width: 600px) {
+// Hide text when container is narrow (less space)
+@container workflow-panel (max-width: 600px) {
     .export-button {
         padding: 0.5rem;
         
@@ -175,15 +176,12 @@ const handleImageClick = (event: MouseEvent) => {
     }
 }
 
-.sidemenu.right {
-    &[style*="width: 1"] .export-button .export-button-text,
-    &[style*="width: 2"] .export-button .export-button-text {
-        display: none;
-    }
-    
-    &[style*="width: 1"] .export-button,
-    &[style*="width: 2"] .export-button {
-        padding: 0.5rem;
+// Keep text visible for all other sizes (medium and large)
+@container workflow-panel (min-width: 601px) {
+    .export-button {
+        .export-button-text {
+            display: inline;
+        }
     }
 }
 
