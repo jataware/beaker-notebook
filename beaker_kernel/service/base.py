@@ -133,7 +133,7 @@ class BeakerSessionManager(SessionManager):
         user: BeakerUser = current_user.get()
         logger.debug(f"start_kernel_for_session: user={user}, user_type={user.__class__.__name__ if user else None}")
 
-        if user:
+        if isinstance(user, BeakerUser):
             virtual_home_root = self.parent.virtual_home_root
             virtual_home_dir = os.path.join(virtual_home_root, user.home_dir)
             logger.debug(f"Setting up virtual home directory: {virtual_home_dir}")
@@ -330,7 +330,7 @@ class CreateSessionWithContextHandler(APIHandler):
 
         try:
             session = await self.session_manager.create_session(**session_kwargs)
-            
+
             # Move context from 'next' to session_id for more reliable matching
             if (context or context_info or language) and hasattr(self.kernel_manager, '_pending_kernel_context'):
                 session_id = session.get('id')
@@ -403,7 +403,7 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             kwargs["beaker_session"] = beaker_session
         if jupyter_session:
             kwargs["jupyter_session"] = jupyter_session
-        
+
         # Check if there's a session-specific context stored in the mapping manager
         session_context = None
         if hasattr(self.parent, '_current_context') and self.parent._current_context:
@@ -545,7 +545,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     def cwd_for_path(self, path, **kwargs):
         user: BeakerUser = current_user.get()
-        if user:
+        if isinstance(user, BeakerUser):
             user_home = self.get_home_for_user(user)
             return super().cwd_for_path(user_home, **kwargs)
         else:
@@ -556,12 +556,12 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     async def _async_start_kernel(self, *, kernel_id = None, path = None, **kwargs):
         kwargs.setdefault('session_path', path)
-        
+
         # check for pending context for this session
         context_dict = None
         session_id = kwargs.pop('session_id', None)
         session_path = kwargs.get('session_path', path)
-        
+
         # Try to find context by session_id first (most reliable)
         if session_id and session_id in self._pending_kernel_context:
             context_dict = self._pending_kernel_context.pop(session_id)
@@ -571,20 +571,20 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
         elif 'next' in self._pending_kernel_context:
             # Use 'next' as last resort fallback
             context_dict = self._pending_kernel_context.pop('next')
-        
+
         # store context temporarily so BeakerKernelManager.write_connection_file can access it
         if context_dict:
             self._current_context = context_dict
         else:
             self._current_context = None
-        
+
         try:
             result = await super()._async_start_kernel(kernel_id=kernel_id, path=path, **kwargs)
             return result
         finally:
             # clean up the temporary context after kernel startup
             self._current_context = None
-    
+
     start_kernel = _async_start_kernel
 
     def pre_start_kernel(self, kernel_name: str, kwargs: dict):
