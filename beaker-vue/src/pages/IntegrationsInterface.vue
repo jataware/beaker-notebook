@@ -233,6 +233,21 @@ const fetchIntegrations = async () => {
     integrations.value.finishedInitialLoad = true;
 }
 
+const activeContext = computed(() => {
+    const contextInfo = beakerSession?.value?.activeContext;
+    const kernelInfo = beakerSession?.value?.session.kernelInfo;
+    console.log(contextInfo, kernelInfo)
+    return {
+        ...contextInfo,
+        kernelInfo,
+    };
+});
+
+watch(activeContext, async () => {
+    await fetchIntegrations();
+});
+
+
 const modifySelectedIntegration = async (body: object, integrationId?: string) => {
     if (integrationId) {
         integrations.value.integrations[integrationId] = await updateIntegration(
