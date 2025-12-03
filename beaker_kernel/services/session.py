@@ -106,7 +106,8 @@ class BeakerSessionManager(SessionManager):
             subkernel_user = self.parent.subkernel_user
             if not os.path.isdir(virtual_home_dir):
                 os.makedirs(virtual_home_dir, exist_ok=True)
-                shutil.chown(virtual_home_dir, user=subkernel_user, group=subkernel_user)
+                if subkernel_user != self.parent.service_user:
+                    shutil.chown(virtual_home_dir, user=subkernel_user, group=subkernel_user)
             path = os.path.relpath(virtual_home_dir, self.kernel_manager.root_dir)
 
         kernel_env = self.get_kernel_env(path, name)

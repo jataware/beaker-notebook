@@ -213,27 +213,15 @@ class BaseBeakerApp(ServerApp):
 
     @traitlets.default('agent_user')
     def _default_agent_user(self):
-        if self.service_user == "root":
-            agent_user = os.environ.get("BEAKER_AGENT_USER", None)
-            if agent_user is None:
-                raise RuntimeError("When running as root, BEAKER_AGENT_USER environment variable must be set.")
-            return agent_user
-        else:
-            return os.environ.get("BEAKER_AGENT_USER", self.service_user)
+        return os.environ.get("BEAKER_AGENT_USER", self.service_user)
 
     @traitlets.default('subkernel_user')
     def _default_subkernel_user(self):
-        if self.service_user == "root":
-            subkernel_user = os.environ.get("BEAKER_SUBKERNEL_USER", None)
-            if subkernel_user is None:
-                raise RuntimeError("When running as root, BEAKER_SUBKERNEL_USER environment variable must be set.")
-            return subkernel_user
-        else:
-            return os.environ.get("BEAKER_SUBKERNEL_USER", self.service_user)
+        return os.environ.get("BEAKER_SUBKERNEL_USER", self.service_user)
 
     @traitlets.default('working_dir')
     def _default_working_dir(self):
-        if self.service_user == "root":
+        if self.service_user == "root" and self.subkernel_user != "root":
             return os.path.expanduser(f"~{self.subkernel_user}")
         else:
             return os.getcwd()
