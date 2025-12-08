@@ -1,17 +1,57 @@
+import datetime
+import json
 import os
 import pwd
 import shutil
 import signal
-from typing import Optional, cast
+from typing import Optional, cast, TYPE_CHECKING
 
 import traitlets
-from traitlets import Unicode, Integer, Float
+from traitlets import Unicode, Integer, Float, Instance, Type, default
+from jupyter_client.connect import KernelConnectionInfo
 from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.config import config
 from beaker_kernel.services.auth import current_user, BeakerUser
+from beaker_kernel.services.datastore import DatastoreTable, Column, ColumnType
+
+if TYPE_CHECKING:
+    from beaker_kernel.app.base import BaseBeakerApp
+
+class KernelTable(DatastoreTable):
+    name = "kernels"
+    columns = [
+        # Identity
+        Column(name="kernel_id", column_type=ColumnType.TEXT, primary_key=True),
+        Column(name="kernel_name", column_type=ColumnType.TEXT, allow_null=False),  # renamed from 'name'
+        Column(name="user_id", column_type=ColumnType.TEXT),
+
+        # Sessions (Beaker-specific)
+        Column(name="beaker_session", column_type=ColumnType.TEXT, allow_null=True),
+        Column(name="jupyter_session", column_type=ColumnType.TEXT, allow_null=True),
+
+        # Kernel configuration
+        Column(name="connection_info", column_type=ColumnType.JSON, allow_null=False),
+        Column(name="path", column_type=ColumnType.TEXT),  # API path
+        Column(name="cwd", column_type=ColumnType.TEXT, allow_null=True),  # actual working directory
+
+        # State tracking
+        Column(name="execution_state", column_type=ColumnType.TEXT, allow_null=False, default_value="starting"),
+        Column(name="last_activity", column_type=ColumnType.DATETIME, allow_null=False),
+        Column(name="connections", column_type=ColumnType.INTEGER, default_value=0),
+        Column(name="reason", column_type=ColumnType.TEXT, allow_null=True),
+        Column(name="autorestart", column_type=ColumnType.BOOLEAN, default_value=True),
+
+        # Timestamps
+        Column(name="started_at", column_type=ColumnType.DATETIME, allow_null=False),
+        Column(name="last_restart_time", column_type=ColumnType.DATETIME, allow_null=True),
+        Column(name="restart_count", column_type=ColumnType.INTEGER, default_value=0),
+
+        # Catch-all
+        Column(name="metadata", column_type=ColumnType.JSON),
+    ]
 
 
 class BeakerKernelManager(AsyncIOLoopKernelManager):
@@ -47,6 +87,12 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             The server application instance
         """
         return self.parent.parent
+
+    @classmethod
+    def from_record(cls, record):
+        """Rehydrates a KernelManager from a record stored in the DB"""
+        return cls.__init__()
+
 
     def write_connection_file(self, **kwargs: object) -> None:
         """Write kernel connection file with Beaker-specific context.
@@ -163,6 +209,72 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
         help="Timeout in seconds for culling idle kernels",
         config=True
     )
+
+    kernel_table_class = Type(
+        default_value=KernelTable,
+        klass=DatastoreTable,
+    )
+    kernel_table = Instance(
+        klass=DatastoreTable,
+    )
+
+    @default("kernel_table")
+    def _default_kernel_table(self):
+        return self.kernel_table_class(datastore=self.parent.datastore)
+
+    @property
+    def _kernels(self):
+        records = self.kernel_table.all()
+        # kms = [
+        #     self.kernel_manager_class.from_record(record)
+        #     for record in records
+        #     if self.is_alive(record["kernel_id"])
+        # ]
+        kms = {}
+        for record in records:
+                # for connection_file in list(self.kernel_id_to_connection_file.values()):
+                #     if connection_file not in connection_files:
+                #         kernel_id = k[v.index(connection_file)]
+                #         del self.kernel_id_to_connection_file[kernel_id]
+                #         del self._kernels[kernel_id]
+
+                # # add kernels (whose connection file appeared) to our list
+                # for connection_file in connection_files:
+                #     if connection_file in self.kernel_id_to_connection_file.values():
+                #         continue
+                #     try:
+                #         connection_info: KernelConnectionInfo = json.loads(
+                #             connection_file.read_text()
+                #         )
+                #     except Exception:  # noqa: S112
+                #         continue
+                #     self.log.debug("Loading connection file %s", connection_file)
+                #     if not ("kernel_name" in connection_info and "key" in connection_info):
+                #         continue
+                #     # it looks like a connection file
+                #     kernel_id = self.new_kernel_id()
+                #     self.kernel_id_to_connection_file[kernel_id] = connection_file
+            kernel_id = record.pop("kernel_id")
+            connection_info: KernelConnectionInfo = json.loads(record["connection_info"])
+
+            km: BeakerKernelManager = self.kernel_manager_factory(
+                parent=self,
+                log=self.log,
+                owns_kernel=False,
+            )
+            km.load_connection_info(connection_info)
+            km.last_activity = datetime.datetime.now(tz=datetime.UTC)
+            km.execution_state = "idle"
+            km.connections = 1
+            km.kernel_id = kernel_id
+            km.kernel_name = record["kernel_name"]
+            km.ready.set_result(None)
+
+            km.user_id = record["user_id"]
+            km.session = record["jupyter_session"]
+            km.reason = record["reason"]
+            kms[kernel_id] = km
+        return kms
 
     def __init__(self, **kwargs):
         """Initialize BeakerKernelMappingManager.

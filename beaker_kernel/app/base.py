@@ -67,6 +67,11 @@ class BaseBeakerApp(ServerApp):
         help="Path pointing to where user directories should be stored. Defaults to 'root_dir' if not set.",
         config=True,
     )
+    datastore_class = traitlets.Type(
+        "beaker_kernel.services.datastore.sqlite.Sqlite3Datastore",
+        klass="beaker_kernel.services.datastore.BeakerDatastore",
+        config=True,
+    )
 
     kernel_spec_include_local = traitlets.Bool(True, help="Include local kernel specs", config=True)
     kernel_spec_managers = traitlets.Dict(help="Kernel specification managers indexed by extension name", config=True)
@@ -156,6 +161,11 @@ class BaseBeakerApp(ServerApp):
             parent=self,
             # contents_manager=self.contents_manager
         )
+        self.datastore = self.datastore_class(
+            parent=self,
+        )
+        self.log.info(f"Initialized datastore: {self.datastore.__class__.__name__}")
+
 
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):
         super().initialize(argv, find_extensions, new_httpserver, starter_extension)
