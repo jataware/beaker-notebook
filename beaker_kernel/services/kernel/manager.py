@@ -363,7 +363,7 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     def cwd_for_path(self, path, **kwargs):
         user: BeakerUser = current_user.get()
-        if user:
+        if isinstance(user, BeakerUser):
             user_home = self.get_home_for_user(user)
             return super().cwd_for_path(user_home, **kwargs)
         else:

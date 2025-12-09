@@ -72,6 +72,87 @@ def request_log_handler(handler: JupyterHandler):
     )
 
 
+class XSRFTokenHandler(JupyterHandler):
+    """
+    Handler to retrieve XSRF token for client-side requests.
+
+    GET /api/xsrf-token returns the XSRF token that should be included
+    in POST/PUT/DELETE requests via X-XSRFToken header or _xsrf field.
+    """
+
+    @web.authenticated
+    async def get(self):
+        """GET /api/xsrf-token - Get XSRF token for authenticated requests"""
+        self.finish({
+            'token': self.xsrf_token.decode('utf-8'),
+            'user': self.current_user.username if hasattr(self.current_user, 'username') else None,
+        })
+
+
+class CreateSessionWithContextHandler(JupyterHandler):
+    """
+    Custom handler for creating sessions with context parameters.
+
+    Handles POST /api/sessions/create-with-context endpoint.
+    Accepts context, context_info, and language parameters and creates a session
+    with those parameters pre-configured.
+    """
+
+    @web.authenticated
+    async def post(self):
+        """POST /api/sessions/create-with-context - Create a new session with context"""
+        model = self.get_json_body()
+
+        if model is None:
+            raise web.HTTPError(400, "No JSON body provided")
+
+        context = model.get('context')
+        context_info = model.get('context_info')
+        language = model.get('language', 'python3')
+
+        session_kwargs = {
+            'path': model.get('path', ''),
+            'name': model.get('name', ''),
+            'type': model.get('type', ''),
+            'kernel_name': model.get('kernel', {}).get('name'),
+            'kernel_id': model.get('kernel', {}).get('id'),
+        }
+
+        if context or context_info or language:
+            context_dict = {
+                'default_context': context,
+                'default_context_payload': context_info or {},
+                'language': language,
+            }
+            # Store in kernel manager's pending context
+            # Use 'next' as temporary key, will be moved to session_id after session creation
+            if hasattr(self.kernel_manager, '_pending_kernel_context'):
+                self.kernel_manager._pending_kernel_context['next'] = context_dict
+
+        try:
+            session = await self.session_manager.create_session(**session_kwargs)
+
+            # Move context from 'next' to session_id for more reliable matching
+            if (context or context_info or language) and hasattr(self.kernel_manager, '_pending_kernel_context'):
+                session_id = session.get('id')
+                if session_id and 'next' in self.kernel_manager._pending_kernel_context:
+                    context_dict = self.kernel_manager._pending_kernel_context.pop('next')
+                    self.kernel_manager._pending_kernel_context[session_id] = context_dict
+
+            location = f"/api/sessions/{session['id']}"
+            self.set_header('Location', location)
+            self.set_header('Content-Type', 'application/json')
+            self.set_status(201)
+            self.finish(json.dumps(session, default=str))
+
+        except Exception as e:
+            # Clean up pending context if session creation fails
+            if (context or context_info or language) and hasattr(self.kernel_manager, '_pending_kernel_context'):
+                self.kernel_manager._pending_kernel_context.pop('next', None)
+            logger.error(f"Error creating session with context: {e}", exc_info=True)
+            raise web.HTTPError(500, str(e)) from e
+
+
 class PageHandler(StaticFileHandler):
     """
     Special handler that returns UI pages dynamically defined by the UI.
@@ -605,4 +686,9 @@ def register_handlers(app: ServerApp):
     app.handlers.append((r"/(favicon.ico|beaker.svg)$", StaticFileHandler, {"path": Path(app.ui_path)}))
     app.handlers.append((r"/export/(?P<format>\w+)", ExportAsHandler)),
     app.handlers.append((r"/((?:static|themes)/.*)", StaticFileHandler, {"path": Path(app.ui_path)})),
+
+    # TODO: Cleanup
+    app.handlers.append((r"/api/xsrf-token", XSRFTokenHandler))
+    app.handlers.append((r"/api/sessions/create-with-context", CreateSessionWithContextHandler))
+
     app.handlers.append((page_regex, PageHandler, {"path": app.ui_path, "default_filename": "index.html"}))

@@ -39,7 +39,10 @@ class BeakerLocalContentsHandler(AuthenticatedFileHandler):
 
     def parse_url_path(self, url_path):
         os_path = super().parse_url_path(url_path)
-        return os.path.join(self.current_user.home_dir, os_path)
+        if isinstance(self.current_user, BeakerUser):
+            return os.path.join(self.current_user.home_dir, os_path)
+        else:
+            return os_path
 
 
 class BeakerLocalContentsManager(AsyncLargeFileManager, BaseBeakerContentsManager):
@@ -60,7 +63,7 @@ class BeakerLocalContentsManager(AsyncLargeFileManager, BaseBeakerContentsManage
             Absolute path within user's home directory
         """
         user: BeakerUser = current_user.get()
-        if user:
+        if isinstance(user, BeakerUser):
             userdir_path = os.path.join(self.parent.virtual_home_root, user.home_dir)
             if not os.path.isdir(userdir_path):
                 os.makedirs(userdir_path, exist_ok=True)

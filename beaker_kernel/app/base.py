@@ -24,7 +24,7 @@ from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.config import config, CONFIG_FILE_SEARCH_LOCATIONS
 from beaker_kernel.lib.utils import import_dotted_class
 from beaker_kernel.services.auth import current_user, BeakerUser, BeakerAuthorizer, BeakerIdentityProvider
-from beaker_kernel.app.handlers import register_handlers, request_log_handler
+from beaker_kernel.app.handlers import register_handlers, request_log_handler, XSRFTokenHandler, CreateSessionWithContextHandler
 
 
 logger = logging.getLogger("beaker_server")

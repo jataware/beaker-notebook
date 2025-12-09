@@ -140,7 +140,7 @@ class BeakerSessionManager(SessionManager):
             Session information from parent class
         """
         user: BeakerUser = current_user.get()
-        if user:
+        if isinstance(user, BeakerUser):
             virtual_home_root = self.parent.virtual_home_root
             virtual_home_dir = os.path.join(virtual_home_root, user.home_dir)
 

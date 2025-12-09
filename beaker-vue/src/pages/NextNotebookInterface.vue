@@ -360,9 +360,10 @@ type FilePreview = {
 }
 const previewedFile = ref<FilePreview>();
 
-watch(beakerSession, async () => {
-    integrations.value = await listIntegrations(sessionIdFromUrl);
-});
+watch(
+    [() => beakerSession?.value?.activeContext, () => beakerSession?.value?.session.kernelInfo],
+    async () => {integrations.value = await listIntegrations(sessionIdFromUrl)}
+);
 
 </script>
 
