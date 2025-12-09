@@ -1,3 +1,6 @@
+import json
+import os
+import threading
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, Generic
 
@@ -10,6 +13,8 @@ try:
 except ImportError:
     # fallback on pysqlite2 if Python was build without sqlite
     from pysqlite2 import dbapi2 as sqlite3  # type:ignore[no-redef]
+
+connection_cache: dict[tuple[int, int], sqlite3.Connection] = {}
 
 class Sqlite3Table(DatastoreTable):
     type_map = {
@@ -66,14 +71,30 @@ CREATE TABLE IF NOT EXISTS {self.name}
         result = self.cursor.execute(query, (self.name,))
         return bool(result.fetchall())
 
+    def sanitize_record(self, column_type: ColumnType, value: Any):
+        match column_type:
+            case ColumnType.JSON:
+                return json.dumps(value)
+            case _:
+                return value
+
     def add(self, record_values: dict):
         """Add a new record to the table."""
-        columns = list(record_values.keys())
-        col_def = ", ".join(columns)
-        placeholders = ", ".join(["?" for _ in columns])
+        col_map = {col.name: col.column_type for col in self.columns}
+        incoming_cols = list(record_values.keys())
+        col_def = ", ".join(incoming_cols)
+        placeholders = ", ".join(["?" for _ in incoming_cols])
         query = f"""INSERT INTO {self.name} ({col_def}) VALUES ({placeholders})"""
-        values = [record_values[col] for col in columns]
-        self.cursor.execute(query, values)
+        values = [
+            self.sanitize_record(col_map[col], record_values[col])
+            for col in incoming_cols
+        ]
+        try:
+            self.cursor.execute(query, values)
+        except Exception as err:
+            print(err)
+            print(query, values)
+            raise
 
     def get(self, **conditions: Any):
         """Get a single record matching the conditions."""
@@ -100,6 +121,15 @@ CREATE TABLE IF NOT EXISTS {self.name}
         result = self.cursor.fetchall()
         return result  # type: ignore[return-value]
 
+    def count(self, **conditions: Any):
+        query = f"""SELECT COUNT(1) as count FROM {self.name}"""
+        cond_str, params = self.parse_conditions(conditions)
+        if cond_str:
+            query = f"{query} {cond_str}"
+        self.cursor.execute(query, params)
+        result = self.cursor.fetchone()
+        return result["count"]
+
     def filter(self, **conditions: Any):
         """Filter records matching the conditions."""
         col_def = ", ".join([col.name for col in self.columns])
@@ -107,8 +137,11 @@ CREATE TABLE IF NOT EXISTS {self.name}
         cond_str, params = self.parse_conditions(conditions)
         if cond_str:
             query = f"{query} {cond_str}"
-        self.cursor.execute(query, params)
-        result = self.cursor.fetchall()
+        try:
+            self.cursor.execute(query, params)
+            result = self.cursor.fetchall()
+        except Exception as e:
+            raise
         return result  # type: ignore[return-value]
 
     def update(self, conditions: dict, values: dict):
@@ -154,11 +187,19 @@ class Sqlite3Datastore(BeakerDatastore):
     @property
     def connection(self) -> sqlite3.Connection:
         """Start a database connection"""
-        if self._connection is None:
-            # Set isolation level to None to autocommit all changes to the database.
-            self._connection = sqlite3.connect(self.database_path, isolation_level=None)
-            self._connection.row_factory = self.dict_factory
-        return self._connection
+        pid = os.getpid()
+        thread_id = threading.get_ident()
+
+        # If the db is in-memory, update path to allow multiple threads/processes to access the same
+        # shared in-memory SQLite db
+        if self.database_path == ':memory:':
+            self.database_path = "file:beaker_datastore?mode=memory&cached=shared"
+
+        if (pid, thread_id) not in connection_cache:
+            connection = sqlite3.connect(self.database_path, isolation_level=None)
+            connection.row_factory = self.dict_factory
+            connection_cache[(pid, thread_id)] = connection
+        return connection_cache[(pid, thread_id)]
 
     @property
     def cursor(self) -> sqlite3.Cursor:

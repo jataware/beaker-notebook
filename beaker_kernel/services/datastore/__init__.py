@@ -155,6 +155,10 @@ class DatastoreTable[RecordType]:
         """Retrieve all records from the table."""
         raise NotImplementedError()
 
+    def count(self, **conditions: dict) -> int:
+        """Count records matching the conditions."""
+        raise NotImplementedError()
+
     def filter(self, **conditions: dict) -> RecordType:
         """Filter records matching the conditions."""
         raise NotImplementedError()

@@ -160,7 +160,10 @@ class BeakerSessionManager(SessionManager):
         return cast(str, kernel_id)
 
     async def session_model(self, session_dict: dict):
-        kernel_model = await ensure_async(self.kernel_manager.kernel_model(session_dict["kernel_id"]))
+        try:
+            kernel_model = await ensure_async(self.kernel_manager.kernel_model(session_dict["kernel_id"]))
+        except KeyError:
+            kernel_model = None
 
         session_id = session_dict.pop("id", session_dict.pop("session_id"))
         model = {

@@ -4,6 +4,8 @@ import os
 import pwd
 import shutil
 import signal
+import socket
+from pathlib import Path
 from typing import Optional, cast, TYPE_CHECKING
 
 import traitlets
@@ -91,8 +93,14 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
     @classmethod
     def from_record(cls, record):
         """Rehydrates a KernelManager from a record stored in the DB"""
-        return cls.__init__()
+        instance = cls.__init__()
+        for k, v in record:
+            setattr(instance, k, v)
+        return instance
 
+    async def _async_start_kernel(self, **kw):
+        return await super()._async_start_kernel(**kw)
+    start_kernel = _async_start_kernel
 
     def write_connection_file(self, **kwargs: object) -> None:
         """Write kernel connection file with Beaker-specific context.
@@ -222,38 +230,49 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
     def _default_kernel_table(self):
         return self.kernel_table_class(datastore=self.parent.datastore)
 
+    def is_alive(self, kernel_id):
+        record = self.kernel_table.get(kernel_id=kernel_id)
+        connection_info = record.get("connection_info", None)
+        if isinstance(connection_info, str):
+            connection_info = json.loads(connection_info)
+        kernel_ip = connection_info["ip"]
+        control_port = connection_info["control_port"]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.1)
+            try:
+                sock.connect((kernel_ip, control_port))
+                return True
+            except (socket.timeout, ConnectionError, OSError):
+                return False
+        return True
+
+    async def _add_kernel_when_ready(self, kernel_id, km, kernel_awaitable):
+        await super()._add_kernel_when_ready(kernel_id, km, kernel_awaitable)
+        record_dict = {
+            k: v for k, v in {
+                name: getattr(km, name, km.__dict__.get(name, None))
+                for name in [col.name for col in self.kernel_table_class.columns]
+            }.items()
+            if v is not None
+        }
+        connection_info = json.loads(Path(km.connection_file).read_text())
+        record_dict["connection_info"] = connection_info
+        now = datetime.datetime.now()
+        record_dict["last_activity"] = now
+        record_dict["started_at"] = now
+
+        self.kernel_table.add(record_dict)
+        self._kernels.pop(kernel_id, None)
+
     @property
     def _kernels(self):
         records = self.kernel_table.all()
-        # kms = [
-        #     self.kernel_manager_class.from_record(record)
-        #     for record in records
-        #     if self.is_alive(record["kernel_id"])
-        # ]
         kms = {}
+        dead_kms = []
         for record in records:
-                # for connection_file in list(self.kernel_id_to_connection_file.values()):
-                #     if connection_file not in connection_files:
-                #         kernel_id = k[v.index(connection_file)]
-                #         del self.kernel_id_to_connection_file[kernel_id]
-                #         del self._kernels[kernel_id]
-
-                # # add kernels (whose connection file appeared) to our list
-                # for connection_file in connection_files:
-                #     if connection_file in self.kernel_id_to_connection_file.values():
-                #         continue
-                #     try:
-                #         connection_info: KernelConnectionInfo = json.loads(
-                #             connection_file.read_text()
-                #         )
-                #     except Exception:  # noqa: S112
-                #         continue
-                #     self.log.debug("Loading connection file %s", connection_file)
-                #     if not ("kernel_name" in connection_info and "key" in connection_info):
-                #         continue
-                #     # it looks like a connection file
-                #     kernel_id = self.new_kernel_id()
-                #     self.kernel_id_to_connection_file[kernel_id] = connection_file
+            # if not self.is_alive(record["kernel_id"]):
+            #     dead_kms.append(record)
+            #     continue
             kernel_id = record.pop("kernel_id")
             connection_info: KernelConnectionInfo = json.loads(record["connection_info"])
 
@@ -271,10 +290,13 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
             km.ready.set_result(None)
 
             km.user_id = record["user_id"]
-            km.session = record["jupyter_session"]
+            # km.session = record["jupyter_session"]
             km.reason = record["reason"]
             kms[kernel_id] = km
         return kms
+
+    def __len__(self):
+        return self.kernel_table.count()
 
     def __init__(self, **kwargs):
         """Initialize BeakerKernelMappingManager.
@@ -298,8 +320,38 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     def _check_kernel_id(self, kernel_id: str) -> None:
         """check that a kernel id is valid"""
-        if kernel_id not in self:
+        # if kernel_id not in self:
+        #     raise KeyError("Kernel with id not found: %s" % kernel_id)
+        if not self.kernel_table.count(kernel_id=kernel_id) > 0:
             raise KeyError("Kernel with id not found: %s" % kernel_id)
+        # records = self.kernel_table.filter(kernel_id=kernel_id)
+        # match records:
+        #     case []:
+        #         return None
+        #     case [record]:
+        #         km: BeakerKernelManager = self.kernel_manager_factory(
+        #             parent=self,
+        #             log=self.log,
+        #             owns_kernel=False,
+        #             **record
+        #         )
+        #         return km
+        #         # return self.
+        #     case [*record_list] if len(record_list) > 1:
+        #         # More than one!
+        #         return None
+        #     case _:
+        #         return None
+
+    def get_kernel(self, kernel_id: str) -> BeakerKernelManager:
+        """Get the single KernelManager object for a kernel by its uuid.
+
+        Parameters
+        ==========
+        kernel_id : uuid
+            The id of the kernel.
+        """
+        return self._kernels.get(kernel_id, None)
 
     @property
     def beaker_config(self):
