@@ -165,7 +165,7 @@ class BeakerSessionManager(SessionManager):
         except KeyError:
             kernel_model = None
 
-        session_id = session_dict.pop("id", session_dict.pop("session_id"))
+        session_id = session_dict.get("id", session_dict.get("session_id"))
         model = {
             "id": session_id,
             **session_dict,
@@ -275,7 +275,7 @@ class BeakerSessionManager(SessionManager):
             return
 
         await self.get_session(session_id=session_id)
-        self.session_table.update(conditions={"session_id": session_id}, values=kwargs)
+        self.session_table.update(conditions={"session_id": session_id}, record=kwargs)
         if hasattr(self.kernel_manager, "update_env"):
             row = self.session_table.get(session_id=session_id)
             self.kernel_manager.update_env(kernel_id=row["kernel_id"], env=self.get_kernel_env(row["path"], row["name"]))

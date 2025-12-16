@@ -26,7 +26,7 @@ class BeakerIdentityProvider(IdentityProvider):
         config=True
     )
 
-    async def _is_authorized_beaker_kernel(self, handler: web.RequestHandler):
+    def _is_authorized_beaker_kernel(self, handler: web.RequestHandler):
         """Validate Beaker kernel authentication token.
 
         Checks for a valid Beaker kernel authentication token in the request
@@ -82,7 +82,7 @@ class BeakerIdentityProvider(IdentityProvider):
         """
         @wraps(fn)
         async def get_user(self: BeakerIdentityProvider, handler: web.RequestHandler):
-            is_beaker = await self._is_authorized_beaker_kernel(handler)
+            is_beaker = self._is_authorized_beaker_kernel(handler)
             if is_beaker:
                 handler._token_authenticated = True
                 return RoleBasedUser(
@@ -98,6 +98,9 @@ class BeakerIdentityProvider(IdentityProvider):
                 current_user.set(result)
                 return result
         return get_user
+
+    def is_token_authenticated(self, handler: web.RequestHandler) -> bool:
+        return self._is_authorized_beaker_kernel(handler) or super().is_token_authenticated(handler)
 
     def __init_subclass__(cls, **kwargs):
         """Setup authentication wrapper for subclasses.

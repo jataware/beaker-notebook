@@ -12,7 +12,7 @@ from beaker_kernel.lib.utils import ensure_async
 import tornado
 
 if typing.TYPE_CHECKING:
-    from beaker_kernel.services.kernel.manager import BeakerKernelManager, BeakerKernelMappingManager
+    from beaker_kernel.services.kernel import BeakerKernelManager, BeakerKernelMappingManager
 
 logger = logging.getLogger(__name__)
 

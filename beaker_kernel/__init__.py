@@ -44,7 +44,7 @@ redirect_map: ImportRedirectMap = {
     'beaker_kernel.service.base': {
         'BaseBeakerApp': 'beaker_kernel.app.base',
         'BeakerKernelManager': 'beaker_kernel.services.kernel.manager',
-        'BeakerKernelMappingManager': 'beaker_kernel.services.kernel.manager',
+        'BeakerKernelMappingManager': 'beaker_kernel.services.kernel.mappingmanager',
         'BeakerKernelSpecManager': 'beaker_kernel.services.kernel.spec',
         'BeakerSessionManager': 'beaker_kernel.services.session',
     },

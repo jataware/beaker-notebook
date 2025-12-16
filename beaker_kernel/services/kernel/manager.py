@@ -1,15 +1,19 @@
+import copy
 import datetime
 import json
 import os
+import dill
+import pickle
 import pwd
 import shutil
 import signal
 import socket
 from pathlib import Path
-from typing import Optional, cast, TYPE_CHECKING
+from typing import Self, Optional, cast, TYPE_CHECKING, TypeAlias
 
 import traitlets
 from traitlets import Unicode, Integer, Float, Instance, Type, default
+from traitlets.utils.importstring import import_item
 from jupyter_client.connect import KernelConnectionInfo
 from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
@@ -17,43 +21,13 @@ from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelMana
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.config import config
 from beaker_kernel.services.auth import current_user, BeakerUser
-from beaker_kernel.services.datastore import DatastoreTable, Column, ColumnType
+from beaker_kernel.services.datastore import DatastoreTable, Column, ColumnType, TableRecord, Now
 
 if TYPE_CHECKING:
     from beaker_kernel.app.base import BaseBeakerApp
+    from beaker_kernel.services.kernel.mappingmanager import BeakerKernelMappingManager
+    from beaker_kernel.services.kernel.provisioner import BeakerProvisioner
 
-class KernelTable(DatastoreTable):
-    name = "kernels"
-    columns = [
-        # Identity
-        Column(name="kernel_id", column_type=ColumnType.TEXT, primary_key=True),
-        Column(name="kernel_name", column_type=ColumnType.TEXT, allow_null=False),  # renamed from 'name'
-        Column(name="user_id", column_type=ColumnType.TEXT),
-
-        # Sessions (Beaker-specific)
-        Column(name="beaker_session", column_type=ColumnType.TEXT, allow_null=True),
-        Column(name="jupyter_session", column_type=ColumnType.TEXT, allow_null=True),
-
-        # Kernel configuration
-        Column(name="connection_info", column_type=ColumnType.JSON, allow_null=False),
-        Column(name="path", column_type=ColumnType.TEXT),  # API path
-        Column(name="cwd", column_type=ColumnType.TEXT, allow_null=True),  # actual working directory
-
-        # State tracking
-        Column(name="execution_state", column_type=ColumnType.TEXT, allow_null=False, default_value="starting"),
-        Column(name="last_activity", column_type=ColumnType.DATETIME, allow_null=False),
-        Column(name="connections", column_type=ColumnType.INTEGER, default_value=0),
-        Column(name="reason", column_type=ColumnType.TEXT, allow_null=True),
-        Column(name="autorestart", column_type=ColumnType.BOOLEAN, default_value=True),
-
-        # Timestamps
-        Column(name="started_at", column_type=ColumnType.DATETIME, allow_null=False),
-        Column(name="last_restart_time", column_type=ColumnType.DATETIME, allow_null=True),
-        Column(name="restart_count", column_type=ColumnType.INTEGER, default_value=0),
-
-        # Catch-all
-        Column(name="metadata", column_type=ColumnType.JSON),
-    ]
 
 
 class BeakerKernelManager(AsyncIOLoopKernelManager):
@@ -66,7 +40,6 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
         help="Time to wait for shutdown before killing processes",
         config=True
     )
-
 
     @property
     def beaker_config(self):
@@ -97,6 +70,10 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
         for k, v in record:
             setattr(instance, k, v)
         return instance
+
+    def setup_instance(self, *args, **kwargs):
+        super().setup_instance(*args, **kwargs)
+        self.user = kwargs.get("user", None)
 
     async def _async_start_kernel(self, **kw):
         return await super()._async_start_kernel(**kw)
@@ -204,191 +181,153 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             return await self._async_signal_kernel(signal.SIGINT)
         return await super()._async_interrupt_kernel()
 
+    # def __getstate__(self):
+    #     state = super().__getstate__()
+    #     del state["_ready"]
+    #     del state["_trait_values"]["parent"]
+    #     del state["_trait_values"]["kernel_spec_manager"]
+    #     del state["_trait_values"]["session"]
 
-class BeakerKernelMappingManager(AsyncMappingKernelManager):
-    kernel_manager_class = traitlets.DottedObjectName("beaker_kernel.services.kernel.manager.BeakerKernelManager")
-    connection_dir = Unicode(
-        os.path.join(config.beaker_run_path, "kernelfiles"),
-        help="Directory for kernel connection files",
-        config=True
-    )
-    cull_idle_timeout = Integer(
-        0,
-        help="Timeout in seconds for culling idle kernels",
-        config=True
-    )
 
-    kernel_table_class = Type(
-        default_value=KernelTable,
-        klass=DatastoreTable,
-    )
-    kernel_table = Instance(
-        klass=DatastoreTable,
-    )
+    #     return state
 
-    @default("kernel_table")
-    def _default_kernel_table(self):
-        return self.kernel_table_class(datastore=self.parent.datastore)
 
-    def is_alive(self, kernel_id):
-        record = self.kernel_table.get(kernel_id=kernel_id)
-        connection_info = record.get("connection_info", None)
-        if isinstance(connection_info, str):
-            connection_info = json.loads(connection_info)
+
+class BeakerDistributedKernelManager(BeakerKernelManager):
+
+    async def is_alive(self) -> bool:
+        """Check to see if kernel is alive without a local process"""
+        connection_info = self.get_connection_info()
+        if not connection_info:
+            return False
+
         kernel_ip = connection_info["ip"]
         control_port = connection_info["control_port"]
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.1)
             try:
                 sock.connect((kernel_ip, control_port))
+                # Socket is closed automatically when exiting the context manager
                 return True
             except (socket.timeout, ConnectionError, OSError):
                 return False
         return True
 
-    async def _add_kernel_when_ready(self, kernel_id, km, kernel_awaitable):
-        await super()._add_kernel_when_ready(kernel_id, km, kernel_awaitable)
-        record_dict = {
-            k: v for k, v in {
-                name: getattr(km, name, km.__dict__.get(name, None))
-                for name in [col.name for col in self.kernel_table_class.columns]
-            }.items()
-            if v is not None
-        }
-        connection_info = json.loads(Path(km.connection_file).read_text())
-        record_dict["connection_info"] = connection_info
-        now = datetime.datetime.now()
-        record_dict["last_activity"] = now
-        record_dict["started_at"] = now
+    def __getstate__(self):
+        """Custom handler to allow serialization"""
+        state = super().__getstate__()
+        return state
 
-        self.kernel_table.add(record_dict)
-        self._kernels.pop(kernel_id, None)
 
-    @property
-    def _kernels(self):
-        records = self.kernel_table.all()
-        kms = {}
-        dead_kms = []
-        for record in records:
-            # if not self.is_alive(record["kernel_id"]):
-            #     dead_kms.append(record)
-            #     continue
-            kernel_id = record.pop("kernel_id")
-            connection_info: KernelConnectionInfo = json.loads(record["connection_info"])
 
-            km: BeakerKernelManager = self.kernel_manager_factory(
-                parent=self,
-                log=self.log,
-                owns_kernel=False,
-            )
-            km.load_connection_info(connection_info)
-            km.last_activity = datetime.datetime.now(tz=datetime.UTC)
-            km.execution_state = "idle"
-            km.connections = 1
-            km.kernel_id = kernel_id
-            km.kernel_name = record["kernel_name"]
-            km.ready.set_result(None)
+class KernelTable(DatastoreTable):
+    resource = BeakerKernelManager
+    name = "kernels"
+    columns = [
+        # Identity
+        Column(name="kernel_id", column_type=ColumnType.TEXT, primary_key=True),
+        Column(name="kernel_name", column_type=ColumnType.TEXT, allow_null=False),
+        Column(name="user_id", column_type=ColumnType.TEXT),
 
-            km.user_id = record["user_id"]
-            # km.session = record["jupyter_session"]
-            km.reason = record["reason"]
-            kms[kernel_id] = km
-        return kms
+        Column(name="cls", column_type=ColumnType.TEXT, allow_null=False),
 
-    def __len__(self):
-        return self.kernel_table.count()
+        # Serialized setup
+        Column(name="provisioner", column_type=ColumnType.JSON),
 
-    def __init__(self, **kwargs):
-        """Initialize BeakerKernelMappingManager.
+        # Sessions (Beaker-specific)
+        Column(name="beaker_session", column_type=ColumnType.TEXT, allow_null=True),
 
-        Sets up the connection directory and initializes the kernel manager
-        with default kernel name if available.
+        # TODO: This is apparently only stored in the connection_file json file.
+        Column(name="jupyter_session", column_type=ColumnType.TEXT, allow_null=True),
 
-        Parameters
-        ----------
-        **kwargs
-            Additional arguments passed to parent class
-        """
-        # Ensure connection dir exists and is readable
-        if not os.path.isdir(self.connection_dir):
-            os.makedirs(self.connection_dir, mode=0o0755)
+        # Kernel configuration
+        Column(name="connection_info", column_type=ColumnType.JSON, allow_null=False),
+
+        # State tracking
+        Column(name="execution_state", column_type=ColumnType.TEXT, allow_null=False, default_value="starting"),
+        Column(name="last_activity", column_type=ColumnType.DATETIME, allow_null=True),
+        Column(name="connections", column_type=ColumnType.INTEGER, default_value=0),
+        Column(name="reason", column_type=ColumnType.TEXT, allow_null=True),
+        Column(name="autorestart", column_type=ColumnType.BOOLEAN, default_value=True),
+
+        # Timestamps
+        Column(name="started_at", column_type=ColumnType.DATETIME, allow_null=True, default_value=Now()),
+        Column(name="restart_count", column_type=ColumnType.INTEGER, default_value=0),
+
+        # Catch-all
+        Column(name="metadata", column_type=ColumnType.JSON),
+    ]
+
+    def serialize(self, resource: BeakerKernelManager) -> "KernelRecord":
+        # Warning: Do not modify the passed resource during serialization as resource is a shared reference.
+        connection_info = json.loads(Path(resource.connection_file).read_text())
+        if resource.provisioner is not None:
+            provisioner = {
+                "cls": f"{resource.provisioner.__class__.__module__}.{resource.provisioner.__class__.__name__}",
+                "uuid": getattr(resource.provisioner, "uuid", None)
+            }
         else:
-            os.chmod(self.connection_dir, 0o0755)
-        super().__init__(**kwargs)
-        if hasattr(self.kernel_spec_manager, "get_default_kernel_name"):
-            self.default_kernel_name = self.kernel_spec_manager.get_default_kernel_name()
+            provisioner = None
+        record = dict(
+            kernel_id=resource.kernel_id,
+            kernel_name=resource.kernel_name,
+            user_id=getattr(getattr(resource, "user", None), "username", None),
+            cls=f"{resource.__class__.__module__}.{resource.__class__.__name__}",
+            provisioner=provisioner,
+            beaker_session=resource.beaker_session,
+            jupyter_session=connection_info.get("jupyter_session", None),
+            connection_info=connection_info,
+            connections=getattr(resource, "connections", 0),
+            reason=getattr(resource, "reason", None),
+            autorestart=getattr(resource, "autorestart", None),
+            restart_count=getattr(resource, "restart_count", None),
+            metadata=getattr(resource, "metadata", {}),
+        )
+        if hasattr(resource, "execution_state"):
+            record["execution_state"] = getattr(resource, "execution_state")
+        if hasattr(resource, "last_activity"):
+            record["last_activity"] = getattr(resource, "last_activity")
+        return record
 
-    def _check_kernel_id(self, kernel_id: str) -> None:
-        """check that a kernel id is valid"""
-        # if kernel_id not in self:
-        #     raise KeyError("Kernel with id not found: %s" % kernel_id)
-        if not self.kernel_table.count(kernel_id=kernel_id) > 0:
-            raise KeyError("Kernel with id not found: %s" % kernel_id)
-        # records = self.kernel_table.filter(kernel_id=kernel_id)
-        # match records:
-        #     case []:
-        #         return None
-        #     case [record]:
-        #         km: BeakerKernelManager = self.kernel_manager_factory(
-        #             parent=self,
-        #             log=self.log,
-        #             owns_kernel=False,
-        #             **record
-        #         )
-        #         return km
-        #         # return self.
-        #     case [*record_list] if len(record_list) > 1:
-        #         # More than one!
-        #         return None
-        #     case _:
-        #         return None
-
-    def get_kernel(self, kernel_id: str) -> BeakerKernelManager:
-        """Get the single KernelManager object for a kernel by its uuid.
-
-        Parameters
-        ==========
-        kernel_id : uuid
-            The id of the kernel.
-        """
-        return self._kernels.get(kernel_id, None)
-
-    @property
-    def beaker_config(self):
-        return getattr(self.parent, 'beaker_config', None)
-
-    def get_current_user(self) -> BeakerUser | None:
-        user: BeakerUser = current_user.get()
-        return user
-
-    def cwd_for_path(self, path, **kwargs):
-        user: BeakerUser = current_user.get()
-        if isinstance(user, BeakerUser):
-            user_home = self.get_home_for_user(user)
-            return super().cwd_for_path(user_home, **kwargs)
+    def deserialize(self, record: "KernelRecord", parent: "BeakerKernelMappingManager") -> BeakerKernelManager:
+        km: BeakerKernelManager = parent.kernel_manager_factory(
+            parent=parent,
+            log=parent.log,
+            owns_kernel=True,
+        )
+        if isinstance(record["connection_info"], str):
+            connection_info = json.loads(record["connection_info"])
+        elif isinstance(record["connection_info"], dict):
+            connection_info = record["connection_info"]
         else:
-            return super().cwd_for_path(path, **kwargs)
+            connection_info = None
 
-    def get_home_for_user(self, user: BeakerUser) -> os.PathLike:
-        return user.home_dir
+        km.load_connection_info(connection_info)
+        km.last_activity = datetime.datetime.now(tz=datetime.UTC)
+        km.execution_state = "idle"
+        km.connections = 1
+        km.kernel_id = record["kernel_id"]
+        km.kernel_name = record["kernel_name"]
+        km.ready.set_result(None)
 
-    async def _async_start_kernel(self, *, kernel_id = None, path = None, **kwargs):
-        kwargs.setdefault('session_path', path)
-        return await super()._async_start_kernel(kernel_id=kernel_id, path=path, **kwargs)
-    start_kernel = _async_start_kernel
+        km.user_id = record["user_id"]
+        # km.session = record["jupyter_session"]
+        km.reason = record["reason"]
 
-    def pre_start_kernel(self, kernel_name: str, kwargs: dict):
-        km, kernel_name, kernel_id = super().pre_start_kernel(kernel_name, kwargs)
-        km = cast(BeakerKernelManager, km)
-        beaker_session = kwargs.get('env', {}).get('BEAKER_SESSION', None) or kwargs.get("session_path", None)
-        if beaker_session and not km.beaker_session:
-            km.beaker_session = beaker_session
-        return km, kernel_name, kernel_id
+        provisioner_info = record.get("provisioner", None)
+        if isinstance(provisioner_info, str):
+            provisioner_info = json.loads(provisioner_info)
+        provisioner = None
+        if provisioner_info:
+            if "cls" in provisioner_info and "uuid" in provisioner_info:
+                try:
+                    provisioner_cls: BeakerProvisioner = import_item(provisioner_info["cls"])
+                    provisioner = provisioner_cls.get_instance(provisioner_info["uuid"])
+                except (ImportError, LookupError):
+                    pass
+        km.provisioner = provisioner
+        return km
 
-    async def cull_kernel_if_idle(self, kernel_id):
-        """Cull a kernel if it is idle."""
-        kernel = self._kernels.get(kernel_id, None)
-        if getattr(kernel, "kernel_name", None) != "beaker_kernel":
-            return
-        result = await super().cull_kernel_if_idle(kernel_id)
-        return result
+
+KernelRecord: TypeAlias = TableRecord[KernelTable]

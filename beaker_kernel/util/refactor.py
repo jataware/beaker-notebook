@@ -5,7 +5,7 @@ import typing
 
 
 ImportRedirectTarget: typing.TypeAlias = str | tuple[str, str]
-ImportRedirectMap: typing.TypeAlias = dict[str, ImportRedirectTarget]
+ImportRedirectMap: typing.TypeAlias = dict[str, dict[str, ImportRedirectTarget]]
 
 
 def redirect_imports(redirect_map: ImportRedirectMap):
@@ -48,5 +48,5 @@ def redirect_imports(redirect_map: ImportRedirectMap):
         if mod_name not in sys.modules:
             mod = types.ModuleType(mod_name)
             mod.__dict__["_members"] = members
-            mod.__getattr__ = types.MethodType(_mod_getattr, mod)
+            setattr(mod, "__getattr__", types.MethodType(_mod_getattr, mod))
             sys.modules[mod_name] = mod

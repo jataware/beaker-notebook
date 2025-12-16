@@ -305,7 +305,11 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         )
         kernel_info = kernel_creation_res.json()
 
-        subkernel_id = kernel_info["id"]
+        try:
+            subkernel_id = kernel_info["id"]
+        except Exception as err:
+            logger.error(json.dumps(kernel_info), exc_info=err)
+            raise
 
         connection_info_res = requests.get(
             url=urllib.parse.urljoin(urlbase, f"/beaker/subkernels/{subkernel_id}"),

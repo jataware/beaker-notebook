@@ -2,7 +2,8 @@ import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Optional, Generic, TypeAlias, TypeVar, ClassVar, Union, TypedDict, TYPE_CHECKING
+from typing import Any, Optional, Generic, TypeAlias, TypeVar, ClassVar, Union, TypedDict, TYPE_CHECKING, _TypedDict
+from collections.abc import Callable
 from types import GenericAlias, get_original_bases, resolve_bases
 
 from traitlets import Instance, TraitError, Unicode, validate, MetaHasTraits
@@ -12,8 +13,42 @@ if TYPE_CHECKING:
     from beaker_kernel.app.base import BaseBeakerApp
 
 # RecordType = TypeVar("RecordType", bound="DatastoreRecord", covariant=True)
-# TableRef = TypeVar("TableRef", bound="DatastoreTable", covariant=True)
+TableRef = TypeVar("TableRef", bound="DatastoreTable", covariant=True)
 # RecordRef = TypeVar("RecordRef", bound="DatastoreTable", covariant=True)
+
+class TableRecord(Generic[TableRef]):
+    def __class_getitem__(cls, value: "type[DatastoreTable]"):
+        cls_name = f"{value.__name__}Record"
+        keydef: dict[str, type] = {
+            col.name: ColumnType.to_pytype(col.column_type)
+            for col in value.columns
+        }
+        # from typing import Literal
+        # lit: TypeAlias = Literal[*keydef.keys()]
+        return TypedDict(cls_name, keydef)
+# class TableRecord(type):
+#     def __new__(mcls, cls):
+#         print(mcls, cls)
+#         cls_name = f"{cls.__name__}Record"
+#         keydef: dict[str, type] = {
+#             col.name: ColumnType.to_pytype(col.column_type)
+#             for col in cls.columns
+#         }
+#         result_class = type(cls_name, (object,), {
+#             "__annotations__": keydef,
+#             "__orig_bases__": (object,),
+#             "__dict__": {key: None for key in keydef},
+#             "__getitem__": lambda self, a: f"{self}.{a}",
+#             "__setitem__": lambda self, a, b: f"{self}.{a} = {b}",
+#         })
+#         return result_class
+    # def __class_getitem__(cls, value: "DatastoreTable"):
+    #     cls_name = f"{value.__name__}Record"
+    #     keydef: dict[str, type] = {
+    #         col.name: ColumnType.to_pytype(col.column_type)
+    #         for col in value.columns
+    #     }
+    #     return TypedDict(cls_name, keydef)
 
 
 # Export for convenience
@@ -25,6 +60,12 @@ __all__ = [
     'DatastoreTable',
     # 'RecordType',
 ]
+
+
+class Now():
+    """Simple class to indicate default 'now' timestamp in the UTC timezone."""
+    def __call__(self):
+        return datetime.datetime.now(tz=datetime.timezone.utc)
 
 
 class ColumnType(StrEnum):
@@ -39,7 +80,7 @@ class ColumnType(StrEnum):
     DATETIME = "datetime"
 
     @classmethod
-    def to_pytype(cls, value) -> type:
+    def to_pytype(cls, value) -> type|None:
         match value:
             case cls.BOOL:
                 return bool
@@ -108,11 +149,13 @@ class DatastoreTable[RecordType]:
     """
     name: ClassVar[str]
     columns: ClassVar[list[Column]]
+    resource: ClassVar[type]
 
     datastore: "BeakerDatastore"
     metadata: dict[str, Any]
 
-    def __new__(cls, *args, datastore=None, **kwargs) -> "DatastoreTable[RecordType]":
+    def __new__(cls, *args, datastore: "BeakerDatastore" = None, **kwargs) -> "DatastoreTable[RecordType]":
+        """Create a proper table belonging to the defined datastore."""
         # Check if this is a definition of a table rather than a definition of the metaclass
         if issubclass(cls, DatastoreTable) and cls is not DatastoreTable and datastore:
             # Dynamically rewrite the MRO for the class to insert the datastore table class between the final table class
@@ -121,6 +164,7 @@ class DatastoreTable[RecordType]:
             namespace = dict(vars(cls))
             namespace["__orig_bases__"] = (datastore_subclass, DatastoreTable)
             cls = type(cls.__name__, (datastore_subclass, DatastoreTable), namespace)
+            datastore.tables.append(cls)
         instance = super(DatastoreTable, cls).__new__(cls)
         cls.__init__(instance, *args, datastore=datastore, **kwargs)
         return instance
@@ -139,11 +183,11 @@ class DatastoreTable[RecordType]:
         """Check if the table exists in the datastore."""
         raise NotImplementedError()
 
-    def add(self, record_values: dict):
+    def add(self, record: dict|object):
         """Add a new record to the table."""
         raise NotImplementedError()
 
-    def get(self, **conditions: dict) -> RecordType:
+    def get(self, **conditions: dict) -> RecordType|None:
         """Get a single record matching the conditions."""
         raise NotImplementedError()
 
@@ -163,9 +207,21 @@ class DatastoreTable[RecordType]:
         """Filter records matching the conditions."""
         raise NotImplementedError()
 
-    def update(self, conditions: dict, values: dict):
+    def update(self, conditions: dict, record: dict|object):
         """Update records matching conditions with new values."""
         raise NotImplementedError()
+
+    def serialize(self, resource) -> "TableRecord":
+        # Warning: Do not modify the passed resource during serialization as resource is a shared reference.
+        return {
+            getattr(resource, col.name) for col in self.columns if hasattr(resource, col.name)
+        }
+
+    def deserialize(self, record: "TableRecord", parent=None):
+        if hasattr(self, "resource"):
+            return self.resource(**record)
+        else:
+            return record
 
 
 class BeakerDatastore(LoggingConfigurable):
@@ -176,32 +232,14 @@ class BeakerDatastore(LoggingConfigurable):
     must follow, providing a unified API for both SQL and NoSQL backends.
 
     Subclasses should implement:
-    - get_session(table_name: Optional[str]) -> DatastoreSession
-    - register_table(table_name: str, **kwargs) -> None
     - list_tables() -> list[str]
     - drop_table(table_name: str) -> None
     """
 
-    tables: ClassVar[type] = []
+    tables: ClassVar[list[type]] = []
     table_class: ClassVar[type]
 
     parent: "Instance[BaseBeakerApp | None] | BaseBeakerApp"
-
-    def register_table(self, table: DatastoreTable, **kwargs) -> None:
-        """
-        Register a table with the datastore.
-
-        For SQL datastores, this registers the table schema.
-        For NoSQL datastores, this may be a no-op.
-
-        Args:
-            table: DatastoreTable instance to register
-            **kwargs: Additional backend-specific parameters
-
-        Raises:
-            NotImplementedError: If not implemented by subclass
-        """
-        raise NotImplementedError()
 
     def list_tables(self) -> list[str]:
         """
@@ -209,11 +247,8 @@ class BeakerDatastore(LoggingConfigurable):
 
         Returns:
             List of table names
-
-        Raises:
-            NotImplementedError: If not implemented by subclass
         """
-        raise NotImplementedError()
+        return [table.name for table in self.tables]
 
     def drop_table(self, table_name: str) -> None:
         """

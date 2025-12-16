@@ -42,7 +42,7 @@ class BaseBeakerApp(ServerApp):
     app_slug = traitlets.Unicode(config=True)
 
     kernel_manager_class = traitlets.Type(
-        f"beaker_kernel.services.kernel.manager.BeakerKernelMappingManager",
+        f"beaker_kernel.services.kernel.mappingmanager.BeakerKernelMappingManager",
         config=True
     )
     session_manager_class = traitlets.Type(
@@ -68,7 +68,7 @@ class BaseBeakerApp(ServerApp):
         config=True,
     )
     datastore_class = traitlets.Type(
-        "beaker_kernel.services.datastore.sqlite.Sqlite3Datastore",
+        "beaker_kernel.services.datastore.memory.MemoryDatastore",
         klass="beaker_kernel.services.datastore.BeakerDatastore",
         config=True,
     )
@@ -173,7 +173,6 @@ class BaseBeakerApp(ServerApp):
         if beaker_app_slug:
             app_cls: type[BeakerApp] = import_dotted_class(beaker_app_slug)
             beaker_app: BeakerApp = app_cls()
-
             self.config.update({
                 "app_cls": app_cls,
                 "app": beaker_app,
@@ -183,6 +182,7 @@ class BaseBeakerApp(ServerApp):
                 "app_cls": None,
                 "app": None,
             })
+        self.config["KernelProvisionerFactory"]["default_provisioner_name"] = "beaker-local-provisioner"
         self.initialize_handlers()
 
     def initialize_handlers(self):
@@ -293,7 +293,7 @@ class BaseBeakerApp(ServerApp):
             "# Copy this file to jupyter_server_config.py or beaker_config.py in your Jupyter config directory.",
             "# Uncomment and modify values as needed for your deployment.",
             "",
-            "c = get_config()  # noqa",
+            "c = get_config()  # noqa # type: ignore",
             "",
         ]
 

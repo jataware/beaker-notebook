@@ -3,10 +3,11 @@ import os
 import threading
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, Generic
+from urllib.parse import urlparse, parse_qs, ParseResult, urlunparse
 
 from traitlets import Unicode, default, validate, observe
 
-from . import BeakerDatastore, DatastoreTable, ColumnType
+from . import BeakerDatastore, DatastoreTable, ColumnType, Now
 
 try:
     import sqlite3
@@ -17,6 +18,7 @@ except ImportError:
 connection_cache: dict[tuple[int, int], sqlite3.Connection] = {}
 
 class Sqlite3Table(DatastoreTable):
+    datastore: "Sqlite3Datastore"
     type_map = {
         ColumnType.BOOL: "BOOLEAN",
         ColumnType.TEXT: "TEXT",
@@ -27,9 +29,8 @@ class Sqlite3Table(DatastoreTable):
         ColumnType.DATETIME: "DATETIME",
     }
 
-    @property
     def cursor(self) -> sqlite3.Cursor:
-        return self.datastore.cursor
+        return self.datastore.cursor()
 
     def parse_conditions(self, conditions: dict) -> tuple[str, list]:
         query_str = ""
@@ -55,7 +56,11 @@ class Sqlite3Table(DatastoreTable):
             if not col.allow_null:
                 line_parts.append("NOT NULL")
             if col.default_value is not None:
-                line_parts.append(f"DEFAULT {col.default_value}")
+                if isinstance(col.default_value, Now) or col.default_value is Now:
+                    # SQLite always stores UTC
+                    line_parts.append(f"DEFAULT (DATETIME('now'))")
+                else:
+                    line_parts.append(f"DEFAULT {repr(col.default_value)}")
             col_lines.append(" ".join(line_parts))
         col_def = ',\n   '.join(col_lines)
         query = f"""\
@@ -63,13 +68,14 @@ CREATE TABLE IF NOT EXISTS {self.name}
 (
     {col_def}
 );"""
-        self.cursor.execute(query)
+        self.cursor().execute(query)
 
     def exists(self):
         """Check if the table exists in the SQLite database."""
         query = f"SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-        result = self.cursor.execute(query, (self.name,))
-        return bool(result.fetchall())
+        cursor = self.cursor()
+        cursor.execute(query, (self.name,))
+        return bool(cursor.fetchall())
 
     def sanitize_record(self, column_type: ColumnType, value: Any):
         match column_type:
@@ -78,19 +84,26 @@ CREATE TABLE IF NOT EXISTS {self.name}
             case _:
                 return value
 
-    def add(self, record_values: dict):
+    def add(self, record: dict|object):
         """Add a new record to the table."""
         col_map = {col.name: col.column_type for col in self.columns}
-        incoming_cols = list(record_values.keys())
-        col_def = ", ".join(incoming_cols)
-        placeholders = ", ".join(["?" for _ in incoming_cols])
+
+        if isinstance(record, dict):
+            clean_record = {key: value for key, value in record.items() if key in col_map}
+        elif isinstance(record, self.resource) and callable(getattr(self, "serialize", None)):
+            clean_record = self.serialize(record)
+        else:
+            clean_record = {col: getattr(record, col) for col in col_map.keys()}
+
+        col_def = ", ".join(clean_record.keys())
+        placeholders = ", ".join(["?" for _ in clean_record])
         query = f"""INSERT INTO {self.name} ({col_def}) VALUES ({placeholders})"""
         values = [
-            self.sanitize_record(col_map[col], record_values[col])
-            for col in incoming_cols
+            self.sanitize_record(col_map[col_name], value)
+            for col_name, value in clean_record.items()
         ]
         try:
-            self.cursor.execute(query, values)
+            self.cursor().execute(query, values)
         except Exception as err:
             print(err)
             print(query, values)
@@ -101,8 +114,11 @@ CREATE TABLE IF NOT EXISTS {self.name}
         cond_str, cond_params = self.parse_conditions(conditions)
         col_def = ", ".join([col.name for col in self.columns])
         query = f"""SELECT {col_def} FROM {self.name} {cond_str}"""
-        self.cursor.execute(query, cond_params)
-        result = self.cursor.fetchone()
+        cursor = self.cursor()
+        cursor.execute(query, cond_params)
+        result = cursor.fetchone()
+        if not result:
+            result = None
         return result  # type: ignore[return-value]
 
     def remove(self, **conditions: Any):
@@ -111,14 +127,15 @@ CREATE TABLE IF NOT EXISTS {self.name}
             raise ValueError("Removing records require at least one condition")
         cond_str, cond_params = self.parse_conditions(conditions)
         query = f"""DELETE FROM {self.name} {cond_str}"""
-        self.cursor.execute(query, cond_params)
+        self.cursor().execute(query, cond_params)
 
     def all(self):
         """Retrieve all records from the table."""
         col_def = ", ".join([col.name for col in self.columns])
         query = f"""SELECT {col_def} FROM {self.name};"""
-        self.cursor.execute(query)
-        result = self.cursor.fetchall()
+        cursor = self.cursor()
+        cursor.execute(query)
+        result = cursor.fetchall()
         return result  # type: ignore[return-value]
 
     def count(self, **conditions: Any):
@@ -126,8 +143,9 @@ CREATE TABLE IF NOT EXISTS {self.name}
         cond_str, params = self.parse_conditions(conditions)
         if cond_str:
             query = f"{query} {cond_str}"
-        self.cursor.execute(query, params)
-        result = self.cursor.fetchone()
+        cursor = self.cursor()
+        cursor.execute(query, params)
+        result = cursor.fetchone()
         return result["count"]
 
     def filter(self, **conditions: Any):
@@ -138,21 +156,41 @@ CREATE TABLE IF NOT EXISTS {self.name}
         if cond_str:
             query = f"{query} {cond_str}"
         try:
-            self.cursor.execute(query, params)
-            result = self.cursor.fetchall()
+            cursor = self.cursor()
+            cursor.execute(query, params)
+            result = cursor.fetchall()
         except Exception as e:
             raise
         return result  # type: ignore[return-value]
 
-    def update(self, conditions: dict, values: dict):
+    def update(self, conditions: dict, record: dict|object):
         """Update records matching conditions with new values."""
         if not conditions:
             raise ValueError("Updating records require at least one condition")
+
+        col_map = {col.name: col.column_type for col in self.columns}
+        if isinstance(record, dict):
+            values = {
+                key: self.sanitize_record(col_map[key], value)
+                for key, value in record.items()
+                if key in col_map
+            }
+        elif isinstance(record, self.resource) and callable(getattr(self, "serialize", None)):
+            values = {
+                key: self.sanitize_record(col_map[key], value)
+                for key, value in self.serialize(record).items()
+            }
+        else:
+            values = {
+                col: self.sanitize_record(col, getattr(record, col))
+                for col in col_map.keys()
+            }
+
         cond_str, cond_params = self.parse_conditions(conditions)
         set_clause = ", ".join([f"{col}=?" for col in values.keys()])
         query = f"""UPDATE {self.name} SET {set_clause} {cond_str}"""
         params = list(values.values()) + cond_params
-        self.cursor.execute(query, params)
+        self.cursor().execute(query, params)
 
 
 
@@ -160,12 +198,11 @@ class Sqlite3Datastore(BeakerDatastore):
     """
     SQLite-specific datastore implementation.
     """
-    _cursor = None
     _connection = None
     table_class: ClassVar[type] = Sqlite3Table
 
     database_path = Unicode(
-        default_value=":memory:",
+        default_value="file:beaker_datastore?mode=memory&cache=shared",
         allow_none=True,
         help="Path to SQLite database file (will be converted to database_url)"
     ).tag(config=True)
@@ -177,12 +214,19 @@ class Sqlite3Datastore(BeakerDatastore):
 
     @validate("database_path")
     def _validate_database_path(self, proposal):
-        if isinstance(proposal.value, str) and not proposal.value.startswith(":"):
-            db_path = Path(proposal.value).expanduser().resolve()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            return str(db_path)
+        # Always pass strings starting with ':' unchanged
+        if proposal.value.startswith(":"):
+            return proposal.value
+
+        parse_result: ParseResult = urlparse(proposal.value)
+        query_dict = parse_qs(parse_result.query)
+        if query_dict.get("mode", None) == "memory":
+            return proposal.value
         else:
-            return proposal
+            db_path = Path(parse_result.path).expanduser().resolve()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            parse_result = parse_result._replace(scheme="file", path=str(db_path))
+            return urlunparse(parse_result)
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -193,17 +237,32 @@ class Sqlite3Datastore(BeakerDatastore):
         # If the db is in-memory, update path to allow multiple threads/processes to access the same
         # shared in-memory SQLite db
         if self.database_path == ':memory:':
-            self.database_path = "file:beaker_datastore?mode=memory&cached=shared"
+            self.database_path = "file:beaker_datastore?mode=memory&cache=shared"
 
         if (pid, thread_id) not in connection_cache:
-            connection = sqlite3.connect(self.database_path, isolation_level=None)
+            self.log.debug(f"SQLite3 connection: {pid=}, {thread_id=}, {self.database_path=}, uri={self.database_path.startswith('file:')}")
+            connection = sqlite3.connect(
+                database=self.database_path,
+                isolation_level=None,
+                uri=self.database_path.startswith('file:'),
+            )
             connection.row_factory = self.dict_factory
             connection_cache[(pid, thread_id)] = connection
         return connection_cache[(pid, thread_id)]
 
-    @property
     def cursor(self) -> sqlite3.Cursor:
-        """Start a cursor and create a database called 'session'"""
-        if self._cursor is None:
-            self._cursor = self.connection.cursor()
-        return self._cursor
+        """Start a cursor"""
+        return self.connection.cursor()
+
+    def list_tables(self):
+        """Check if the table exists in the SQLite database."""
+        query = f"SELECT name FROM sqlite_master WHERE type='table'"
+        cursor = self.cursor()
+        cursor.execute(query)
+        return [row.name for row in cursor.fetchall()]
+
+    def drop_table(self, table_name):
+        query = f"DROP table ?"
+        cursor = self.cursor()
+        cursor.execute(query, (table_name,))
+        return cursor.fetchone()
