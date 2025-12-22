@@ -63,6 +63,10 @@ class BaseBeakerApp(ServerApp):
         # default_value=f"beaker_kernel.services.storage.notebook.FileNotebookManager",
         config=True
     )
+    context_manager_class = traitlets.Type(
+        f"beaker_kernel.services.context.manager.BeakerContextManager",
+        config=True,
+    )
     virtual_home_root = traitlets.Unicode(
         help="Path pointing to where user directories should be stored. Defaults to 'root_dir' if not set.",
         config=True,
@@ -136,6 +140,11 @@ class BaseBeakerApp(ServerApp):
         from beaker_kernel.services.storage.notebook import FileNotebookManager
         return FileNotebookManager
 
+    @traitlets.default("context_manager_class")
+    def _default_context_manager_class(self):
+        from beaker_kernel.services.context.manager import BeakerContextManager
+        return BeakerContextManager
+
     def __init__(self, **kwargs):
         # Apply defaults from defaults classvar
         defaults = getattr(self.__class__, "defaults", None)
@@ -157,14 +166,21 @@ class BaseBeakerApp(ServerApp):
         # Initialize configurables first to ensure config is loaded before other initializations
         super().init_configurables()
 
-        self.notebook_manager = self.notebook_manager_class(
-            parent=self,
-            # contents_manager=self.contents_manager
-        )
         self.datastore = self.datastore_class(
             parent=self,
         )
-        self.log.info(f"Initialized datastore: {self.datastore.__class__.__name__}")
+        self.log.debug(f"Initialized datastore: {self.datastore.__class__.__name__}")
+        self.notebook_manager = self.notebook_manager_class(
+            parent=self,
+        )
+        from beaker_kernel.services.context.manager import BeakerContextManager
+        self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
+
+        contexts = self.context_manager.list_contexts()
+        self.log.warning(f"Loaded contexts: {', '.join(str(c) for c in contexts)}")
+
+        import sys
+        sys.exit(0)
 
 
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):

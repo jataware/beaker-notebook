@@ -5,7 +5,7 @@ from archytas.react import ReActAgent
 from archytas.tool_utils import AgentRef, LoopControllerRef, ReactContextRef, tool
 
 from beaker_kernel.lib.config import config
-from beaker_kernel.lib.utils import set_tool_execution_context, DefaultModel
+from beaker_kernel.lib.utils import DefaultModel, set_tool_execution_context
 
 if typing.TYPE_CHECKING:
     from .context import BeakerContext

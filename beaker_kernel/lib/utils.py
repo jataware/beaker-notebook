@@ -216,8 +216,8 @@ def action(action_name: str|None=None, docs: str|None=None, default_payload=None
                 raise RuntimeError("This action is disabled.")
             return disabled_message
         return disable
-    def register_method(fn):
 
+    def register_method(fn):
         action_nm = action_name or fn.__name__  # Default msg_type value to be the name of the function if undefined/falsey
         if action_nm.lower().endswith("request"):
             logger.error("Beaker action names should not include the `_request` suffix.")

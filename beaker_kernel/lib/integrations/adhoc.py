@@ -193,10 +193,9 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
 
     def __init__(
         self,
-        display_name: str,
         **config_options
     ):
-        super().__init__(display_name)
+        super().__init__()
         self.adhoc_config_options = config_options
 
         # Define a datafile path finding extension that is within the closure of the integration provider class.
@@ -235,7 +234,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
         self.jinja_environment.add_extension(DatafileExtension)
 
         # prompts_root = self.adhoc_path / "prompts"
-        self.specifications = list(self.specification_map.values())
+        self.specifications = list(self.discover_integrations().values())
 
         prompts ="\n".join(
             file.read_text()
@@ -253,10 +252,10 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
             "prompts": cls.PROMPT_BUILD_PATH,
         }
 
-    @property
-    def specification_map(self) -> dict[str, AdhocSpecificationIntegration]:
+    @classmethod
+    def discover_integrations(cls) -> dict[str, AdhocSpecificationIntegration]:
         specs: dict[str, AdhocSpecificationIntegration] = {}
-        for spec_dir in self.iter_data("specifications"):
+        for spec_dir in cls.iter_data("specifications"):
             if not spec_dir.is_dir():
                 continue
 
@@ -272,7 +271,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
                     continue
                 spec = AdhocSpecificationIntegration.from_dict(
                     location=spec_dir,
-                    provider=self.slug,
+                    provider=cls.slug,
                     content=spec_data
                 )
                 specs[spec_uuid] = spec

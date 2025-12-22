@@ -338,8 +338,8 @@ class BeakerKernel(KernelProxyManager):
         with open(self.connection_file, "w") as connection_file:
             json.dump(run_info, connection_file, indent=2)
 
-    async def set_context(self, context_name, context_info, language="python3", subkernel=None, parent_header={}):
 
+    async def set_context(self, context_name, context_info, language="python3", subkernel=None, parent_header={}):
         context_cls = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
             # TODO: Should we return an error if the requested context isn't available?

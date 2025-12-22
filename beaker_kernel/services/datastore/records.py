@@ -9,12 +9,14 @@ if TYPE_CHECKING:
 
 _table_cache = ContextVar("_table_cache", default=None)
 
+
 def table_cache(table):
     cache = _table_cache.get()
     if cache is None:
         cache = {}
         _table_cache.set(cache)
     return cache.setdefault(table, {})
+
 
 class TableDict(MutableMapping):
     parent: "MultiKernelManager"
@@ -109,6 +111,7 @@ class TableDict(MutableMapping):
         # Log warning
         return None
 
+
 class TableDictRecord(dict):
     table: TableDict
 
@@ -144,5 +147,6 @@ class TableDictRecord(dict):
         self.callback("Dictionary updated via update() method")
 
     def __del__(self):
+        # TODO
         # Ensure updated before deletion
         super().__del__()

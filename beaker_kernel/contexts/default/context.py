@@ -28,11 +28,10 @@ class DefaultContext(BeakerContext):
         super().__init__(beaker_kernel, self.agent_cls, config)
 
     @classmethod
-    def available_subkernels(cls) -> List["BeakerSubkernel"]:
+    def available_subkernels(cls) -> dict["str", "BeakerSubkernel"]:
         subkernels: Dict[str, BeakerSubkernel] = autodiscover("subkernels")
         subkernel_list = sorted(subkernels.values(), key=lambda subkernel: (subkernel.WEIGHT, subkernel.SLUG))
-        subkernel_slugs = [subkernel.SLUG for subkernel in subkernel_list]
-        return subkernel_slugs
+        return {subkernel.SLUG: subkernel for subkernel in subkernel_list}
 
     async def auto_context(self):
         return f"""

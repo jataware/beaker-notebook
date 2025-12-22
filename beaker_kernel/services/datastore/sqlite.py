@@ -42,6 +42,20 @@ class Sqlite3Table(DatastoreTable):
             params.extend(condition_values)
         return query_str, params
 
+    def parse_result(self, result):
+        if result is None:
+            return None
+        parsed_result = {}
+        for col in self.columns:
+            value = result[col.name]
+            if col.column_type == ColumnType.JSON and isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            parsed_result[col.name] = value
+        return parsed_result
+
     def create(self):
         """Create the table in the SQLite database."""
         col_lines = []
@@ -119,7 +133,7 @@ CREATE TABLE IF NOT EXISTS {self.name}
         result = cursor.fetchone()
         if not result:
             result = None
-        return result  # type: ignore[return-value]
+        return self.parse_result(result)  # type: ignore[return-value]
 
     def remove(self, **conditions: Any):
         """Remove records matching the conditions."""
@@ -135,8 +149,8 @@ CREATE TABLE IF NOT EXISTS {self.name}
         query = f"""SELECT {col_def} FROM {self.name};"""
         cursor = self.cursor()
         cursor.execute(query)
-        result = cursor.fetchall()
-        return result  # type: ignore[return-value]
+        results = cursor.fetchall()
+        return [self.parse_result(result) for result in results] # type: ignore[return-value]
 
     def count(self, **conditions: Any):
         query = f"""SELECT COUNT(1) as count FROM {self.name}"""
@@ -158,10 +172,10 @@ CREATE TABLE IF NOT EXISTS {self.name}
         try:
             cursor = self.cursor()
             cursor.execute(query, params)
-            result = cursor.fetchall()
+            results = cursor.fetchall()
         except Exception as e:
             raise
-        return result  # type: ignore[return-value]
+        return [self.parse_result(result) for result in results]  # type: ignore[return-value]
 
     def update(self, conditions: dict, record: dict|object):
         """Update records matching conditions with new values."""

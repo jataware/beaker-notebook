@@ -11,12 +11,13 @@ class BaseIntegrationProvider(ABC):
     provider_type: ClassVar[str]
     mutable: ClassVar[bool] = False
     slug: ClassVar[str]
+    display_name: ClassVar[str]
 
-    display_name: str
     prompt_instructions: Optional[str]
 
-    def __init__(self, display_name: str):
-        self.display_name = display_name
+    def __init__(self, display_name: Optional[str] = None):
+        if display_name is not None:
+            self.__class__.display_name = display_name
         self.prompt_instructions = None
 
     @classmethod
@@ -43,13 +44,19 @@ class BaseIntegrationProvider(ABC):
             parts.append(str(integration))
         return "\n".join(parts)
 
-    def iter_data(self, data_types: Optional[list[str] | str]=None) -> Generator[Path, None, None]:
+    @classmethod
+    @abstractmethod
+    def discover_integrations(cls) -> dict[str, Integration]:
+        ...
+
+    @classmethod
+    def iter_data(cls, data_types: Optional[list[str] | str]=None) -> Generator[Path, None, None]:
         seen: set[tuple[str, str]] = set()
         if data_types is None:
-            data_types = self.get_cls_data().keys()
+            data_types = cls.get_cls_data().keys()
         elif isinstance(data_types, str):
             data_types = [data_types]
-        for data_path_base in self.data_basedirs:
+        for data_path_base in cls.get_data_basedirs():
             for data_type in data_types:
                 type_path = Path(data_path_base) / data_type
                 # Skip if generated path is not a directory
@@ -84,11 +91,11 @@ class BaseIntegrationProvider(ABC):
                 return file_path
         return None
 
-    @property
-    def data_basedirs(self):
+    @classmethod
+    def get_data_basedirs(cls) -> list[os.PathLike]:
         data_dirs = []
         for data_dir in find_resource_dirs("data"):
-            base_dir = os.path.join(data_dir, self.slug)
+            base_dir = os.path.join(data_dir, cls.slug)
             if os.path.isdir(base_dir):
                 data_dirs.append(base_dir)
         alt_integration_dir = os.environ.get("INTEGRATION_PATH", "./integrations")
@@ -98,6 +105,10 @@ class BaseIntegrationProvider(ABC):
         # This allows user to overwrite defaults
         data_dirs.reverse()
         return data_dirs
+
+    @property
+    def data_basedirs(self):
+        return self.get_data_basedirs()
 
     @abstractmethod
     def list_integrations(self) -> list[Integration]:
@@ -130,8 +141,6 @@ class BaseIntegrationProvider(ABC):
 
 class MutableBaseIntegrationProvider(BaseIntegrationProvider):
     mutable = True
-    def __init__(self, display_name: str):
-        super().__init__(display_name)
 
     @abstractmethod
     def add_integration(self, **payload) -> Integration:

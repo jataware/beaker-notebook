@@ -2,17 +2,19 @@ import asyncio
 import base64
 import dataclasses
 import inspect
+import itertools
 import json
 import logging
+import os
 import os.path
-from pathlib import Path
-import urllib.parse
-from uuid import uuid4
+import re
 import requests
-import itertools
+import urllib.parse
 from dataclasses import asdict
 from functools import wraps
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias
+from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 import yaml
@@ -39,19 +41,28 @@ logger = logging.getLogger(__name__)
 
 TOOL_TOGGLE_PREFIX = "TOOL_ENABLED_"
 
+
 class LinterCodeCellPayload(TypedDict):
     cell_id: str
     content: str
+
 
 class LinterCodeCellsPayload(TypedDict):
     notebook_id: str
     cells: list[LinterCodeCellPayload]
 
+
 class BeakerContext:
+    SLUG: ClassVar[str]
+    SHORT_NAME: ClassVar[str]
+    FULL_NAME: ClassVar[str]
+    WEIGHT: ClassVar[int] = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+    AGENT_CLS: "ClassVar[type[BeakerAgent]]"
+
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
     config: Dict[str, Any]
-    agent: "ReActAgent"
+    agent: "BeakerAgent"
     current_llm_query: str | None
     compatible_subkernels: ClassVar[list[str] | None] = None
 
@@ -69,8 +80,7 @@ class BeakerContext:
     kernel_state: Optional[dict]
     integrations: list[BaseIntegrationProvider]
 
-    SLUG: Optional[str]
-    WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+    procedure_location: ClassVar[Optional[os.PathLike]]
 
     def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "BeakerAgent", config: Dict[str, Any],
                  integrations: list[BaseIntegrationProvider] = None):
@@ -78,7 +88,7 @@ class BeakerContext:
         self.integrations = integrations if integrations is not None else []
         self.jinja_env = None
         self.templates = {}
-        self.workflows = {}
+        self.workflows = self.discover_workflows()
         self.current_workflow_state = None
         self.beaker_kernel = beaker_kernel
         self.config = config
@@ -124,15 +134,9 @@ class BeakerContext:
                     # For templates, this indicates a binary file which can't be a template, so throw a warning and skip.
                     logger.warning(f"File '{template_name}' in context '{self.__class__.__name__}' is not a valid template file as it cannot be decoded to a unicode string.")
 
-        workflows_dir = os.path.join(os.path.dirname(class_dir), "workflows")
-        if os.path.exists(workflows_dir):
-            for workflow_yaml in Path(workflows_dir).glob("*.yaml"):
-                workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
-                # lives as long as the session does
-                workflow_id = str(uuid4())
-                self.workflows[workflow_id] = workflow
-                if workflow.is_context_default:
-                    self.attach_workflow(workflow_id)
+        for workflow_id, workflow in self.workflows.items():
+            if workflow.is_context_default:
+                self.attach_workflow(workflow_id)
         if not self.workflows:
             logger.warning("Context has no workflows: disabling tools.")
             workflow_tools = [
@@ -144,6 +148,24 @@ class BeakerContext:
                 self.agent.disable(workflow_tool)
 
     def __init_subclass__(cls):
+        # Initialize default values for class variables if not already set
+        if not hasattr(cls, "AGENT_CLS") and hasattr(cls, "agent_cls"):
+            cls.AGENT_CLS = cls.agent_cls
+        if not hasattr(cls, "SLUG"):
+            package_str = inspect.getmodule(cls).__package__
+            if package_str:
+                cls.SLUG = package_str.split(".")[-1]
+            else:
+                cls.SLUG = cls.__name__.upper()
+        if not hasattr(cls, "SHORT_NAME"):
+            cls.SHORT_NAME = cls.SLUG.title()
+        if not hasattr(cls, "FULL_NAME"):
+            full_name = cls.__name__
+            full_name = re.sub(r'Context$', '', full_name)
+            full_name = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', full_name)
+            cls.FULL_NAME = full_name
+
+        # If a subclass has an auto_context, it should be used instead of the parent's.
         subclass_autocontext = getattr(cls, "auto_context", None)
         if not (subclass_autocontext is None or subclass_autocontext is BeakerContext.auto_context):
             cls._auto_context = subclass_autocontext
@@ -238,9 +260,11 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
 """)
 
         if self.workflows:
-            parts.append(create_available_workflows_prompt(
-                list(self.workflows.values()),
-                self.attached_workflow)
+            parts.append(
+                create_available_workflows_prompt(
+                    list(self.workflows.values()),
+                    self.attached_workflow
+                )
             )
 
         if self.integrations:
@@ -257,20 +281,20 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         subkernel_slug = self.config.get("subkernel", None)
 
         self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{subkernel_slug}`")
+        subkernels: "dict[str, BeakerSubkernel]" = autodiscover("subkernels")
         if not subkernel_slug and language:
             kernel_opts = {
                 subkernel.KERNEL_NAME: subkernel
-                for subkernel in autodiscover("subkernels").values()
+                for subkernel in subkernels.values()
             }
             subkernel_opts = {
                 subkernel.SLUG: subkernel
-                for subkernel in autodiscover("subkernels").values()
+                for subkernel in subkernels.values()
             }
             if language not in kernel_opts and language in subkernel_opts:
                 language = subkernel_opts[language].KERNEL_NAME
             subkernel_slug = language
 
-        subkernels = autodiscover("subkernels")
         subkernel_by_lang = {
            sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
         }
@@ -289,7 +313,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             raise RuntimeError(f"Error fetching kernelspec for {subkernel_slug}: {kernelspec_req.json()}")
 
         kernelspec = kernelspec_req.json()
-        kernel_lang = kernelspec.get('spec', {}).get("language", None)
+        kernel_lang: str = kernelspec.get('spec', {}).get("language", None)
         subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
 
         path = self.beaker_kernel.session_config.get("beaker_session", None)
@@ -306,7 +330,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         kernel_info = kernel_creation_res.json()
 
         try:
-            subkernel_id = kernel_info["id"]
+            subkernel_id: str = kernel_info["id"]
         except Exception as err:
             logger.error(json.dumps(kernel_info), exc_info=err)
             raise
@@ -320,16 +344,16 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         connection_info = connection_info_res.json()
         connection_info["key"] = base64.b64decode(connection_info.get("key", b""))
 
-        subkernel = subkernel_cls(subkernel_id, connection_info, self)
+        subkernel: BeakerSubkernel = subkernel_cls(subkernel_id, connection_info, self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
 
     @classmethod
-    def available_subkernels(cls) -> List["BeakerSubkernel"]:
+    def available_subkernels(cls) -> dict["str", "BeakerSubkernel"]:
         subkernels: Dict[str, BeakerSubkernel] = autodiscover("subkernels")
 
         if cls.compatible_subkernels:
-            return [subkernel for subkernel in cls.compatible_subkernels if subkernel in subkernels]
+            return {slug: subkernels[slug] for slug in cls.compatible_subkernels if slug in subkernels}
 
         class_dir = inspect.getfile(cls)
         proc_dir = os.path.join(os.path.dirname(class_dir), "procedures")
@@ -340,10 +364,10 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         subkernel_list = sorted(subkernels.values(), key=lambda subkernel: (subkernel.WEIGHT, subkernel.SLUG))
 
         if proc_slugs and subkernel_list:
-            result = [subkernel.SLUG for subkernel in subkernel_list if subkernel.SLUG in proc_slugs]
+            result = {subkernel.SLUG: subkernel for subkernel in subkernel_list if subkernel.SLUG in proc_slugs}
             return result
         else:
-            return []
+            return {}
 
     @classmethod
     def default_payload(cls) -> str:
@@ -681,24 +705,54 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
     def send_response(self, stream, msg_or_type, content=None, channel=None, parent_header={}, parent_identities=None):
         return self.beaker_kernel.send_response(stream, msg_or_type, content, channel, parent_header, parent_identities)
 
+    @classmethod
+    def discover_procedures(cls) -> dict:
+        proc_dir = getattr(cls, "procedure_location", None)
+        result = {}
+        if proc_dir is None:
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            proc_dir = os.path.join(class_dir, "procedures")
+        if not proc_dir or not os.path.isdir(proc_dir):
+            return {}
+
+        langdirs = os.listdir(proc_dir)
+        for lang in langdirs:
+            proc_lang_dir = os.path.join(proc_dir, lang)
+            if os.path.exists(proc_lang_dir):
+                for proc_file in os.listdir(proc_lang_dir):
+                    proc_name, _ = os.path.splitext(proc_file)
+                    file_path = os.path.join(lang, proc_file)
+                    if proc_name not in result:
+                        result[proc_name] = {
+                            "name": proc_name,
+                            "languages": {lang: file_path}
+                        }
+                    else:
+                        result[proc_name]["languages"][lang] = file_path
+        return result
+
+    @classmethod
+    def discover_workflows(cls) -> dict:
+        workflow_dir = getattr(cls, "workflow_location", None)
+        result = {}
+
+        if workflow_dir is None:
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            workflows_dir = os.path.join(class_dir, "workflows")
+        if os.path.exists(workflows_dir):
+            for workflow_yaml in Path(workflows_dir).glob("*.yaml"):
+                workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
+                # lives as long as the session does
+                workflow_id = str(uuid4())
+                result[workflow_id] = workflow
+        return result
 
     @property
     def slug(self) -> Optional[str]:
         """
         A short, white-space-free label used to identify the context programatically.
-
-        If it is not defined on the context class as cls.SLUG, default to look at the name of the package that contains
-        the context.
-        E.g. For "beaker_kernel.contexts.pandas" the slug would be "pandas"
         """
-        if hasattr(self, "SLUG"):
-            return self.SLUG
-
-        package_str = inspect.getmodule(self).__package__
-        if package_str:
-            return package_str.split(".")[-1]
-        else:
-            return None
+        return self.SLUG
 
     @property
     def lang(self):

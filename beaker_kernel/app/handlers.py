@@ -392,6 +392,7 @@ class ContextHandler(JupyterHandler):
         subkernel_by_language_index = {subkernel.JUPYTER_LANGUAGE: subkernel for subkernel in possible_subkernels.values()}
         kernels = ksm.get_all_specs()
 
+        # TODO: This context/subkernel logic needs to be redone
         installed_kernels = {}
         for kernel_long_name, kernel_details in kernels.items():
             kernelspec = kernel_details.get("spec", {})
