@@ -25,6 +25,7 @@ from beaker_kernel.lib.subkernel import BeakerSubkernel
 from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
 from beaker_kernel.lib import admin
 from beaker_kernel.services.auth import BeakerUser
+from beaker_kernel.services.context.manager import BeakerContextManager
 from .api.handlers import register_api_handlers
 
 if TYPE_CHECKING:
@@ -386,7 +387,9 @@ class ContextHandler(JupyterHandler):
     def get(self):
         """Get the main page for the application's interface."""
         ksm = self.kernel_spec_manager
-        contexts: dict[str, BeakerContext] = autodiscover("contexts")
+        # contexts: dict[str, BeakerContext] = autodiscover("contexts")
+        context_manager: BeakerContextManager = self.serverapp.context_manager
+        contexts = sorted(context_manager.list_contexts(), key=lambda context: context.weight)
         possible_subkernels: dict[str, BeakerSubkernel] = autodiscover("subkernels")
         subkernel_by_kernel_index = {subkernel.KERNEL_NAME: subkernel for subkernel in possible_subkernels.values()}
         subkernel_by_language_index = {subkernel.JUPYTER_LANGUAGE: subkernel for subkernel in possible_subkernels.values()}
@@ -405,47 +408,32 @@ class ContextHandler(JupyterHandler):
                     "subkernel": subkernel_by_language_index[kernel_language],
                 }
 
-        contexts = sorted(contexts.items(), key=lambda item: (item[1].WEIGHT, item[0]))
-
         # Extract data from auto-discovered contexts and subkernels to provide options
-        context_data = {}
-        for context_slug, context in contexts:
-            acceptable_subkernels = context.available_subkernels()
-            available_subkernels = [
-                subkernel
-                for subkernel in acceptable_subkernels
-                if subkernel in set(
-                    subkernel["subkernel"].SLUG for subkernel in installed_kernels.values()
-                )
-            ]
-
-            context_data[context_slug] = {
+        context_data = {
+            context.slug: {
                 "languages": [
                     {
-                        "slug": subkernel_slug,
-                        "subkernel": subkernel_slug,
-                        "display": None,
+                        "slug": subkernel["language"],
+                        "subkernel": subkernel["slug"],
+                        "display": subkernel["display_name"],
                     }
-                    for subkernel_slug in available_subkernels
+                    for subkernel in context.subkernels.values()
+                    if subkernel["slug"] in {installed_kernel["subkernel"].SLUG for installed_kernel in installed_kernels.values()}
                 ],
-                "subkernels": {},
-                "defaultPayload": context.default_payload(),
-            }
-            subkernels = context_data[context_slug]["subkernels"]
-            for kernel_name, kernel_info in installed_kernels.items():
-                if kernel_info["subkernel"].SLUG in acceptable_subkernels:
-                    display_name = kernel_info["subkernel"].DISPLAY_NAME
-                    provisioner_info = kernel_info.get("provisioner", None)
-                    if provisioner_info:
-                        display_name += f" ({provisioner_info['name']})"
-                    subkernels[kernel_name] = {
-                        "language": kernel_info["kernelspec"]["spec"]["language"],
-                        "slug": kernel_info["subkernel"].SLUG,
-                        "display_name": display_name,
-                        "weight": kernel_info["subkernel"].WEIGHT,
+                "subkernels": {
+                    subkernel_slug: {
+                        "language": subkernel["language"],
+                        "slug": subkernel_slug,
+                        "display_name": subkernel["display_name"],
+                        "weight": subkernel["weight"],
                     }
-
-
+                    for subkernel_slug, subkernel in context.subkernels.items()
+                },
+                "defaultPayload": context.cls.default_payload() if context.cls else '{}',  # TODO: Figure out if there's
+                                                                                           # a clean way to track this
+            }
+            for context in contexts
+        }
         return self.write(context_data)
 
 

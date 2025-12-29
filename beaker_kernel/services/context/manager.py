@@ -1,89 +1,25 @@
 import inspect
-import itertools
-import json
-from collections import defaultdict
-from dataclasses import dataclass, field, is_dataclass, asdict
-from typing import TYPE_CHECKING, Any, TypeAlias
+import sys
+from dataclasses import is_dataclass, asdict
+from typing import TYPE_CHECKING, TypeAlias
 
 import traitlets
 from traitlets import Instance, Type, default
 from traitlets.config.configurable import LoggingConfigurable
 from traitlets.utils.importstring import import_item
 
-from beaker_kernel.app.base import BaseBeakerApp
 from beaker_kernel.lib.context import BeakerContext
+from beaker_kernel.lib.types import ContextInfo
+from beaker_kernel.lib.utils import to_import_string
+from beaker_kernel.services import ServiceApi
+from beaker_kernel.services.context.handlers import ContextApi
+from beaker_kernel.services.context.util import find_differences
 from beaker_kernel.services.datastore import Column, ColumnType, DatastoreTable, Now, TableRecord
 from beaker_kernel.services.datastore.records import TableDict
 
 if TYPE_CHECKING:
+    from beaker_kernel.app.base import BaseBeakerApp
     from beaker_kernel.services.context.discovery_service import ContextDiscoveryService
-
-
-# @dataclass
-# class BeakerContextToolInfo:
-#     name: str
-#     description: str
-
-# @dataclass
-# class BeakerContextAgentInfo:
-#     name: str
-#     description: str
-
-# @dataclass
-# class BeakerContextIntegrationInfo:
-#     name: str
-#     description: str
-
-
-# @dataclass
-# class BeakerContextWorkflowInfo:
-#     name: str
-#     description: str
-
-
-# @dataclass
-# class BeakerContextSubkernelInfo:
-#     name: str
-#     description: str
-
-
-# @dataclass
-# class BeakerContextLanguageInfo:
-#     name: str
-#     description: str
-
-
-# @dataclass
-# class BeakerContextInfo:
-#     slug: str
-#     short_name: str
-#     full_name: str
-#     cls: type
-#     description: str
-#     version: str
-#     agent: BeakerContextAgentInfo
-#     actions: dict[str, BeakerContextToolInfo]
-#     tools: dict[str, BeakerContextToolInfo]
-#     integrations: dict[str, BeakerContextIntegrationInfo]
-#     workflows: dict[str, BeakerContextWorkflowInfo]
-#     subkernels: dict[str, BeakerContextSubkernelInfo]
-#     languages: dict[str, BeakerContextLanguageInfo]
-#     metadata: dict[str, Any] = field(default_factory=lambda: {})
-
-from beaker_kernel.lib.types import (
-    ActionInfo,
-    AgentInfo,
-    ContextInfo,
-    Integration,
-    LanguageInfo,
-    LLMInfo,
-    ProcedureInfo,
-    SubkernelInfo,
-    ToolInfo,
-    Workflow,
-    WorkflowStage,
-    WorkflowStep,
-)
 
 
 class ContextTable(DatastoreTable):
@@ -96,8 +32,10 @@ class ContextTable(DatastoreTable):
         Column(name="full_name", column_type=ColumnType.TEXT, allow_null=False),
         Column(name="cls", column_type=ColumnType.TEXT, allow_null=False),
         Column(name="description", column_type=ColumnType.TEXT),
+        Column(name="weight", column_type=ColumnType.INTEGER),
         Column(name="version", column_type=ColumnType.TEXT, allow_null=True),
 
+        # Info
         Column(name="agent", column_type=ColumnType.JSON),
         Column(name="actions", column_type=ColumnType.JSON),
         Column(name="tools", column_type=ColumnType.JSON),
@@ -113,33 +51,45 @@ class ContextTable(DatastoreTable):
     ]
 
     def serialize(self, resource: ContextInfo) -> "ContextRecord":
+        def dict_factory(*args, **kwargs):
+            try:
+                # Fetch raw object that is being turned into a dict so we can keep track of its type
+                frame = inspect.currentframe()
+                if frame:
+                    parent_frame = frame.f_back
+                    obj_cls = parent_frame.f_locals.get("obj", None)
+                    if obj_cls:
+                        kwargs.setdefault("_obj_cls", to_import_string(obj_cls))
+            except Exception as err:
+                pass
+            obj = dict(*args, **kwargs)
+            return obj
+
         if is_dataclass(resource):
-            record = asdict(resource)
+            record = asdict(resource, dict_factory=dict_factory)
+        else:
+            return resource
         return record
 
     def deserialize(self, record: "ContextRecord", parent: "BeakerContextManager") -> ContextInfo:
         cls: type = import_item(record["cls"])
-
-        def objectify(value: Any):
-            if isinstance(value, str):
-                return json.loads(value)
-
         return ContextInfo(
             slug=record["slug"],
             short_name=record["short_name"],
             full_name=record["full_name"],
             cls=cls,
             description=record["description"],
+            weight=record.get("weight", None),
             version=record.get("version", None),
-            actions=objectify(record["actions"]),
-            tools=objectify(record["tools"]),
-            agent=objectify(record["agent"]),
-            integrations=objectify(record["integrations"]),
-            workflows=objectify(record["workflows"]),
-            subkernels=objectify(record["subkernels"]),
-            languages=objectify(record["languages"]),
-            procedures=objectify(record["procedures"]),
-            metadata=objectify(record["metadata"]),
+            actions=record["actions"],
+            tools=record["tools"],
+            agent=record["agent"],
+            integrations=record["integrations"],
+            workflows=record["workflows"],
+            subkernels=record["subkernels"],
+            languages=record["languages"],
+            procedures=record["procedures"],
+            metadata=record["metadata"],
         )
 
 
@@ -148,10 +98,7 @@ ContextRecord: TypeAlias = TableRecord[ContextTable]
 
 class BeakerContextManager(LoggingConfigurable):
     parent: "BaseBeakerApp"
-    # context_manager_class = traitlets.DottedObjectName(
-    #     "beaker_context.services.context.manager.BeakerDistributedcontextManager",
-    #     config=True,
-    # )
+
     context_discovery_class = traitlets.DottedObjectName(
         "beaker_kernel.services.context.discovery_service.ContextDiscoveryService",
         config=True,
@@ -169,9 +116,18 @@ class BeakerContextManager(LoggingConfigurable):
     _contexts = Instance(
         klass=TableDict,
     )
+    api_cls = Type(
+        default_value=ContextApi,
+        klass=ServiceApi,
+        config=True
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.update_contexts()
+        self.parent.handlers.extend(self.api_cls.handlers)
+
+    def update_contexts(self):
         for context in self.context_discovery_service.discover().values():
             self.register_context(context)
 
@@ -191,38 +147,6 @@ class BeakerContextManager(LoggingConfigurable):
         return instance
 
     def register_context(self, context: type[BeakerContext]|BeakerContext|ContextInfo) -> ContextRecord:
-
-        def is_different(left, right) -> bool:
-            if isinstance(left, dict) and isinstance(right, dict):
-                left_keys = set(left.keys())
-                right_keys = set(right.keys())
-                left_keys.discard("last_updated")
-                right_keys.discard("last_updated")
-
-                if left_keys != right_keys:
-                    return True
-
-                for key in left_keys:
-                    if is_different(left[key], right[key]):
-                        return True
-                # Same keys and values (ignoring last_updated), so they are not different
-                return False
-            elif isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
-                if len(left) != len(right):
-                    return True
-                return any(is_different(left_item, right_item) for left_item, right_item in zip(left, right))
-            else:
-                return left != right
-
-        def find_differences(prev: dict, new: dict) -> dict:
-            result = {}
-            for key in new.keys():
-                if key == "last_updated":
-                    continue
-                if is_different(prev.get(key, None), new[key]):
-                    result[key] = new[key]
-            return result
-
         if isinstance(context, BeakerContext):
             # record: ContextRecord = self.context_table.serialize(ContextInfo.from_instance(context))
             context = context.__class__
@@ -232,10 +156,9 @@ class BeakerContextManager(LoggingConfigurable):
             record = self.context_table.serialize(context)
         existing_record = self.context_table.get(slug=record["slug"])
         if existing_record:
-            # differences = {k: v for k, v in record.items() if v != existing_record[k]}
             differences = find_differences(existing_record, record)
             if {key for key in differences if key != "last_updated"}:
-                self.log.warning(f"Updating context {record['slug']} with differences: {differences}")
+                self.log.debug(f"Updating context {record['slug']} with differences: {differences}")
                 return self.context_table.update(conditions={"slug": record["slug"]}, record=record)
             else:
                 self.log.debug(f"Context {record['slug']} already registered with the same data, skipping update.")
@@ -244,65 +167,8 @@ class BeakerContextManager(LoggingConfigurable):
             return self.context_table.add(record)
 
     def list_contexts(self) -> list[ContextInfo]:
-        return [self.context_table.deserialize(record, self) for record in self.context_table.all()]
+        return [self.context_table.deserialize(record, self) for record in self.context_table.all()] or []
 
-    def get_context(self, slug: str) -> ContextInfo:
-        record = self.context_table.get(slug)
-        return self.context_table.deserialize(record, self)
-
-
-def to_context_info(context_cls: type[BeakerContext]|BeakerContext) -> ContextInfo:
-    """
-    Context class (or instance) to context info object
-
-    :param context: Description
-    :type context: BeakerContext
-    :return: Description
-    :rtype: ContextInfo
-    """
-    if not isinstance(context_cls, type):
-        context_cls = context_cls.__class__
-    if not issubclass(context_cls, BeakerContext):
-        raise ValueError(f"Context {context_cls} is not a subclass of BeakerContext")
-
-    actions = {}
-    tools = {}
-    integrations = {}
-    workflows = {}
-    subkernels = context_cls.available_subkernels()
-    language_map = defaultdict(list)
-    for subkernel in subkernels.values():
-        language_map[subkernel.JUPYTER_LANGUAGE] = subkernel
-
-    agent_cls = getattr(context_cls, "AGENT_CLS", None)
-    tool_classes = [context_cls]
-
-    if agent_cls:
-        tool_classes.append(agent_cls)
-
-    for member_name, member in itertools.chain(inspect.getmembers(context_cls), inspect.getmembers(agent_cls)):
-        if hasattr(member, "_action"):
-            actions[member_name] = member
-        elif getattr(member, "_is_tool", False):
-            tools[member_name] = member
-
-    context_info = ContextInfo(
-        slug=context_cls.SLUG,
-        short_name=context_cls.SHORT_NAME,
-        full_name=context_cls.FULL_NAME,
-        cls=context_cls.__class__,
-        description=getattr(context_cls, "description", None),
-        version=getattr(context_cls, "version", None),
-        actions=actions or {},
-        # actions=getattr(context_cls, "actions", {}),
-        tools=tools or {},
-        # tools=getattr(context_cls, "tools", {}),
-        agent=getattr(context_cls, "agent", None),
-        integrations=getattr(context_cls, "integrations", {}),
-        workflows=getattr(context_cls, "workflows", {}),
-        subkernels=subkernels or {},
-        # subkernels=getattr(context_cls, "subkernels", {}),
-        languages=getattr(context_cls, "languages", {}),
-        # metadata=context.metadata,
-    )
-    return context_info
+    def get_context(self, slug: str) -> ContextInfo|None:
+        record = self.context_table.get(slug=slug)
+        return self.context_table.deserialize(record, self) or None

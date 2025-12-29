@@ -17,6 +17,7 @@ def get_kernel_name():
             return kernel
     return None
 
+
 class JuliaSubkernel(BeakerSubkernel):
     """
     Beaker subkernel for the Julia language, using the IJulia kernel from the IJulia.jl package.
@@ -28,7 +29,8 @@ class JuliaSubkernel(BeakerSubkernel):
     DISPLAY_NAME = "Julia"
     SLUG = "julia"
     JUPYTER_LANGUAGE = "julia"
-    KERNEL_NAME = get_kernel_name()
+    # KERNEL_NAME = get_kernel_name()
+    KERNEL_NAME = None
 
 # varinfo / filter / display
     FETCH_STATE_CODE = """
@@ -46,6 +48,11 @@ JSON3.write(Dict(
   "variables" => _variables
 )) |> DisplayAs.unlimited
 """
+
+    def __init__(self, jupyter_id, subkernel_configuration, context):
+        if self.KERNEL_NAME is None:
+            self.__class__.KERNEL_NAME = get_kernel_name()
+        super().__init__(jupyter_id, subkernel_configuration, context)
 
     WEIGHT = 30
 

@@ -338,8 +338,7 @@ class BeakerKernel(KernelProxyManager):
         with open(self.connection_file, "w") as connection_file:
             json.dump(run_info, connection_file, indent=2)
 
-
-    async def set_context(self, context_name, context_info, language="python3", subkernel=None, parent_header={}):
+    async def set_context(self, context_name, context_info, subkernel=None, language="python", parent_header={}):
         context_cls = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
             # TODO: Should we return an error if the requested context isn't available?
@@ -355,9 +354,14 @@ class BeakerKernel(KernelProxyManager):
                 default_payload = json.loads(default_payload)
             context_info = default_payload
 
+        if subkernel is None:
+            if language:
+                subkernel = next((subkernel for subkernel in context_cls.available_subkernels().values() if subkernel.JUPYTER_LANGUAGE == language), None)
+            # subkernel = context_cls.available
+
         context_config = {
-            "language": language,
-            "subkernel": subkernel,
+            "subkernel": subkernel.SLUG,
+            "language": subkernel.JUPYTER_LANGUAGE,
             "context_info": context_info
         }
         self.context = context_cls(beaker_kernel=self, config=context_config)

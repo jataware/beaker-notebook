@@ -8,6 +8,7 @@ from typing import Optional, Any, cast, ClassVar
 
 import traitlets
 from traitlets import Unicode, Integer, Float
+from traitlets.config import Config
 from traitlets.config.application import Application, ClassesType
 from traitlets.config.configurable import Configurable
 from traitlets.config.loader import ConfigFileNotFound
@@ -148,19 +149,16 @@ class BaseBeakerApp(ServerApp):
     def __init__(self, **kwargs):
         # Apply defaults from defaults classvar
         defaults = getattr(self.__class__, "defaults", None)
+
+        kwarg_keys = set(self.aliases.keys()) | set(self.flags.keys())
+
         if defaults and isinstance(defaults, dict):
-            from traitlets.config import Config
-
-            if config.jupyter_token:
-                identity_dict = defaults.get("IdentityProvider", {})
-                identity_dict.setdefault("token", config.jupyter_token)
-                defaults["IdentityProvider"] = identity_dict
-
             trait_config = Config(**defaults)
             self.config.update(trait_config)
+            kwargs.update({ key: value for key, value in defaults.items() if key in kwarg_keys })
 
-            kwargs.update(defaults)
         super().__init__(**kwargs)
+        self.handlers = []
 
     def init_configurables(self):
         # Initialize configurables first to ensure config is loaded before other initializations
@@ -176,14 +174,11 @@ class BaseBeakerApp(ServerApp):
         from beaker_kernel.services.context.manager import BeakerContextManager
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
-        contexts = self.context_manager.list_contexts()
-        self.log.warning(f"Loaded contexts: {', '.join(str(c) for c in contexts)}")
-
-        import sys
-        sys.exit(0)
-
-
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):
+        self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")
+        if config.jupyter_token:
+            self.config["IdentityProvider"].setdefault("token", config.jupyter_token)
+
         super().initialize(argv, find_extensions, new_httpserver, starter_extension)
         beaker_app_slug = os.environ.get("BEAKER_APP", self.config.get("beaker_app", None))
         if beaker_app_slug:
@@ -198,12 +193,11 @@ class BaseBeakerApp(ServerApp):
                 "app_cls": None,
                 "app": None,
             })
-        self.config["KernelProvisionerFactory"]["default_provisioner_name"] = "beaker-local-provisioner"
+
         self.initialize_handlers()
 
     def initialize_handlers(self):
         """Bypass initializing the default handler since we don't need to use the webserver, just the websockets."""
-        self.handlers = []
         register_handlers(self)
         self.web_app.add_handlers(".*", self.handlers)
 

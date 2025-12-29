@@ -40,6 +40,11 @@ def get_socket(stream_name: str):
     socket = KERNEL_SOCKETS[KERNEL_SOCKETS_NAMES.index(stream_name)]
     return socket
 
+def to_import_string(target: type|object) -> str:
+    if not isinstance(target, type):
+        target = target.__class__
+    return f"{target.__module__}.{target.__name__}"
+
 def import_dotted_class(import_string: str):
     try:
         module_name, class_name = import_string.rsplit('.', 1)

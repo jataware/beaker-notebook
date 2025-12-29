@@ -721,6 +721,8 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             if os.path.exists(proc_lang_dir):
                 for proc_file in os.listdir(proc_lang_dir):
                     proc_name, _ = os.path.splitext(proc_file)
+                    if proc_name.startswith('.'):
+                        continue
                     file_path = os.path.join(lang, proc_file)
                     if proc_name not in result:
                         result[proc_name] = {

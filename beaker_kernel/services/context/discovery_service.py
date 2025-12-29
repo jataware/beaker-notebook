@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 import inspect
 import traceback
 from typing import ClassVar
@@ -17,21 +16,19 @@ class ContextDiscoveryService(SingletonConfigurable):
 
     def __init_subclass__(cls):
         super().__init_subclass__()
-        # TODO: Determine if this is worthwhile
         # Replace defined "discover" classes as _discover
         if discover_func := getattr(cls, "discover", None):
             if inspect.ismethod(discover_func) and discover_func is not ContextDiscoveryService.discover:
                 setattr(cls, "_discover", discover_func)
                 delattr(cls, "discover")
+        # Register  subclass as a known service
         ContextDiscoveryService.known_services[cls] = None
         return cls
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
     def setup_instance(self, *args, **kwargs):
         super().setup_instance(*args, **kwargs)
         # Only execute once on this superclass
+        # TODO: Determine if we are confident that services will be registered by the time this is called.
         if self.__class__ is ContextDiscoveryService:
             kwargs["parent"] = self
             for cls, value in self.known_services.items():
@@ -42,7 +39,6 @@ class ContextDiscoveryService(SingletonConfigurable):
                     ContextDiscoveryService.known_services[cls] = service
                     ContextDiscoveryService.registered_services.append(service)
 
-    # @abstractmethod
     def _discover(self, **kwargs) -> dict[str, BeakerContext]:
         raise NotImplementedError()
 
@@ -70,6 +66,9 @@ class ContextDiscoveryService(SingletonConfigurable):
 
 
 class LocalContextDiscoveryService(ContextDiscoveryService):
+    """
+    Context Discovery Service that returns locally installed contexts.
+    """
     @traitlets.default("auto_register")
     def _default_auto_register(self):
         return True

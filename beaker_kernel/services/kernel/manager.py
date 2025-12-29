@@ -318,15 +318,15 @@ class KernelTable(DatastoreTable):
         provisioner_info = record.get("provisioner", None)
         if isinstance(provisioner_info, str):
             provisioner_info = json.loads(provisioner_info)
-        provisioner = None
+        provisioner_instance = None
         if provisioner_info:
             if "cls" in provisioner_info and "uuid" in provisioner_info:
                 try:
                     provisioner_cls: BeakerProvisioner = import_item(provisioner_info["cls"])
-                    provisioner = provisioner_cls.get_instance(provisioner_info["uuid"])
-                except (ImportError, LookupError):
+                    provisioner_instance = provisioner_cls.get_instance(provisioner_info["uuid"])
+                except (ImportError, LookupError, AttributeError):
                     pass
-        km.provisioner = provisioner
+        km.provisioner = provisioner_instance
         return km
 
 

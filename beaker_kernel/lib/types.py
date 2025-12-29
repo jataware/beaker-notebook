@@ -1,31 +1,33 @@
 import inspect
 import typing
-from beaker_kernel.lib.utils import slugify
-from dataclasses import dataclass, field
+from beaker_kernel.lib.utils import slugify, to_import_string
+from collections import deque
+from dataclasses import dataclass, field, is_dataclass, Field
 from datetime import date, datetime
+from typing import get_origin, get_args, Mapping, Collection
 from uuid import uuid4
+
+from beaker_kernel.lib.utils import import_dotted_class
+from beaker_kernel.lib.workflow import Workflow
 
 if typing.TYPE_CHECKING:
     from beaker_kernel.lib.context import BeakerContext
     from beaker_kernel.lib.agent import BeakerAgent
     from beaker_kernel.lib.subkernel import BeakerSubkernel
-    from beaker_kernel.lib.integrations.base import BaseIntegrationProvider, Integration
-
-
-def import_string(target: type|object) -> str:
-    if not isinstance(target, type):
-        target = target.__class__
-    return f"{target.__module__}.{target.__name__}"
+    # from beaker_kernel.lib.integrations.base import Integration
 
 
 def is_action(target: typing.Any) -> bool:
+    """Utility to determine if an object is an action method/function"""
     return callable(target) and hasattr(target, "_action")
 
 def is_tool(target: typing.Any) -> bool:
+    """Utility to determine if an object is an tool method/function"""
     return callable(target) and hasattr(target, "_is_tool")
 
 
 IntegrationTypes: typing.TypeAlias = typing.Literal["api", "database", "dataset"]
+
 
 @dataclass(kw_only=True)
 class Resource:
@@ -37,6 +39,7 @@ class Resource:
         if self.resource_id is None:
             self.resource_id = str(uuid4())
 
+
 @dataclass(kw_only=True)
 class FileResource(Resource):
     resource_type: str = "file"
@@ -47,6 +50,7 @@ class FileResource(Resource):
     # TODO: encoding?
     content: typing.Optional[str] = field(default=None)
 
+
 @dataclass(kw_only=True)
 class ExampleResource(Resource):
     resource_type: str = "example"
@@ -54,11 +58,13 @@ class ExampleResource(Resource):
     code: str
     notes: typing.Optional[str] = field(default=None)
 
+
 @dataclass
 class IntegrationExample:
     query: str
     code: str
     notes: typing.Optional[str]
+
 
 @dataclass
 class Integration:
@@ -119,7 +125,6 @@ class ToolInfo:
         )
 
 
-
 @dataclass
 class ActionInfo:
     name: str           # fn._action
@@ -133,11 +138,6 @@ class ActionInfo:
             documentation=func._docs,
             scope=func._scope,
         )
-
-# @dataclass
-# class WorkflowInfo:
-#     pass
-from .workflow import Workflow, WorkflowStage, WorkflowStep
 
 
 @dataclass
@@ -156,7 +156,7 @@ class SubkernelInfo:
         if metadata is None:
             metadata = {}
         return cls(
-            cls=import_string(subkernel_cls),
+            cls=to_import_string(subkernel_cls),
             slug=subkernel_cls.SLUG,
             display_name=subkernel_cls.DISPLAY_NAME,
             description=getattr(subkernel_cls, "DESCRIPTION", subkernel_cls.__doc__),
@@ -168,7 +168,6 @@ class SubkernelInfo:
             },
             weight=subkernel_cls.WEIGHT,
         )
-
 
 
 @dataclass
@@ -200,13 +199,38 @@ class AgentInfo:
             for _, tool in inspect.getmembers(agent_cls, is_tool)
         }
         result = cls(
-            cls=import_string(agent_cls),
+            cls=to_import_string(agent_cls),
             description=agent_cls.__doc__,
             tools=tools,
             agent_prompt="PROMPT"
         )
         return result
 
+def reify_dataclasses(target, typedef):
+    if is_dataclass(typedef):
+        if isinstance(target, typedef):
+        # Remap existing dataclasses in place
+            for field_name, field_def in target.__dataclass_fields__.items():
+                field_value = getattr(target, field_name)
+                setattr(target, field_name, reify_dataclasses(field_value, field_def.type))
+        elif isinstance(target, dict):
+            instance_cls = import_dotted_class(target.pop("_obj_cls")) if "_obj_cls" in target else typedef
+            target = instance_cls(**target)
+        else:
+            raise ValueError(f"Unable to map {repr(target)} to type {typedef}")
+        return target
+    else:
+        # All others, return the value so that that the dataclass attribute is replaced with the new value
+        origin = get_origin(typedef) or (typedef if isinstance(typedef, type) else type(target))
+        args = get_args(typedef) or [None, None]
+        if not isinstance(origin, type):
+            return target
+        if issubclass(origin, Mapping):
+            return {key: reify_dataclasses(value, args[1]) for key, value in target.items()}
+        elif issubclass(origin, (list, tuple, set, deque)):
+            return origin(reify_dataclasses(value, args[0]) for value in target)
+        else:
+            return target
 
 @dataclass
 class ContextInfo:
@@ -215,11 +239,12 @@ class ContextInfo:
     full_name: str
     cls: str
     description: str
+    weight: int
 
     agent: AgentInfo
     actions: dict[str, ActionInfo]
     tools: dict[str, ToolInfo]
-    integrations: dict[str, Integration]
+    integrations: dict[str, dict[str, Integration]]
     workflows: dict[str, Workflow]
     subkernels: dict[str, SubkernelInfo]
     languages: dict[str, LanguageInfo]
@@ -286,8 +311,9 @@ class ContextInfo:
             slug=context_cls.SLUG,
             short_name=context_cls.SHORT_NAME,
             full_name=context_cls.FULL_NAME,
-            cls=import_string(context_cls),
+            cls=to_import_string(context_cls),
             description=context_cls.__doc__,  # TODO: Improve this
+            weight=getattr(context_cls, "WEIGHT", None),
             agent=agent,
             actions={
                 action._action: ActionInfo.from_func(action)
