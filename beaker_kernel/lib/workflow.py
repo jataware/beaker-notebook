@@ -77,7 +77,7 @@ class WorkflowStep:
 @dataclass(kw_only=True)
 class WorkflowStage:
     name: str
-    steps: list[WorkflowStep]
+    steps: list[WorkflowStep] = field(metadata={"terse-action": "truncate"})
     metadata: Optional[dict[str, Any]] = field(default_factory=lambda: {})
     # human readable string describing the stage
     description: Optional[list[str]]
@@ -95,7 +95,7 @@ class WorkflowStage:
 @dataclass(kw_only=True)
 class Workflow:
     title: str
-    agent_description: str
+    agent_description: str = field(metadata={"terse-action": "truncate"})
     human_description: str
     example_prompt: str
     stages: list[WorkflowStage]
@@ -104,7 +104,7 @@ class Workflow:
     is_context_default: Optional[bool] = field(default=False)
     category: Optional[str] = field(default=None)
     metadata: Optional[dict[str, Any]] = field(default_factory=lambda: {})
-    output_prompt: Optional[str] = field(default=None)
+    output_prompt: Optional[str] = field(default=None, metadata={"terse-action": "truncate"})
 
     @staticmethod
     def from_yaml(source: dict[str, Any]) -> "Workflow":

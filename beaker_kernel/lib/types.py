@@ -4,6 +4,7 @@ from beaker_kernel.lib.utils import slugify, to_import_string
 from collections import deque
 from dataclasses import dataclass, field, is_dataclass, Field
 from datetime import date, datetime
+from itertools import islice
 from typing import get_origin, get_args, Mapping, Collection
 from uuid import uuid4
 
@@ -71,7 +72,7 @@ class Integration:
     name: str
     description: str
     provider: str
-    resources: dict[str, Resource] = field(default_factory=lambda: {})
+    resources: dict[str, Resource] = field(default_factory=lambda: {}, metadata={"terse-action": "truncate"})
     uuid: str = field(default_factory=lambda: str(uuid4()))
 
     # created if not present -- UUID! but must be easily json serializable
@@ -79,7 +80,7 @@ class Integration:
     datatype: IntegrationTypes = field(default="api")
     url: typing.Optional[str] = field(default=None)
     img_url: typing.Optional[str] = field(default=None)
-    source: typing.Optional[str] = field(default=None)
+    source: typing.Optional[str] = field(default=None, metadata={"terse-action": ("truncate", 30)})
     last_updated: typing.Optional[datetime|date] = field(default=None)
 
     @classmethod
@@ -206,16 +207,76 @@ class AgentInfo:
         )
         return result
 
-def reify_dataclasses(target, typedef):
-    if is_dataclass(typedef):
+def truncate(target, size=None):
+    match target:
+        case str():
+            size = size or 50
+            return target[:size] + "..."
+        case list():
+            size = size or 2
+            return target[:size] + ["..."]
+        case tuple():
+            size = size or 2
+            return target[:size] + ("...",)
+        case dict():
+            size = size or 0
+            return {
+                **{key: value for key, value in islice(target.items(), size)},
+                "_truncated_rows": max((len(target) - size), 0)
+            }
+        case _:
+            return "..."
+
+
+def reify_dataclasses(target, typedef=None, verbose: bool = True):
+    if typedef is None:
+        typedef = type(target)
+
+    if target is None:
+        return target
+
+    elif is_dataclass(typedef):
+        values = {}
+
+        # Replace generic type with specific subclass if defined in dict as subclass may have extra fields
+        if isinstance(target, dict) and "_obj_cls" in target:
+            typedef = import_dotted_class(target.get("_obj_cls"))
+
+        for field_name, field_def in typedef.__dataclass_fields__.items():
+            if isinstance(target, typedef):
+                value = getattr(target, field_name)
+            elif isinstance(target, dict):
+                value = target.get(field_name)
+            if not verbose and (terse_action := getattr(field_def, "metadata", {}).get("terse-action", None)):
+                match terse_action:
+                    case "exclude":
+                        continue
+                    case "set-null":
+                        value = None
+                        field_def = type(None)
+                    case ("truncate", int(x)):
+                        value = truncate(value, x)
+                    case "truncate":
+                        value = truncate(value)
+                        field_def = type(value)
+                    case _:
+                        value = value
+            values[field_name] = (field_def, value)
+
         if isinstance(target, typedef):
-        # Remap existing dataclasses in place
-            for field_name, field_def in target.__dataclass_fields__.items():
-                field_value = getattr(target, field_name)
-                setattr(target, field_name, reify_dataclasses(field_value, field_def.type))
+            for field_name, (field_type, field_value) in values.items():
+                if isinstance(field_type, Field):
+                    field_type = field_type.type
+                setattr(target, field_name, reify_dataclasses(field_value, field_type, verbose=verbose))
         elif isinstance(target, dict):
             instance_cls = import_dotted_class(target.pop("_obj_cls")) if "_obj_cls" in target else typedef
-            target = instance_cls(**target)
+            target = reify_dataclasses(
+                instance_cls(**{name: value for name, (_, value) in values.items()}),
+                instance_cls,
+                verbose=verbose
+            )
+        elif target is None:
+            return None
         else:
             raise ValueError(f"Unable to map {repr(target)} to type {typedef}")
         return target
@@ -226,9 +287,9 @@ def reify_dataclasses(target, typedef):
         if not isinstance(origin, type):
             return target
         if issubclass(origin, Mapping):
-            return {key: reify_dataclasses(value, args[1]) for key, value in target.items()}
+            return {key: reify_dataclasses(value, args[1], verbose=verbose) for key, value in target.items()}
         elif issubclass(origin, (list, tuple, set, deque)):
-            return origin(reify_dataclasses(value, args[0]) for value in target)
+            return origin(reify_dataclasses(value, args[0], verbose=verbose) for value in target)
         else:
             return target
 
@@ -255,7 +316,7 @@ class ContextInfo:
     metadata: dict[str, typing.Any] = field(default_factory=lambda: {})
 
     @classmethod
-    def from_class(cls, context_cls: "type[BeakerContext]", metadata=None):
+    def from_class(cls, context_cls: "type[BeakerContext]", metadata=None, verbose=True):
         if metadata is None:
             metadata = {}
 

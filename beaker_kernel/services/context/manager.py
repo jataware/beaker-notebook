@@ -71,25 +71,29 @@ class ContextTable(DatastoreTable):
             return resource
         return record
 
-    def deserialize(self, record: "ContextRecord", parent: "BeakerContextManager") -> ContextInfo:
+    def deserialize(self, record: "ContextRecord", parent: "BeakerContextManager", verbose: bool = True) -> ContextInfo:
         cls: type = import_item(record["cls"])
-        return ContextInfo(
-            slug=record["slug"],
-            short_name=record["short_name"],
-            full_name=record["full_name"],
-            cls=cls,
-            description=record["description"],
-            weight=record.get("weight", None),
-            version=record.get("version", None),
-            actions=record["actions"],
-            tools=record["tools"],
-            agent=record["agent"],
-            integrations=record["integrations"],
-            workflows=record["workflows"],
-            subkernels=record["subkernels"],
-            languages=record["languages"],
-            procedures=record["procedures"],
-            metadata=record["metadata"],
+        from beaker_kernel.lib.types import reify_dataclasses
+        return reify_dataclasses(
+            ContextInfo(
+                slug=record["slug"],
+                short_name=record["short_name"],
+                full_name=record["full_name"],
+                cls=cls,
+                description=record["description"],
+                weight=record.get("weight", None),
+                version=record.get("version", None),
+                actions=record["actions"],
+                tools=record["tools"],
+                agent=record["agent"],
+                integrations=record["integrations"],
+                workflows=record["workflows"],
+                subkernels=record["subkernels"],
+                languages=record["languages"],
+                procedures=record["procedures"],
+                metadata=record["metadata"],
+            ),
+            verbose=verbose,
         )
 
 
@@ -151,7 +155,7 @@ class BeakerContextManager(LoggingConfigurable):
             # record: ContextRecord = self.context_table.serialize(ContextInfo.from_instance(context))
             context = context.__class__
         if isinstance(context, type) and issubclass(context, BeakerContext):
-            record = self.context_table.serialize(ContextInfo.from_class(context))
+            record = self.context_table.serialize(ContextInfo.from_class(context, verbose=True))
         else:
             record = self.context_table.serialize(context)
         existing_record = self.context_table.get(slug=record["slug"])
@@ -166,9 +170,9 @@ class BeakerContextManager(LoggingConfigurable):
         else:
             return self.context_table.add(record)
 
-    def list_contexts(self) -> list[ContextInfo]:
-        return [self.context_table.deserialize(record, self) for record in self.context_table.all()] or []
+    def list_contexts(self, verbose: bool = False) -> list[ContextInfo]:
+        return [self.context_table.deserialize(record, self, verbose=verbose) for record in self.context_table.all()] or []
 
-    def get_context(self, slug: str) -> ContextInfo|None:
+    def get_context(self, slug: str, verbose: bool = True) -> ContextInfo|None:
         record = self.context_table.get(slug=slug)
-        return self.context_table.deserialize(record, self) or None
+        return self.context_table.deserialize(record, self, verbose=verbose) or None

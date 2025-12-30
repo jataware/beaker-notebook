@@ -26,9 +26,11 @@ class ContextApi(ServiceApi):
                 self.context_manager.update_contexts()
 
             if context_slug:
-                result = self.context_manager.get_context(context_slug)
+                verbose = self.request.arguments.get("verbose", True)
+                result = self.context_manager.get_context(context_slug, verbose=verbose)
                 if result is None:
                     raise HTTPError(404, f"Context with slug '{context_slug}' not found.")
             else:
-                result = self.context_manager.list_contexts()
+                verbose = self.request.arguments.get("verbose", False)
+                result = self.context_manager.list_contexts(verbose=verbose)
             self.write(result)
