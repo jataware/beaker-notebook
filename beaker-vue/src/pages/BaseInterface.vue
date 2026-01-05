@@ -44,13 +44,18 @@
 
             <!-- Modals, popups and globals -->
             <slot name="context-selection-popup">
-                <BeakerContextSelection
-                    :isOpen="contextSelectionOpen"
-                    :toggleOpen="toggleContextSelection"
-                    :contextProcessing="contextProcessing"
-                    @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
-                    @close-context-selection="contextSelectionOpen = false"
-                />
+                <Dialog
+                    ref="contextSelectionDialogRef"
+                    v-model:visible="contextSelectionOpen"
+                    modal
+                    :draggable="true"
+                    :maximizable="true"
+                    header="Configure Context"
+                >
+                    <BeakerContextSelection
+                        @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
+                    />
+                </Dialog>
             </slot>
             <slot name="toast">
                 <Toast position="bottom-right" />
@@ -171,7 +176,6 @@ const loginDialogRef = ref();
 const overlayRef = ref<DynamicDialogInstance>();
 
 const contextSelectionOpen = ref(false);
-const contextProcessing = ref(false);
 
 const toggleContextSelection = () => {
     contextSelectionOpen.value = !contextSelectionOpen.value;

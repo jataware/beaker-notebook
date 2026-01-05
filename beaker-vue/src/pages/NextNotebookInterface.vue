@@ -219,6 +219,8 @@ import WorkflowStepPanel from '@/components/panels/WorkflowStepPanel.vue';
 import WorkflowOutputPanel from '@/components/panels/WorkflowOutputPanel.vue';
 import { useWorkflows } from '@/composables/useWorkflows';
 
+import { contextService } from '@/services/context';
+
 const props = defineProps([
     "config",
     "connectionSettings",

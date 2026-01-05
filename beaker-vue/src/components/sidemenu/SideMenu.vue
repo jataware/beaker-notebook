@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="tsx">
-import { ref, watch, computed, getCurrentInstance, useSlots, defineSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
+import { ref, watch, computed, getCurrentInstance, useSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
 import { type VNode } from "vue";
 
 import Button from 'primevue/button';

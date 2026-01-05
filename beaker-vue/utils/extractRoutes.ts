@@ -26,6 +26,11 @@ globalThis.window = <any>{
 
 };
 globalThis.location = globalThis.window.location;
+globalThis.document = <any>{
+    createElement() {},
+    addEventListener() {},
+    removeEventListener() {},
+}
 
 const createRouter = (await import('./src/router'))?.default;
 const router = createRouter({});

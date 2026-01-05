@@ -5,7 +5,6 @@ import { ServiceManager } from '@jupyterlab/services';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
 import { JSONObject } from '@lumino/coreutils';
 import { v4 as uuidv4 } from 'uuid';
-import fetch from 'node-fetch';
 import { Slot, Signal } from '@lumino/signaling';
 import { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
 
@@ -215,7 +214,7 @@ export class BeakerSession {
         return new Promise(async (resolve) => {
             const url = `${this._serverSettings.baseUrl}contexts`;
             const response = await fetch(`${this._serverSettings.baseUrl}contexts`);
-            const data = await response.json();
+            const data = <IBeakerAvailableContexts>(await response.json());
             resolve(data);
         });
     }

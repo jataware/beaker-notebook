@@ -227,7 +227,7 @@
 
 <script setup lang="ts">
 
-import { defineProps, ref, watch, computed, inject, defineModel } from 'vue';
+import { ref, watch, computed, inject } from 'vue';
 import { type IntegrationMap, type Integration, getIntegrationProviderType, type IntegrationAttachedFile, type IntegrationInterfaceState, filterByResourceType } from '../../util/integration';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 

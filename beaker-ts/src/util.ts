@@ -33,7 +33,7 @@ export interface IBeakerFuture<REQUEST extends IBeakerShellMessage = IBeakerShel
 }
 
 export interface IBeakerAvailableContexts {
-    [context_slug: string]: {
+    [key: string]: {
         languages: {
             slug: string,
             kernel: string,

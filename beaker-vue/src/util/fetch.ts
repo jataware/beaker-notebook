@@ -38,5 +38,5 @@ class FetchClient {
 export const client = new FetchClient();
 
 // Export the fetch method bound to the default instance
-const fetchMethod = client.fetch.bind(client);
+const fetchMethod: FetchClient["fetch"] = client.fetch.bind(client);
 export {fetchMethod as fetch};

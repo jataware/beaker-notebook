@@ -12,7 +12,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, defineProps, withDefaults } from "vue";
+import { ref } from "vue";
 import Button from "primevue/button";
 
 interface Props {

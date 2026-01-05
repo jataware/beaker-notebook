@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, inject, withDefaults } from "vue";
+import { ref, shallowRef, computed, inject } from "vue";
 import { Codemirror } from "vue-codemirror";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec, type Extension } from "@codemirror/state";
@@ -299,7 +299,7 @@ li.cm-diagnostic {
     z-index: 99 !important;
 }
 .cm-tooltip {
-    max-width: 60vw; 
+    max-width: 60vw;
 }
 .cm-tooltip.cm-tooltip-hover:not(.cm-tooltip-lint) {
     background-color: transparent;
@@ -307,10 +307,10 @@ li.cm-diagnostic {
 }
 
 /**
-All these styles cm-tooltip styles are exactly defined to have the tooltip-wrapper 
-have a margin-right, so that it doesn't render exactly all the way to the right of the page 
+All these styles cm-tooltip styles are exactly defined to have the tooltip-wrapper
+have a margin-right, so that it doesn't render exactly all the way to the right of the page
 (which would happen sometimes and look odd).
-Moved the tooltip border/color to the inner element to allow CodeMirror to calc the 
+Moved the tooltip border/color to the inner element to allow CodeMirror to calc the
 tooltip size without any weird re-layout animation. It is a bit specific so be careful when changing.
  */
 .cm-tooltip > .cm-tooltip-section, .cm-tooltip.cm-tooltip-lint {
