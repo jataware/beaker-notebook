@@ -15,6 +15,7 @@ const proxyConfig = {
 // https://vite.dev/config/
 export const appConfig: UserConfig = {
   ...baseConfig,
+  base: "./",
   server: {
     host: '0.0.0.0',
     port: 8080,

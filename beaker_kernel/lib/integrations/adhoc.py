@@ -193,9 +193,10 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
 
     def __init__(
         self,
+        display_name: str,
         **config_options
     ):
-        super().__init__()
+        super().__init__(display_name=display_name)
         self.adhoc_config_options = config_options
 
         # Define a datafile path finding extension that is within the closure of the integration provider class.

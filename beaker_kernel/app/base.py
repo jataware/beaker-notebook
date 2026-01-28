@@ -19,6 +19,7 @@ from jupyter_client import kernelspec
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 from jupyter_server.serverapp import ServerApp
+from jupyter_server.utils import url_path_join
 
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.autodiscovery import autodiscover
@@ -175,6 +176,9 @@ class BaseBeakerApp(ServerApp):
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):
+        url_prefix = os.environ.get("BEAKER_SERVER_PREFIX", "").rstrip("/")
+        self.base_url = url_prefix
+
         self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")
         if config.jupyter_token:
             self.config["IdentityProvider"].setdefault("token", config.jupyter_token)
@@ -199,7 +203,12 @@ class BaseBeakerApp(ServerApp):
     def initialize_handlers(self):
         """Bypass initializing the default handler since we don't need to use the webserver, just the websockets."""
         register_handlers(self)
-        self.web_app.add_handlers(".*", self.handlers)
+        new_handlers = []
+        for handler in self.handlers:
+            pattern = url_path_join(self.base_url, handler[0])
+            new_handler = (pattern, *list(handler[1:]))
+            new_handlers.append(new_handler)
+        self.web_app.add_handlers(".*", new_handlers)
 
     def load_config_file(self, suppress_errors = True):
         default_config_files = (self._default_config_file_name(), "beaker_config")

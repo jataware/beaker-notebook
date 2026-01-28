@@ -82,10 +82,12 @@ class BeakerKernel(KernelProxyManager):
         self.user_responses = dict()
         # Initialize context (Using the event loop to simulate `await`ing the async func in non-async setup)
         event_loop = asyncio.get_event_loop()
+        logger.warning(f"About to start default context: {context_args}")
         context_task = event_loop.create_task(self.start_default_context(**context_args))
         context_task.add_done_callback(lambda task: None)
 
     async def start_default_context(self, default_context=None, default_context_payload=None, **options):
+        logger.warning("starting default context!")
         default_context = default_context or os.environ.get('BEAKER_DEFAULT_CONTEXT')
         default_context_payload = default_context_payload or os.environ.get('BEAKER_DEFAULT_CONTEXT_PAYLOAD', "{}")
 
@@ -354,9 +356,12 @@ class BeakerKernel(KernelProxyManager):
                 default_payload = json.loads(default_payload)
             context_info = default_payload
 
-        if subkernel is None:
-            if language:
-                subkernel = next((subkernel for subkernel in context_cls.available_subkernels().values() if subkernel.JUPYTER_LANGUAGE == language), None)
+        match subkernel:
+            case str():
+                subkernel = context_cls.available_subkernels().get(subkernel)
+            case None:
+                if language:
+                    subkernel = next((subkernel for subkernel in context_cls.available_subkernels().values() if subkernel.JUPYTER_LANGUAGE == language), None)
             # subkernel = context_cls.available
 
         context_config = {

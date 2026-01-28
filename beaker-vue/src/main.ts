@@ -22,13 +22,27 @@ import { DefaultTheme } from './themes';
 import 'primeicons/primeicons.css';
 import './index.scss';
 
+const defaultSiteConfig = {
+  "pathPrefix": "/",
+  "username": null,
+  "_xsrf": undefined,
 
-const baseUrl = PageConfig.getBaseUrl();
-const confUrl = URLExt.join(baseUrl, '/config') + `?q=${Date.now().toString()}`;
+};
+const siteConfigElement = document.getElementById("site-config");
+const siteConfig = (siteConfigElement ? JSON.parse(siteConfigElement.textContent) : defaultSiteConfig);
+
+const pathPrefix = siteConfig.pathPrefix;
+const baseUrl = URLExt.normalize(pathPrefix);
+client.setBaseUrl(baseUrl);
+
+const confUrl = '/config' + `?q=${Date.now().toString()}`;
 const configResponse = await fetch(confUrl);
 const config = await configResponse.json();
 const baseHost = URLExt.parse(config.baseUrl).host;
 
+config.pathPrefix = pathPrefix;
+config.baseUrl = baseUrl;
+config.haseHost = baseHost;
 
 const app = createApp(App, {config});
 const router = createRouter(config);

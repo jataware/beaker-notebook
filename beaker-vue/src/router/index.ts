@@ -57,11 +57,13 @@ export const defaultRouteMap: Routes = {
     },
 }
 
-export const reformatRoutes = (routeMap: Routes) => {
+export const reformatRoutes = (routeMap: Routes, config: {[key: string]: string} = {}) => {
   const hasHomeRouteDefined = Object.hasOwn(routeMap, "/");
+  const pathPrefix = config?.pathPrefix || "";
   return Object.entries(routeMap).map(([slug, routeObject]) => {
     const result: RouteRecordRaw = {
       path: routeObject.path,
+      // path: `${pathPrefix}${routeObject.path}`,
       name: slug,
       component: routeObject.component,
       meta: {
@@ -71,6 +73,7 @@ export const reformatRoutes = (routeMap: Routes) => {
     }
     if (!hasHomeRouteDefined && routeObject.role === "home") {
       result["alias"] = "/";
+      // result["alias"] = `${pathPrefix}/`;
     }
     return result;
   });
@@ -100,10 +103,11 @@ export const createRouter = (config) => {
     delete routeMap.playground;
   }
 
-  const routes = reformatRoutes(routeMap);
+  const routes = reformatRoutes(routeMap, config);
+  console.log({routes})
 
   return vueCreateRouter({
-    history: createWebHistory(import.meta.env?.BASE_URL),
+    history: createWebHistory(config.pathPrefix),
     routes,
   });
 }

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import traceback
 import uuid
 import urllib.parse
@@ -154,26 +155,26 @@ class CreateSessionWithContextHandler(JupyterHandler):
             raise web.HTTPError(500, str(e)) from e
 
 
-class PageHandler(StaticFileHandler):
+class PageHandler(JupyterHandler, ):
     """
     Special handler that returns UI pages dynamically defined by the UI.
     """
     async def get(self, path: str, include_body: bool = True) -> None:
 
         # Always serve index.html as routing is performed in app.
-        absolute_path = self.get_absolute_path(self.root, "index.html")
-        try:
-            validated_path = self.validate_absolute_path(self.root, absolute_path)
-        except HTTPError as e:
-            # If path cannot be found, check again with a .html extension
-            if e.status_code == 404:
-                html_path = f"{absolute_path}.html"
-                validated_path = self.validate_absolute_path(self.root, html_path)
-            else:
-                raise
+        beakerapp: BaseBeakerApp = self.settings["serverapp"]
+        base_url = beakerapp.base_url.rstrip('/')
+        index_path = Path(beakerapp.ui_path).absolute() / "index.html"
 
+        if not (index_path.exists() and index_path.is_file()):
+            raise web.HTTPError(404, "File not found")
+
+        session_id = None
         # If no session is provided on a root request, generate a session uuid and redirect to it
-        session_id = self.get_query_argument("session", None)
+        if base_url and base_url.startswith('/session/'):
+            session_id = base_url.replace('/session/', '')
+        if not session_id:
+            session_id = self.get_query_argument("session", None)
         if not session_id:
             session_id = str(uuid.uuid4())
             to_url = httputil.url_concat(
@@ -181,8 +182,6 @@ class PageHandler(StaticFileHandler):
                 {"session": session_id},
             )
             return self.redirect(to_url, permanent=False)
-        path = os.path.relpath(validated_path, self.root)
-        self.absolute_path = validated_path
 
         # Ensure a proper xsrf cookie value is set.
         cookie_name = self.settings.get("xsrf_cookie_name", "_xsrf")
@@ -192,7 +191,27 @@ class PageHandler(StaticFileHandler):
             kwargs = self.settings.get("xsrf_cookie_kwargs", {})
             self.set_cookie(cookie_name, xsrf_token, **kwargs)
 
-        return await super().get(path, include_body=include_body)
+
+        # Read the index.html
+        html = index_path.read_text()
+
+        # Build configuration object
+        config = {
+            'pathPrefix': base_url,
+            'username': self.current_user.name if self.current_user else None,
+            '_xsrf': self.xsrf_token.decode(),
+        }
+
+        # Replace the Jinja2 placeholder with actual JSON
+        # The index.html has: <script id="site-config" type="application/json">{{ siteConfig }}</script>
+        config_json = json.dumps(config)
+        # html = html.replace('{{ siteConfig }}', config_json)
+        html = html.replace("</head>", f'<script id="site-config" type="application/json">{config_json}</script>\n</head>')
+        html = html.replace(r'href="/', rf'href="{base_url}/')
+        html = html.replace(r'src="/', rf'src="{base_url}/')
+
+        self.set_header('Content-Type', 'text/html')
+        self.write(html)
 
 
 class ConfigController(JupyterHandler):
@@ -338,7 +357,10 @@ class ConfigHandler(JupyterHandler):
         # is handling this request, as reported by the request headers.
         # If APP_URL is not provided, assume it is the same as BASE_URL.
 
-        base_url = os.environ.get("JUPYTER_BASE_URL", f"{self.request.protocol}://{self.request.host}")
+        beakerapp: BaseBeakerApp = self.settings["serverapp"]
+        base_path = beakerapp.base_url or "/"
+
+        base_url = os.environ.get("JUPYTER_BASE_URL", f"{self.request.protocol}://{self.request.host}{base_path}")
 
         base_scheme = urllib.parse.urlparse(base_url).scheme
         if base_scheme.endswith("s"):
@@ -680,4 +702,4 @@ def register_handlers(app: ServerApp):
     app.handlers.append((r"/api/xsrf-token", XSRFTokenHandler))
     app.handlers.append((r"/api/sessions/create-with-context", CreateSessionWithContextHandler))
 
-    app.handlers.append((page_regex, PageHandler, {"path": app.ui_path, "default_filename": "index.html"}))
+    app.handlers.append((page_regex, PageHandler))

@@ -299,10 +299,12 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
            sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
         }
 
+        subkernel_name = subkernels[subkernel_slug].KERNEL_NAME
+
         urlbase = self.beaker_kernel.jupyter_server
 
         kernelspec_req = requests.get(
-            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_slug}"),
+            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_name}"),
             headers={
                 "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
             },
@@ -417,9 +419,9 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         }
 
         payload = {
-            "language": self.subkernel.DISPLAY_NAME,
-            "subkernel": self.subkernel.KERNEL_NAME,
-            "subkernel_kernel": self.config.get("subkernel", None),
+            "language": self.subkernel.JUPYTER_LANGUAGE,
+            "subkernel": self.subkernel.SLUG,
+            "config": self.config,
             "actions": action_details,
             "custom_messages": custom_messages,
             "procedures": list(self.templates.keys()),
