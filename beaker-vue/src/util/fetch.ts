@@ -42,12 +42,10 @@ class FetchClient {
 
   async fetch(url: string, options?: RequestInit): Promise<Response> {
     // const absUrl = URLExt.parse(url).href;
-    console.log({url, options, isLocal: isRelativeUrl(url), baseUrl: this.baseUrl})
     const absUrl = ((isRelativeUrl(url) && !url.startsWith(this._baseUrl))
                     ? URLExt.parse(URLExt.join(this.baseUrl, url)).href
                     : URLExt.parse(url).href
     );
-    console.log({absUrl})
     const headers = Object.entries(this.defaultHeaders).reduce<HeadersInit>((prev, [regex, headers]) => {
       if (new RegExp(regex).test(absUrl)) {
         return {...prev, ...headers};
