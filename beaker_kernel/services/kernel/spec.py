@@ -64,7 +64,8 @@ class BeakerKernelSpecManager(kernelspec.KernelSpecManager):
 
             if not self.parent.kernel_spec_include_local and spec_slug is None:
                 # Even we are not including local specs, we need to include beaker_kernel
-                res["beaker_kernel"] = self._update_spec(spec_manager.get_all_specs()["beaker_kernel"])
+                beaker_kernel_spec = spec_manager.get_all_specs()["beaker_kernel"]
+                res["beaker_kernel"] = self._update_spec("beaker_kernel", beaker_kernel_spec)
 
             specs = spec_manager.get_all_specs().items()
             for kernel_name, spec in specs:

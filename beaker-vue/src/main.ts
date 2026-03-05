@@ -42,7 +42,7 @@ const baseHost = URLExt.parse(config.baseUrl).host;
 
 config.pathPrefix = pathPrefix;
 config.baseUrl = baseUrl;
-config.haseHost = baseHost;
+config.baseHost = baseHost;
 
 const app = createApp(App, {config});
 const router = createRouter(config);

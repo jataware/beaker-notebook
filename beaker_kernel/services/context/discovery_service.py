@@ -53,6 +53,7 @@ class ContextDiscoveryService(SingletonConfigurable):
                         f"Error discovering contexts from service '{service}'({service.__class__.__module__}.{service.__class__.__name__}): {err}"
                     )
                     self.log.debug(traceback.format_exception(err))
+                    continue
                 for context_slug, context in contexts.items():
                     if context_slug in results:
                         prev_context = results[context_slug]

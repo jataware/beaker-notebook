@@ -38,32 +38,28 @@ def find_api_handlers(base=None) -> Generator[tuple[str, Any, str], None, None]:
     """
     if base is None:
         package = __package__
-        base_dir = os.path.dirname(sys.modules[package].__file__)
+        base_dir = os.path.dirname(str(sys.modules[package].__file__))
     else:
-        match base:
-            case str():
-                if os.path.pathsep in base:
-                    base_dir = base
-                else:
-                    try:
-                        mod = importlib.import_module(base)
-                        base_dir = os.path.dirname(mod.__file__)
-                    except ImportError:
-                        logger.error(f"Could not import module {base} for API handler discovery")
-                        return
-            case os.PathLike():
-                base_dir = os.fspath(base)
-            case _:
-                logger.error(f"Invalid base parameter type: {type(base)}")
-                return
+        package = None
+        try:
+            mod = importlib.import_module(base)
+            base_dir = os.path.dirname(str(mod.__file__))
+            package = mod.__package__
+        except (ImportError, TypeError):
+            logger.error(f"Could not import module {base} for API handler discovery")
+            return
+
+    if base_dir is None or package is None:
+        logger.error(f"Invalid base parameter: {type(base)}: {base}")
+        return
 
     for f in os.listdir(base_dir):
         if f.endswith('.py') and f != '__init__.py' and f != 'handlers.py':
-            s = f'beaker_kernel.app.api.{f[:-3]}'
+            s = f'{package}.{f[:-3]}'
             try:
                 mod = importlib.import_module(s)
                 if "handlers" in dir(mod):
-                    logger.warning(f"Found handlers in {s}")
+                    logger.debug(f"Found handlers in {s}")
                     for handlers in getattr(mod, "handlers"):
                         yield handlers
             except ImportError as e:
@@ -72,7 +68,7 @@ def find_api_handlers(base=None) -> Generator[tuple[str, Any, str], None, None]:
                 continue
 
 
-def add_handler_prefix(prefix: str, handler_tuple: tuple[str]):
+def add_handler_prefix(prefix: str, handler_tuple: tuple[str, Any, str]):
     path, rest = handler_tuple[0], handler_tuple[1:]
     if not prefix.endswith('/'):
         prefix = prefix + '/'

@@ -44,7 +44,6 @@
         <template #footer>
             <div style="width: 100%; text-align: center;">
                 <Button
-                    :loading="props.contextProcessing"
                     raised
                     @click="setContext"
                     label="Apply"
@@ -71,7 +70,6 @@ import { contextService, type ISubkernelInfo, type IContextInfo } from '@/servic
 
 const props = defineProps([
     "isOpen",
-    "contextProcessing"
 ]);
 
 const logDebug = ref(false);

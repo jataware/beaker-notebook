@@ -174,7 +174,7 @@ class BeakerContext:
     @property
     def preview(self) -> Callable[[], Awaitable[Any]] | None:
         preview_func = getattr(self, self.preview_function_name, None)
-        if callable(preview_func) and not inspect.iscoroutinefunction:
+        if callable(preview_func) and not inspect.iscoroutinefunction(preview_func):
             raise ValueError(f"Preview function '{self.preview_function_name}' must be a coroutine (awaitable) if defined.")
         if preview_func and inspect.iscoroutinefunction(preview_func):
             return preview_func
@@ -182,8 +182,8 @@ class BeakerContext:
     @property
     def kernel_state(self) -> Callable[[], Awaitable[Any]] | None:
         state_func = getattr(self, self.kernel_state_function_name, None)
-        if callable(state_func) and not inspect.iscoroutinefunction:
-            raise ValueError(f"Kernel state fetching function '{self.preview_function_name}' must be a coroutine (awaitable) if defined.")
+        if callable(state_func) and not inspect.iscoroutinefunction(state_func):
+            raise ValueError(f"Kernel state fetching function '{self.kernel_state_function_name}' must be a coroutine (awaitable) if defined.")
         if state_func and inspect.iscoroutinefunction(state_func):
             return state_func
 
@@ -277,57 +277,59 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         return content
 
     def get_subkernel(self):
-        language = self.config.get("language", None)
         subkernel_slug = self.config.get("subkernel", None)
+        language = self.config.get("language", None)
 
-        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{subkernel_slug}`")
-        subkernels: "dict[str, BeakerSubkernel]" = autodiscover("subkernels")
-        if not subkernel_slug and language:
-            kernel_opts = {
-                subkernel.KERNEL_NAME: subkernel
-                for subkernel in subkernels.values()
-            }
-            subkernel_opts = {
-                subkernel.SLUG: subkernel
-                for subkernel in subkernels.values()
-            }
-            if language not in kernel_opts and language in subkernel_opts:
-                language = subkernel_opts[language].KERNEL_NAME
-            subkernel_slug = language
+        # Step 1: Discover available BeakerSubkernel classes
+        subkernels = autodiscover("subkernels")  # slug -> class
 
-        subkernel_by_lang = {
-           sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
-        }
+        # Step 2: Resolve which BeakerSubkernel class to use
+        subkernel_cls: type[BeakerSubkernel] | None = None
+        if subkernel_slug and subkernel_slug in subkernels:
+            subkernel_cls = subkernels[subkernel_slug]
+        elif language:
+            by_lang = {s.JUPYTER_LANGUAGE: s for s in subkernels.values()}
+            subkernel_cls = by_lang.get(language)
+        if subkernel_cls is None:
+            raise ValueError(
+                f"No subkernel found for subkernel={subkernel_slug!r}, language={language!r}. "
+                f"Available subkernels: {list(subkernels.keys())}"
+            )
 
-        subkernel_name = subkernels[subkernel_slug].KERNEL_NAME
-
+        # Step 3: Fetch kernel specs from the (potentially remote) KSM
         urlbase = self.beaker_kernel.jupyter_server
-
-        kernelspec_req = requests.get(
-            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_name}"),
-            headers={
-                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
-            },
+        kernelspecs_res = requests.get(
+            urllib.parse.urljoin(urlbase, "/api/kernelspecs"),
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
-        if kernelspec_req.status_code == 400:
-            raise ValueError(f"Can't find kernelspec for {subkernel_slug}")
-        elif kernelspec_req.status_code >= 500:
-            raise RuntimeError(f"Error fetching kernelspec for {subkernel_slug}: {kernelspec_req.json()}")
+        if kernelspecs_res.status_code >= 400:
+            raise RuntimeError(
+                f"Error fetching kernel specs (status {kernelspecs_res.status_code}): "
+                f"{kernelspecs_res.text}"
+            )
+        kernelspecs = kernelspecs_res.json().get("kernelspecs", {})
 
-        kernelspec = kernelspec_req.json()
-        kernel_lang: str = kernelspec.get('spec', {}).get("language", None)
-        subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
+        # Step 4: Resolve which kernel spec name to use for kernel creation
+        kernel_spec_name = subkernel_cls.resolve_kernelspec(kernelspecs)
+        if not kernel_spec_name:
+            available_languages = {
+                info.get("spec", {}).get("language") for info in kernelspecs.values()
+            }
+            raise ValueError(
+                f"No installed kernel spec matches subkernel '{subkernel_cls.SLUG}' "
+                f"(language='{subkernel_cls.JUPYTER_LANGUAGE}'). "
+                f"Available kernel spec languages: {available_languages}"
+            )
 
+        # Step 5: Create the kernel via the Jupyter API
         path = self.beaker_kernel.session_config.get("beaker_session", None)
         if path is None:
             path = self.beaker_kernel.session_config.get("jupyter_session", "")
 
         kernel_creation_res = requests.post(
             url=urllib.parse.urljoin(urlbase, "/api/kernels"),
-            json={"name": subkernel_slug, "path": path},
-            headers={
-                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
-            },
+            json={"name": kernel_spec_name, "path": path},
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
         kernel_info = kernel_creation_res.json()
 
@@ -339,13 +341,12 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
 
         connection_info_res = requests.get(
             url=urllib.parse.urljoin(urlbase, f"/beaker/subkernels/{subkernel_id}"),
-            headers={
-                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
-            },
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
         connection_info = connection_info_res.json()
         connection_info["key"] = base64.b64decode(connection_info.get("key", b""))
 
+        # Step 6: Instantiate the BeakerSubkernel
         subkernel: BeakerSubkernel = subkernel_cls(subkernel_id, connection_info, self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
@@ -742,9 +743,9 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
 
         if workflow_dir is None:
             class_dir = os.path.dirname(inspect.getfile(cls))
-            workflows_dir = os.path.join(class_dir, "workflows")
-        if os.path.exists(workflows_dir):
-            for workflow_yaml in Path(workflows_dir).glob("*.yaml"):
+            workflow_dir = os.path.join(class_dir, "workflows")
+        if os.path.exists(workflow_dir):
+            for workflow_yaml in Path(workflow_dir).glob("*.yaml"):
                 workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
                 # lives as long as the session does
                 workflow_id = str(uuid4())

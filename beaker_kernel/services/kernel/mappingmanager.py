@@ -1,29 +1,19 @@
-import json
 import os
-import socket
 from typing import TYPE_CHECKING, cast, ClassVar, Any
 from collections.abc import Callable
-from dataclasses import MISSING
 
 import traitlets
-from tornado.ioloop import PeriodicCallback
-from traitlets.config.configurable import LoggingConfigurable
-from traitlets import Unicode, Integer, Instance, Type, default
+from traitlets import Unicode, Integer
 from traitlets.utils.importstring import import_item
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 
 from beaker_kernel.lib.config import config
 from beaker_kernel.services.auth import current_user, BeakerUser
-from beaker_kernel.services.datastore import DatastoreTable
-from beaker_kernel.services.datastore.records import TableDict, TableDictRecord
 
-from .manager import BeakerKernelManager, KernelTable, KernelRecord
+from .manager import BeakerKernelManager
 
-if TYPE_CHECKING:
-    from .manager import BeakerDistributedKernelManager
 
 class BeakerKernelMappingManager(AsyncMappingKernelManager):
-    distributed: ClassVar[bool] = False
 
     kernel_manager_class = traitlets.DottedObjectName("beaker_kernel.services.kernel.manager.BeakerKernelManager")
     connection_dir = Unicode(
@@ -84,12 +74,12 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     def is_alive(self, kernel_id):
         km = self.get_kernel(kernel_id)
-        if km.provisioner is None:
+        if km is None or km.provisioner is None:
             return False
         connection_info = km.get_connection_info()
         if not connection_info:
             return False
-        return super().is_alive()
+        return super().is_alive(kernel_id)
 
     @property
     def beaker_config(self):
@@ -133,99 +123,3 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
     def __bool__(self):
         return True
-
-
-class BeakerDistributedKernelMappingManager(BeakerKernelMappingManager):
-    distributed = True
-    shared_context = False
-
-    kernel_manager_class = traitlets.DottedObjectName("beaker_kernel.services.kernel.manager.BeakerDistributedKernelManager")
-    kernel_table_class = Type(
-        default_value=KernelTable,
-        klass=DatastoreTable,
-    )
-    kernel_table = Instance(
-        klass=DatastoreTable,
-    )
-    _kernels = Instance(
-        klass=TableDict,
-    )
-
-    @default("_kernels")
-    def _default_kernels(self):
-        return TableDict(self.kernel_table, parent=self)
-
-    @default("kernel_table")
-    def _default_kernel_table(self):
-        return self.kernel_table_class(datastore=self.parent.datastore)
-
-    def get_kernel(self, kernel_id: str) -> BeakerKernelManager|None:
-        kernel_record =  self.kernel_table.get(kernel_id=kernel_id)
-        if not kernel_record:
-            return None
-        km = self.kernel_table.deserialize(kernel_record, parent=self)
-        return km
-
-    async def _add_kernel_when_ready(self, kernel_id, km: BeakerKernelManager, kernel_awaitable):
-        await super()._add_kernel_when_ready(kernel_id, km, kernel_awaitable)
-        # Save updates to the kernel manager
-        self._kernels[kernel_id] = km
-
-
-class PeriodicService(LoggingConfigurable):
-    frequency_secs: int|None = Integer(None, allow_none=True, config=True)
-    enabled: bool = traitlets.Bool(True, config=True)
-    run_immediately: bool = traitlets.Bool(False, config=True)
-
-    _pcallback: PeriodicCallback|None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._pcallback = None
-
-
-    def start(self) -> None:
-        """Start the polling of the kernel."""
-        if self._pcallback is None:
-
-            if self.frequency_secs is None:
-                self.log.info("Not starting periodic service -- frequency_secs is None")
-            else:
-                self._pcallback = PeriodicCallback(
-                    self.fire,
-                    1000 * self.frequency_secs,
-                )
-                self._pcallback.start()
-                if self.run_immediately:
-                    self.fire()
-
-
-    def stop(self) -> None:
-        """Stop the kernel polling."""
-        if self._pcallback is not None:
-            self._pcallback.stop()
-            self._pcallback = None
-
-    def fire(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-class DistributedKernelAlivenessCheck(PeriodicService):
-
-    mapping_manager: BeakerDistributedKernelMappingManager = Instance("beaker_kernel.services.kernel.mappingmanager.BeakerKernelMappingManager")
-
-    @traitlets.default("run_immediately")
-    def _default_run_immediately(self):
-        return True
-
-    async def fire(self, *args, **kwargs):
-        kernel_id: str
-        km: "BeakerDistributedKernelManager"
-        dead_kernels = []
-        for kernel_id, km in self.mapping_manager._kernels.items():
-            is_alive = await km.is_alive()
-            if not is_alive:
-                dead_kernels.append(kernel_id)
-        for kernel_id in dead_kernels:
-            self.mapping_manager.log.info(f"Removing dead kernel {kernel_id} from mapping manager")
-            self.mapping_manager.kernel_table.remove(kernel_id=kernel_id)

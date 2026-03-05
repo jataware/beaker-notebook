@@ -54,6 +54,7 @@
                 >
                     <BeakerContextSelection
                         @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
+                        @close-context-selection="contextSelectionOpen = false"
                     />
                 </Dialog>
             </slot>

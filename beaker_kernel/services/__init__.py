@@ -1,7 +1,7 @@
 import json
 import typing
 from dataclasses import is_dataclass, asdict
-from typing import ClassVar, Optional
+from typing import ClassVar, Optional, Any
 
 from tornado.web import HTTPError
 
@@ -28,9 +28,10 @@ def json_default(obj: typing.Any) -> typing.Any:
 
 class ServiceApi:
     prefix: ClassVar[str]
-    handlers: ClassVar[list[tuple[str, JupyterHandler]]] = []
+    handlers: ClassVar[list[tuple[str, type[JupyterHandler], *tuple[Any, ...]]]]
 
     def __init_subclass__(cls):
+        cls.handlers = []
         for member in cls.__dict__.values():
             if isinstance(member, type) and issubclass(member, ServiceApiHandler):
                 handler: type[ServiceApiHandler] = member

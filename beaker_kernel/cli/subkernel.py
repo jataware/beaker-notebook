@@ -245,10 +245,18 @@ def list_subkernels(all):
     from jupyter_client.kernelspec import KernelSpecManager
     ksm = KernelSpecManager()
     kernel_specs = ksm.get_all_specs()
+    kernel_languages = {
+        spec.get("spec", {}).get("language")
+        for spec in kernel_specs.values()
+    }
     subkernels = {
         name: cls
         for name, cls in autodiscover_subkernels().items()
-        if cls is not None and (all or getattr(cls, 'KERNEL_NAME', 'undetermined') in kernel_specs)
+        if cls is not None and (
+            all
+            or getattr(cls, 'KERNEL_NAME', None) in kernel_specs
+            or getattr(cls, 'JUPYTER_LANGUAGE', None) in kernel_languages
+        )
     }
     if subkernels:
         click.echo("Currently installed subkernels:\n")

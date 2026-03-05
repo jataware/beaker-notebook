@@ -65,10 +65,6 @@ redirect_map: ImportRedirectMap = {
         'request_log_handler': 'beaker_kernel.app.handlers',
         'sanitize_env': 'beaker_kernel.app.handlers',
     },
-    'beaker_kernel.service.multiuser': {
-        'BeakerMultiuserApp': ('beaker_kernel.app.multiuser_app', 'BeakerMultiUserServerApp'),
-        'BeakerMultiUserServerApp': 'beaker_kernel.app.multiuser_app',
-    },
     'beaker_kernel.service.notebook': {
         'BeakerNotebookApp': 'beaker_kernel.app.notebook_app'
     },

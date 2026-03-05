@@ -33,9 +33,9 @@ async def fetch_kernel_info(kernel_manager):
     if kernelfile_dir:
         kernel_files += glob.glob(os.path.join(kernelfile_dir, "kernel-*.json"))
     for kernel_file in kernel_files:
-        if not kernel_file.startswith("kernel-"):
+        if not os.path.basename(kernel_file).startswith("kernel-"):
             continue
-        kernel_id = kernel_file[7:-5]  # Remove 'kernel-' and '.json' from the beginning and end of the filename.
+        kernel_id = os.path.basename(kernel_file)[7:-5]  # Remove 'kernel-' and '.json' from the beginning and end of the filename.
         if kernel_id not in kernels:
             continue
         with open(kernel_file) as kf:

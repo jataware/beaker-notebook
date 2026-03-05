@@ -42,12 +42,15 @@ class SubkernelHandler(JupyterHandler):
         return kernel_manager
 
     async def head(self, kernel_id=None):
-        kernel_manager = self.kernel_manager
-        self.write(self.kernel_manager.list_kernel_ids)
+        kernel_manager: BeakerKernelMappingManager = self.kernel_manager
+        all_kernel_ids = kernel_manager.list_kernel_ids()
+        if kernel_id and kernel_id in all_kernel_ids:
+            self.write(json.dumps([kernel_id]))
+        else:
+            self.write(json.dumps(all_kernel_ids))
 
     async def get(self, kernel_id=None):
-        kernel_manager = self.kernel_manager
-        kernel_manager.list_kernel_ids()
+        kernel_manager: BeakerKernelMappingManager = self.kernel_manager
 
         if kernel_id in (None, ""):
             kernel_connections = {

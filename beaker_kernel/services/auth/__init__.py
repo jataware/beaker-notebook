@@ -30,7 +30,7 @@ class BeakerIdentityProvider(IdentityProvider):
         """Validate Beaker kernel authentication token.
 
         Checks for a valid Beaker kernel authentication token in the request
-        headers and validates it against the kernel's session key using MD5 hash.
+        headers and validates it against the kernel's session key using SHA256 hash.
 
         Parameters
         ----------
@@ -54,7 +54,7 @@ class BeakerIdentityProvider(IdentityProvider):
             key = kernel.session.key.decode()
 
             payload = f"{kernel_id}{nonce}{key}".encode()
-            reconstructed_hash_value = hashlib.md5(payload).hexdigest()
+            reconstructed_hash_value = hashlib.sha256(payload).hexdigest()
             valid = reconstructed_hash_value == hash_value
             return valid
 

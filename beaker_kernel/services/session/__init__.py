@@ -5,39 +5,16 @@ from typing import cast
 
 from jupyter_core.utils import ensure_async
 from jupyter_server.services.sessions.sessionmanager import SessionManager
-from traitlets import Type, Instance, default, validate
+from traitlets import default
 
 from beaker_kernel.services.auth import current_user, BeakerUser
-from beaker_kernel.services.datastore import DatastoreTable, Column, ColumnType
 
-class SessionTable(DatastoreTable):
-    name = "sessions"
-    columns = [
-        Column(name="session_id", column_type=ColumnType.TEXT),
-        Column(name="path", column_type=ColumnType.TEXT),
-        Column(name="name", column_type=ColumnType.TEXT),
-        Column(name="type", column_type=ColumnType.TEXT),
-        Column(name="kernel_id", column_type=ColumnType.TEXT),
-        Column(name="user_id", column_type=ColumnType.TEXT),
-        Column(name="started_at", column_type=ColumnType.DATETIME, allow_null=False),
-        Column(name="metadata", column_type=ColumnType.JSON),
-    ]
 
 class BeakerSessionManager(SessionManager):
 
-    session_table_class = Type(
-        default_value=SessionTable,
-        klass=DatastoreTable,
-    )
-    session_table = Instance(
-        klass=DatastoreTable,
-    )
-
-    @default("session_table")
-    def _default_session_table(self) -> SessionTable:
-        table: SessionTable = self.session_table_class(datastore=self.parent.datastore)
-        self.session_table = table
-        return table
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sessions: dict[str, dict] = {}
 
     @property
     def cursor(self):
@@ -76,10 +53,16 @@ class BeakerSessionManager(SessionManager):
         return count
 
     async def list_sessions(self, include_missing=False) -> list[dict]:
-        return await super().list_sessions()
+        """Returns a list of dictionaries containing all the information from
+        the session store"""
+        result = [await self.session_model(row) for row in self._sessions.values()]
+        return result
 
-
-    def get_kernel_env(self, path, name = None):
+    def get_kernel_env(
+            self,
+            path: str|None,
+            name: str|None = None
+        ):
         """Get environment variables for Beaker kernel sessions.
 
         Sets up environment variables including session name, Beaker session,
@@ -87,7 +70,7 @@ class BeakerSessionManager(SessionManager):
 
         Parameters
         ----------
-        path : str
+        path : str, optional
             Session path
         name : str, optional
             Session name
@@ -98,10 +81,14 @@ class BeakerSessionManager(SessionManager):
             Environment variables for kernel
         """
         # This only sets env variables for the Beaker Kernel, not subkernels.
-        try:
-            beaker_user = path.split(os.path.sep)[0]
-        except:
-            pass
+        if path is not None:
+            try:
+                beaker_user = path.split(os.path.sep)[0]
+            except Exception:
+                beaker_user = None
+        else:
+            beaker_user = None
+
         env = {
             **os.environ,
             "JPY_SESSION_NAME": path,
@@ -136,8 +123,8 @@ class BeakerSessionManager(SessionManager):
 
         Returns
         -------
-        dict
-            Session information from parent class
+        str
+            Kernel ID
         """
         user: BeakerUser = current_user.get()
         if isinstance(user, BeakerUser):
@@ -177,60 +164,29 @@ class BeakerSessionManager(SessionManager):
         return model
 
     async def row_to_model(self, row, tolerate_culled=False):
-        # """Takes sqlite database session row and turns it into a dictionary"""
-        # kernel_culled: bool = await ensure_async(self.kernel_culled(row["kernel_id"]))
-        # if kernel_culled:
-        #     # The kernel was culled or died without deleting the session.
-        #     # We can't use delete_session here because that tries to find
-        #     # and shut down the kernel - so we'll delete the row directly.
-        #     #
-        #     # If caller wishes to tolerate culled kernels, log a warning
-        #     # and return None.  Otherwise, raise KeyError with a similar
-        #     # message.
-        #     self.session_table.remove(session_id=row["session_id"])
-        #     msg = (
-        #         "Kernel '{kernel_id}' appears to have been culled or died unexpectedly, "
-        #         "invalidating session '{session_id}'. The session has been removed.".format(
-        #             kernel_id=row["kernel_id"], session_id=row["session_id"]
-        #         )
-        #     )
-        #     if tolerate_culled:
-        #         self.log.warning(f"{msg}  Continuing...")
-        #         return None
-        #     raise KeyError(msg)
         return await ensure_async(self.session_model(row))
 
     async def session_exists(self, path):
-        session_list = self.session_table.filter(path=path)
-        return bool(session_list)
-
-    async def list_sessions(self):
-        """Returns a list of dictionaries containing all the information from
-        the session database"""
-        result = [await self.session_model(row) for row in self.session_table.all()]
-        return result
+        return any(s["path"] == path for s in self._sessions.values())
 
     async def get_session(self, **kwargs):
         if not kwargs:
             msg = "must specify a column to query"
             raise TypeError(msg)
 
-        results = self.session_table.filter(**kwargs)
-        row = next(iter(results), None)
+        for session in self._sessions.values():
+            if all(session.get(k) == v for k, v in kwargs.items()):
+                return await ensure_async(self.session_model(session))
 
-        if row is None:
-            from tornado import web
-            q = [f"{key}={value}" for key, value in kwargs]
-            raise web.HTTPError(404, "Session not found: %s" % (", ".join(q)))
-
-        return await ensure_async(self.session_model(row))
+        from tornado import web
+        q = [f"{key}={value}" for key, value in kwargs.items()]
+        raise web.HTTPError(404, "Session not found: %s" % (", ".join(q)))
 
     async def save_session(self, session_id, **kwargs):
         """Saves the items for the session with the given session_id
 
         Given a session_id (and any other of the arguments), this method
-        creates a row in the sqlite session database that holds the information
-        for a session.
+        stores the information for a session in memory.
 
         Parameters
         ----------
@@ -250,12 +206,12 @@ class BeakerSessionManager(SessionManager):
         model : dict
             a dictionary of the session model
         """
-        self.session_table.add({"session_id": session_id, "started_at": datetime.datetime.now(), **kwargs})
+        self._sessions[session_id] = {"session_id": session_id, "started_at": datetime.datetime.now(), **kwargs}
         result = await self.get_session(session_id=session_id)
         return result
 
     async def update_session(self, session_id, **kwargs):
-        """Updates the values in the session database.
+        """Updates the values in the session store.
 
         Changes the values of the session with the given session_id
         with the values from the keyword arguments.
@@ -263,19 +219,26 @@ class BeakerSessionManager(SessionManager):
         Parameters
         ----------
         session_id : str
-            a uuid that identifies a session in the sqlite3 database
+            a uuid that identifies a session
         **kwargs : str
-            the key must correspond to a column title in session database,
+            the key must correspond to a session field,
             and the value replaces the current value in the session
             with session_id.
         """
-
         if not kwargs:
             # no changes
             return
 
         await self.get_session(session_id=session_id)
-        self.session_table.update(conditions={"session_id": session_id}, record=kwargs)
+        self._sessions[session_id].update(kwargs)
         if hasattr(self.kernel_manager, "update_env"):
-            row = self.session_table.get(session_id=session_id)
+            row = self._sessions[session_id]
             self.kernel_manager.update_env(kernel_id=row["kernel_id"], env=self.get_kernel_env(row["path"], row["name"]))
+
+    async def delete_session(self, session_id=None):
+        """Delete a session and shut down its kernel."""
+        session = await self.get_session(session_id=session_id)
+        kernel_id = session["kernel"]["id"] if session.get("kernel") else None
+        if kernel_id:
+            await ensure_async(self.kernel_manager.shutdown_kernel(kernel_id))
+        self._sessions.pop(session_id, None)

@@ -193,7 +193,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
 
     def __init__(
         self,
-        display_name: str,
+        display_name: Optional[str] = None,
         **config_options
     ):
         super().__init__(display_name=display_name)

@@ -1,33 +1,17 @@
-import copy
-import datetime
-import json
 import os
-import dill
-import pickle
 import pwd
 import shutil
 import signal
-import socket
-from pathlib import Path
-from typing import Self, Optional, cast, TYPE_CHECKING, TypeAlias
+from typing import Optional, TYPE_CHECKING
 
-import traitlets
-from traitlets import Unicode, Integer, Float, Instance, Type, default
-from traitlets.utils.importstring import import_item
-from jupyter_client.connect import KernelConnectionInfo
+from traitlets.traitlets import Unicode, Float
 from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
-from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.config import config
-from beaker_kernel.services.auth import current_user, BeakerUser
-from beaker_kernel.services.datastore import DatastoreTable, Column, ColumnType, TableRecord, Now
 
 if TYPE_CHECKING:
     from beaker_kernel.app.base import BaseBeakerApp
-    from beaker_kernel.services.kernel.mappingmanager import BeakerKernelMappingManager
-    from beaker_kernel.services.kernel.provisioner import BeakerProvisioner
-
 
 
 class BeakerKernelManager(AsyncIOLoopKernelManager):
@@ -62,14 +46,6 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             The server application instance
         """
         return self.parent.parent
-
-    @classmethod
-    def from_record(cls, record):
-        """Rehydrates a KernelManager from a record stored in the DB"""
-        instance = cls.__init__()
-        for k, v in record:
-            setattr(instance, k, v)
-        return instance
 
     def setup_instance(self, *args, **kwargs):
         super().setup_instance(*args, **kwargs)
@@ -180,154 +156,3 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             # Normal interrupts are done via a interrupt message, which will also interrupt the subkernel.
             return await self._async_signal_kernel(signal.SIGINT)
         return await super()._async_interrupt_kernel()
-
-    # def __getstate__(self):
-    #     state = super().__getstate__()
-    #     del state["_ready"]
-    #     del state["_trait_values"]["parent"]
-    #     del state["_trait_values"]["kernel_spec_manager"]
-    #     del state["_trait_values"]["session"]
-
-
-    #     return state
-
-
-
-class BeakerDistributedKernelManager(BeakerKernelManager):
-
-    async def is_alive(self) -> bool:
-        """Check to see if kernel is alive without a local process"""
-        connection_info = self.get_connection_info()
-        if not connection_info:
-            return False
-
-        kernel_ip = connection_info["ip"]
-        control_port = connection_info["control_port"]
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.1)
-            try:
-                sock.connect((kernel_ip, control_port))
-                # Socket is closed automatically when exiting the context manager
-                return True
-            except (socket.timeout, ConnectionError, OSError):
-                return False
-        return True
-
-    def __getstate__(self):
-        """Custom handler to allow serialization"""
-        state = super().__getstate__()
-        return state
-
-
-
-class KernelTable(DatastoreTable):
-    resource = BeakerKernelManager
-    name = "kernels"
-    columns = [
-        # Identity
-        Column(name="kernel_id", column_type=ColumnType.TEXT, primary_key=True),
-        Column(name="kernel_name", column_type=ColumnType.TEXT, allow_null=False),
-        Column(name="user_id", column_type=ColumnType.TEXT),
-
-        Column(name="cls", column_type=ColumnType.TEXT, allow_null=False),
-
-        # Serialized setup
-        Column(name="provisioner", column_type=ColumnType.JSON),
-
-        # Sessions (Beaker-specific)
-        Column(name="beaker_session", column_type=ColumnType.TEXT, allow_null=True),
-
-        # TODO: This is apparently only stored in the connection_file json file.
-        Column(name="jupyter_session", column_type=ColumnType.TEXT, allow_null=True),
-
-        # Kernel configuration
-        Column(name="connection_info", column_type=ColumnType.JSON, allow_null=False),
-
-        # State tracking
-        Column(name="execution_state", column_type=ColumnType.TEXT, allow_null=False, default_value="starting"),
-        Column(name="last_activity", column_type=ColumnType.DATETIME, allow_null=True),
-        Column(name="connections", column_type=ColumnType.INTEGER, default_value=0),
-        Column(name="reason", column_type=ColumnType.TEXT, allow_null=True),
-        Column(name="autorestart", column_type=ColumnType.BOOLEAN, default_value=True),
-
-        # Timestamps
-        Column(name="started_at", column_type=ColumnType.DATETIME, allow_null=True, default_value=Now()),
-        Column(name="restart_count", column_type=ColumnType.INTEGER, default_value=0),
-
-        # Catch-all
-        Column(name="metadata", column_type=ColumnType.JSON),
-    ]
-
-    def serialize(self, resource: BeakerKernelManager) -> "KernelRecord":
-        # Warning: Do not modify the passed resource during serialization as resource is a shared reference.
-        connection_info = json.loads(Path(resource.connection_file).read_text())
-        if resource.provisioner is not None:
-            provisioner = {
-                "cls": f"{resource.provisioner.__class__.__module__}.{resource.provisioner.__class__.__name__}",
-                "uuid": getattr(resource.provisioner, "uuid", None)
-            }
-        else:
-            provisioner = None
-        record = dict(
-            kernel_id=resource.kernel_id,
-            kernel_name=resource.kernel_name,
-            user_id=getattr(getattr(resource, "user", None), "username", None),
-            cls=f"{resource.__class__.__module__}.{resource.__class__.__name__}",
-            provisioner=provisioner,
-            beaker_session=resource.beaker_session,
-            jupyter_session=connection_info.get("jupyter_session", None),
-            connection_info=connection_info,
-            connections=getattr(resource, "connections", 0),
-            reason=getattr(resource, "reason", None),
-            autorestart=getattr(resource, "autorestart", None),
-            restart_count=getattr(resource, "restart_count", None),
-            metadata=getattr(resource, "metadata", {}),
-        )
-        if hasattr(resource, "execution_state"):
-            record["execution_state"] = getattr(resource, "execution_state")
-        if hasattr(resource, "last_activity"):
-            record["last_activity"] = getattr(resource, "last_activity")
-        return record
-
-    def deserialize(self, record: "KernelRecord", parent: "BeakerKernelMappingManager") -> BeakerKernelManager:
-        km: BeakerKernelManager = parent.kernel_manager_factory(
-            parent=parent,
-            log=parent.log,
-            owns_kernel=True,
-        )
-        if isinstance(record["connection_info"], str):
-            connection_info = json.loads(record["connection_info"])
-        elif isinstance(record["connection_info"], dict):
-            connection_info = record["connection_info"]
-        else:
-            connection_info = None
-
-        km.load_connection_info(connection_info)
-        km.last_activity = datetime.datetime.now(tz=datetime.UTC)
-        km.execution_state = "idle"
-        km.connections = 1
-        km.kernel_id = record["kernel_id"]
-        km.kernel_name = record["kernel_name"]
-        km.ready.set_result(None)
-
-        km.user_id = record["user_id"]
-        # km.session = record["jupyter_session"]
-        km.reason = record["reason"]
-
-        provisioner_info = record.get("provisioner", None)
-        if isinstance(provisioner_info, str):
-            provisioner_info = json.loads(provisioner_info)
-        provisioner_instance = None
-        if provisioner_info:
-            if "cls" in provisioner_info and "uuid" in provisioner_info:
-                try:
-                    provisioner_cls: BeakerProvisioner = import_item(provisioner_info["cls"])
-                    provisioner_instance = provisioner_cls.get_instance(provisioner_info["uuid"])
-                except (ImportError, LookupError, AttributeError):
-                    pass
-        km.provisioner = provisioner_instance
-        return km
-
-
-KernelRecord: TypeAlias = TableRecord[KernelTable]

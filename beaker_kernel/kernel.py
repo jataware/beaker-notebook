@@ -17,6 +17,7 @@ from tornado import ioloop
 
 from beaker_kernel.lib.config import reset_config, config
 from beaker_kernel.lib.context import BeakerContext, autodiscover_contexts
+from beaker_kernel.lib.subkernel import BeakerSubkernel
 from beaker_kernel.lib.jupyter_kernel_proxy import InterceptionFilter, JupyterMessage, KernelProxyManager
 from beaker_kernel.lib.utils import (message_handler, LogMessageEncoder, magic,
                         handle_message, get_socket, execution_context, parent_message_context,
@@ -82,12 +83,12 @@ class BeakerKernel(KernelProxyManager):
         self.user_responses = dict()
         # Initialize context (Using the event loop to simulate `await`ing the async func in non-async setup)
         event_loop = asyncio.get_event_loop()
-        logger.warning(f"About to start default context: {context_args}")
+        logger.debug(f"About to start default context: {context_args}")
         context_task = event_loop.create_task(self.start_default_context(**context_args))
         context_task.add_done_callback(lambda task: None)
 
     async def start_default_context(self, default_context=None, default_context_payload=None, **options):
-        logger.warning("starting default context!")
+        logger.debug("starting default context!")
         default_context = default_context or os.environ.get('BEAKER_DEFAULT_CONTEXT')
         default_context_payload = default_context_payload or os.environ.get('BEAKER_DEFAULT_CONTEXT_PAYLOAD', "{}")
 
@@ -98,7 +99,8 @@ class BeakerKernel(KernelProxyManager):
             optional_args["language"] = language
 
         # Set context specific options
-        debug = options.get("debug", None) or os.environ.get('BEAKER_DEFAULT_CONTEXT_DEBUG', None)
+        if (debug := (options.get("debug", None))) is None:
+            debug = str(os.environ.get('BEAKER_DEFAULT_CONTEXT_DEBUG', "false")).lower() in ("true", "t", "y", "yes", "debug")
         verbose = options.get("verbose", None) or os.environ.get('BEAKER_DEFAULT_CONTEXT_VERBOSE', None)
         if debug is not None:
             self.debug_enabled = debug
@@ -168,7 +170,7 @@ class BeakerKernel(KernelProxyManager):
         key = self.session_config.get("key")
 
         hash_source = f"{kernel_id}{nonce}{key}".encode()
-        hash_value = hashlib.md5(hash_source).hexdigest()
+        hash_value = hashlib.sha256(hash_source).hexdigest()
 
         return f"{preamble}:{kernel_id}:{nonce}:{hash_value}"
 
@@ -340,8 +342,16 @@ class BeakerKernel(KernelProxyManager):
         with open(self.connection_file, "w") as connection_file:
             json.dump(run_info, connection_file, indent=2)
 
-    async def set_context(self, context_name, context_info, subkernel=None, language="python", parent_header={}):
-        context_cls = AVAILABLE_CONTEXTS.get(context_name, None)
+    async def set_context(
+            self,
+            context_name: str,
+            context_info: dict|None,
+            subkernel: BeakerSubkernel|str|type[BeakerSubkernel]|None = None,
+            language: str = "python",
+            parent_header: dict = {}
+        ):
+        subkernel_ref = subkernel
+        context_cls: type[BeakerContext]|None = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
             # TODO: Should we return an error if the requested context isn't available?
             return False
@@ -362,7 +372,9 @@ class BeakerKernel(KernelProxyManager):
             case None:
                 if language:
                     subkernel = next((subkernel for subkernel in context_cls.available_subkernels().values() if subkernel.JUPYTER_LANGUAGE == language), None)
-            # subkernel = context_cls.available
+
+        if not subkernel:
+            raise ModuleNotFoundError(f"Unable to locate subkernel {repr(subkernel_ref)}")
 
         context_config = {
             "subkernel": subkernel.SLUG,
@@ -692,8 +704,8 @@ class BeakerKernel(KernelProxyManager):
         content = message.content
         context_name = content.get("context")
         context_info = content.get("context_info", {})
-        language = content.get("language", "python3")
-        subkernel = content.get("subkernel", None)
+        subkernel = content.get("subkernel", "python3")
+        language = content.get("language", None)
         enable_debug = content.get("debug", None)
         verbose = content.get("verbose", None)
 
@@ -750,7 +762,7 @@ class BeakerKernel(KernelProxyManager):
         await self.set_context(
             self.context.SLUG,
             self.context.config,
-            language=self.context.subkernel.SLUG,
+            subkernel=self.context.subkernel.SLUG,
             parent_header=message.header
         )
         await self.send_chat_history(message.header)

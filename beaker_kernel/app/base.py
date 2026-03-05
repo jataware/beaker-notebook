@@ -4,20 +4,17 @@ import logging
 import os
 import re
 import urllib.parse
-from typing import Optional, Any, cast, ClassVar
+from typing import ClassVar
 
 import traitlets
-from traitlets import Unicode, Integer, Float
+from traitlets.traitlets import Unicode
 from traitlets.config import Config
 from traitlets.config.application import Application, ClassesType
 from traitlets.config.configurable import Configurable
 from traitlets.config.loader import ConfigFileNotFound
-from traitlets.utils.text import indent, wrap_paragraphs
+from traitlets.utils.text import wrap_paragraphs
 
-from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
 from jupyter_client import kernelspec
-from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
-from jupyter_server.services.sessions.sessionmanager import SessionManager
 from jupyter_server.serverapp import ServerApp
 from jupyter_server.utils import url_path_join
 
@@ -25,8 +22,7 @@ from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.config import config, CONFIG_FILE_SEARCH_LOCATIONS
 from beaker_kernel.lib.utils import import_dotted_class
-from beaker_kernel.services.auth import current_user, BeakerUser, BeakerAuthorizer, BeakerIdentityProvider
-from beaker_kernel.app.handlers import register_handlers, request_log_handler, XSRFTokenHandler, CreateSessionWithContextHandler
+from beaker_kernel.app.handlers import register_handlers
 
 
 logger = logging.getLogger("beaker_server")
@@ -73,12 +69,6 @@ class BaseBeakerApp(ServerApp):
         help="Path pointing to where user directories should be stored. Defaults to 'root_dir' if not set.",
         config=True,
     )
-    datastore_class = traitlets.Type(
-        "beaker_kernel.services.datastore.memory.MemoryDatastore",
-        klass="beaker_kernel.services.datastore.BeakerDatastore",
-        config=True,
-    )
-
     kernel_spec_include_local = traitlets.Bool(True, help="Include local kernel specs", config=True)
     kernel_spec_managers = traitlets.Dict(help="Kernel specification managers indexed by extension name", config=True)
 
@@ -165,10 +155,6 @@ class BaseBeakerApp(ServerApp):
         # Initialize configurables first to ensure config is loaded before other initializations
         super().init_configurables()
 
-        self.datastore = self.datastore_class(
-            parent=self,
-        )
-        self.log.debug(f"Initialized datastore: {self.datastore.__class__.__name__}")
         self.notebook_manager = self.notebook_manager_class(
             parent=self,
         )
@@ -221,7 +207,7 @@ class BaseBeakerApp(ServerApp):
                     self.log.debug("Config file not found, skipping: %s", self.config_file_name)
 
             # If another configuration file is defined, load it second so it overrides any defaults
-            if self.config_file_name != default_config_file_name:
+            if self.config_file_name not in default_config_files:
                 try:
                     Application.load_config_file(self, self.config_file_name, path=self.beaker_config_path)
                 except ConfigFileNotFound:

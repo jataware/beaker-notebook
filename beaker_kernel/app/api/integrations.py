@@ -1,22 +1,15 @@
 import json
 import logging
-import os
 import typing
 import asyncio
+from inspect import isawaitable, iscoroutinefunction
 from queue import Empty
 
 from jupyter_server.base.handlers import JupyterHandler
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 
-from beaker_kernel.lib.agent_tasks import summarize
-from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.config import Choice, Config, Table, config, locate_config, recursiveOptionalUpdate, reset_config
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.subkernel import BeakerSubkernel
-from beaker_kernel.lib.utils import ensure_async
-from beaker_kernel.lib import admin
 
 import tornado
 
@@ -120,6 +113,7 @@ class BeakerAPIMixin:
         if kwargs is None:
             kwargs = {}
 
+        kernel = None
         retries = 0
         max_retries = 5
         interval = 3
@@ -150,14 +144,17 @@ class BeakerAPIMixin:
                 "args": args,
                 "kwargs": kwargs
             }
-            msg = client.session.send(
+            client.session.send(
                 stream=client.shell_channel.socket,
                 msg_or_type="call_in_context_request",
                 content=content,
                 track=True,
                 metadata=None,
             )
-            result = await client.get_shell_msg(timeout=30) # timeout is in seconds, not milliseconds
+            if iscoroutinefunction(client.get_shell_msg):
+                result = await client.get_shell_msg(timeout=30) # timeout is in seconds, not milliseconds
+            else:
+                result = client.get_shell_msg(timeout=30)
         except Empty as err:
             raise TimeoutError(err)
         finally:

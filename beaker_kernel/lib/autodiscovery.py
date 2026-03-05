@@ -70,7 +70,7 @@ def find_resource_dirs(resource_type: str, extra_locations: typing.Optional[list
             yield resource_dir
 
 
-def find_mappings(resource_type: ResourceType) -> typing.Generator[typing.Dict[str, any], None, None]:
+def find_mappings(resource_type: ResourceType) -> typing.Generator[typing.Tuple[str, dict], None, None]:
     """
     Finds, reads, and parses all mappings of the provided type.
     """
@@ -140,7 +140,7 @@ class AutodiscoveryItems(Mapping[str, type]):
 
         # Fallback to loading from old json file
         item = self.raw_jsons.get(key)
-        if isinstance(item, (str, bytes, os.PathLike)) and os.path(path := os.fspath(item)) and path.endswith('.json'):
+        if isinstance(item, (str, bytes, os.PathLike)) and os.path.exists(path := os.fspath(item)) and path.endswith('.json'):
             with open(path) as jsonfile:
                 item = json.load(jsonfile)
                 item["mapping_file"] = path
@@ -176,7 +176,7 @@ class AutodiscoveryItems(Mapping[str, type]):
         return len(self.raw) + len(self.raw_jsons)
 
 
-def autodiscover(mapping_type: ResourceType) -> typing.Dict[str, type]:
+def autodiscover(mapping_type: ResourceType) -> AutodiscoveryItems:
     """
     Auto discovers installed classes of specified types.
     """

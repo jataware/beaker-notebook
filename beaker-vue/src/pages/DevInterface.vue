@@ -188,7 +188,6 @@ const saveAsFilename = ref<string>(null);
 const isMaximized = ref(false);
 const contextSelectionOpen = ref(false);
 const activeContextPayload = ref<any>(null);
-const contextProcessing = ref(false);
 const rightMenu = ref<typeof SideMenuPanel>();
 const executeActionRef = ref<typeof BeakerExecuteAction>();
 const { theme, toggleDarkMode } = inject<IBeakerTheme>('theme');

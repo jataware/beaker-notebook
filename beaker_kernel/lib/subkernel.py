@@ -355,10 +355,32 @@ async def run_code(code: str, agent: AgentRef, loop: LoopControllerRef, react_co
 class BeakerSubkernel(abc.ABC):
     DISPLAY_NAME: str
     SLUG: str
-    KERNEL_NAME: str
+    KERNEL_NAME: str | None = None  # Optional hint; if set and available, preferred when resolving kernel specs
     JUPYTER_LANGUAGE: str
 
     WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+
+    @classmethod
+    def resolve_kernelspec(cls, kernelspecs: dict[str, dict]) -> str | None:
+        """Given the kernelspecs dict from the KSM API, return the spec name to use.
+
+        Prefers KERNEL_NAME if set and available, otherwise picks any spec
+        matching JUPYTER_LANGUAGE. Subclasses can override for custom logic.
+
+        Args:
+            kernelspecs: The "kernelspecs" dict from the /api/kernelspecs response,
+                         mapping spec name -> {"name": ..., "spec": {"language": ..., ...}, ...}
+        """
+        if cls.KERNEL_NAME and cls.KERNEL_NAME in kernelspecs:
+            return cls.KERNEL_NAME
+
+        matches = [
+            name for name, info in kernelspecs.items()
+            if info.get("spec", {}).get("language") == cls.JUPYTER_LANGUAGE
+        ]
+        if matches:
+            return matches[0]
+        return None
 
     TOOLS: list[tuple[Callable, Callable]]  = [
         (run_code, lambda: True),
