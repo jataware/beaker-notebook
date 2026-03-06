@@ -42,9 +42,9 @@ dependencies = [
   "numpy",
   "scipy",
   "openpyxl",
-  "tree-sitter<0.25.0",
-  "tree-sitter-python",
-  "tree-sitter-julia",
+  "tree-sitter<0.25",
+  "tree-sitter-python<0.25",
+  "tree-sitter-julia<0.25",
 ]
 
 [project.entry-points.hatch]
