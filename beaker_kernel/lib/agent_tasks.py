@@ -46,14 +46,20 @@ async def summarize(notebook: dict, summary_prompts: dict[str, str] | None = Non
         "summary": "a ~400 character summary in passive voice",
     }
     for cell in notebook["cells"]:
+        if isinstance(cell.get("source"), list):
+            cell["source"] = "".join(cell["source"])
         if "outputs" in cell and len(cell["outputs"]) > 0:
             for output in cell["outputs"]:
                 if "text" in output:
+                    if isinstance(output["text"], list):
+                        output["text"] = "".join(output["text"])
                     output["text"] = output["text"][:OUTPUT_CHAR_LIMIT]
                 if "traceback" in output:
                     del output["traceback"]
                 if "data" in output:
                     for data_type in output["data"]:
+                        if isinstance(output["data"][data_type], list):
+                            output["data"][data_type] = "".join(output["data"][data_type])
                         output["data"][data_type] = output["data"][data_type][:OUTPUT_CHAR_LIMIT]
 
     agent = Summarizer(notebook)

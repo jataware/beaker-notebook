@@ -395,6 +395,15 @@ class ExportAsHandler(JupyterHandler):
         name = model.get("name", "notebook.ipynb")
         nbnode = from_dict(model["content"])
 
+        # Normalize cell sources and output text fields to strings.
+        # Jupyter notebooks sometimes represent these as lists of strings.
+        for cell in nbnode.cells:
+            if isinstance(cell.source, list):
+                cell.source = "".join(cell.source)
+            for output in cell.get("outputs", []):
+                if "text" in output and isinstance(output["text"], list):
+                    output["text"] = "".join(output["text"])
+
         try:
             # attach additional options for export from json body to streamlined notebook exporter
             # options is a superclass field that does not exist on all exporters

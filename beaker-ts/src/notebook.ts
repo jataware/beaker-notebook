@@ -73,6 +73,9 @@ export class BeakerBaseCell implements nbformat.IBaseCell {
         if (content.id === undefined) {
             this.id = BeakerBaseCell.generateId();
         }
+        if (Array.isArray(this.source)) {
+            this.source = this.source.join("");
+        }
     }
 
     static generateId(): string {
@@ -189,6 +192,9 @@ export class BeakerRawCell extends BeakerBaseCell implements nbformat.IRawCell {
     constructor(content: nbformat.ICell) {
         super(content);
         Object.assign(this, content)
+        if (Array.isArray(this.source)) {
+            this.source = this.source.join("");
+        }
     }
 
     public execute(session: BeakerSession): IBeakerFuture | null {
@@ -299,9 +305,9 @@ export class BeakerMarkdownCell extends BeakerBaseCell implements nbformat.IMark
     constructor(content: Partial<nbformat.ICell>) {
         super({ ...content});
         Object.assign(this, content)
-        // if (Array.isArray(this.source)) {
-        //     this.source = this.source.join("");
-        // }
+        if (Array.isArray(this.source)) {
+            this.source = this.source.join("");
+        }
     }
 
 
@@ -329,6 +335,9 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     constructor(content: Partial<nbformat.ICell>) {
         super({cell_type: 'query', ...content});
         Object.assign(this, content)
+        if (Array.isArray(this.source)) {
+            this.source = this.source.join("");
+        }
     }
 
     public execute(session: BeakerSession, includeNotebookState: boolean = true): IBeakerFuture | null {
