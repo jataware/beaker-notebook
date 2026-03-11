@@ -165,11 +165,12 @@ class BaseBeakerApp(ServerApp):
         url_prefix = os.environ.get("BEAKER_SERVER_PREFIX", "").rstrip("/")
         self.base_url = url_prefix
 
+        super().initialize(argv, find_extensions, new_httpserver, starter_extension)
+
         self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")
         if config.jupyter_token:
             self.config["IdentityProvider"].setdefault("token", config.jupyter_token)
 
-        super().initialize(argv, find_extensions, new_httpserver, starter_extension)
         beaker_app_slug = os.environ.get("BEAKER_APP", self.config.get("beaker_app", None))
         if beaker_app_slug:
             app_cls: type[BeakerApp] = import_dotted_class(beaker_app_slug)
