@@ -124,9 +124,6 @@ const contextPayloadData = ref<{[key: string]: string}>({});
 // language might not be available in the new languageOptions/context
 // Ensure to default the selected language for that context to 1st option available
 watch(selectedContextSlug, (newSelectedContextSlug: string) => {
-    // console.log(JSON.stringify(selectedContext.value));
-    // console.log(JSON.stringify(availableSubkernels.value));
-    // console.log({newSelectedContextSlug});
     const subkernelOptions = availableSubkernels.value;
     const currentSubkernelSlug = selectedSubkernelSlug.value;
     const availableCount = subkernelOptions.length;
@@ -146,49 +143,9 @@ watch(selectedContextSlug, (newSelectedContextSlug: string) => {
 
         if (!existingContextPayload) {
             console.log("Need to fetch default payload");
-            // contextPayloadData.value[newSelectedContextSlug] = contextData.value[selectedContextSlug.value].defaultPayload;
         }
     // }
 });
-
-// // TODO clean this once we understand how checkboxes state work..
-// watch(() => props.isOpen, (open /*, oldValue*/) => {
-
-//     // Only setup saved context state when opening the dialog (not closing).
-//     if (open) {
-
-//         if (beakerSession.activeContext.language) {
-//             // Panel just opened and activeContext data available:
-//             selectedLanguage.value = beakerSession.activeContext.language.subkernel;
-//             selectedContextSlug.value = beakerSession.activeContext.slug;
-
-//             // First time we open, if payload empty, load from active context
-//             const existingContextPayload = contextPayloadData.value[selectedContextSlug.value];
-//             if (!existingContextPayload) {
-//                 contextPayloadData.value[selectedContextSlug.value] = JSON.stringify(beakerSession.activeContext.config);
-//             }
-//         }
-
-//         if (beakerSession.activeContext.info) {
-//         // Panel just opened and activeContext info available (verbose/debug checks)
-//             const strDebugValue = beakerSession.activeContext.info.debug.toString();
-
-//             if (logDebug.value.length) {
-//                 logDebug.value[0] = strDebugValue;
-//             } else {
-//                 logDebug.value.push(strDebugValue);
-//             }
-//             const strVerboseValue = beakerSession.activeContext.info.verbose.toString();
-
-//             if (logVerbose.value.length) {
-//                 logVerbose.value[0] = strVerboseValue;
-//             } else {
-//                 logVerbose.value.push(strVerboseValue);
-//             }
-
-//         }
-//     }
-// });
 
 const setContext = async () => {
     const isDebug = logDebug.value;
@@ -203,7 +160,6 @@ const setContext = async () => {
       debug: isDebug,
       verbose: isVerbose,
     };
-    console.log(contextMessageContent);
     emit("context-changed", contextMessageContent);
     emit("close-context-selection")
 }

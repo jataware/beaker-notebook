@@ -123,7 +123,6 @@ const shouldShowThought = computed(() => {
 
 const toggleMockSticky = () => {
     mockStickyForce.value = !mockStickyForce.value;
-    // console.log('Mock sticky force:', mockStickyForce.value);
 };
 
 const isQueryActive = computed(() => {
@@ -132,11 +131,6 @@ const isQueryActive = computed(() => {
     const queryStatus = cell.value.metadata?.query_status;
     return queryStatus === 'in-progress' && ['busy', 'awaiting_input'].includes(cell.value.status);
 });
-
-// const showCollapseControl = computed(() => {
-//     const queryStatus = cell.value.metadata?.query_status;
-//     return queryStatus === 'in-progress' || queryStatus === 'pending';
-// });
 
 watchEffect(() => {
     if (cell.value.metadata) {

@@ -198,7 +198,6 @@ const setPreamble = async () => {
             { message_text: preambleText.value.trim() }
         );
         const reply = await action.done;
-        console.log({response: reply});
         if (reply?.content?.status === "ok") {
             preambleText.value = '';
             showToast({title: 'Upload complete', detail: "Preamble message set.", severity: 'success', life: 4000});

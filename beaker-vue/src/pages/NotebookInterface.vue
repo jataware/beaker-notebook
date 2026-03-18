@@ -355,7 +355,6 @@ const iopubMessage = (msg) => {
         });
     } else if (msg.header.msg_type === "chat_history") {
         chatHistory.value = msg.content;
-        console.log(msg.content);
     } else if (msg.header.msg_type === "lint_code_result") {
         msg.content.forEach((result) => {
             const cell = beakerSession.value.findNotebookCellById(result.cell_id);

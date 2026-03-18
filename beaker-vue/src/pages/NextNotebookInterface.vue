@@ -348,7 +348,7 @@ const { setupQueryCellFlattening, resetProcessedEvents } = useQueryCellFlattenin
 setupQueryCellFlattening(() => beakerSession.value?.session?.notebook?.cells);
 
 const handleLoadNotebook = (notebookJSON: any, filename: string) => {
-    console.log("Loading notebook:", notebookJSON, filename);
+    console.log("Loading notebook:", filename);
     resetProcessedEvents();
     loadNotebook(notebookJSON, filename);
 };

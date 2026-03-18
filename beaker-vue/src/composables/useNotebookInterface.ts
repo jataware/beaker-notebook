@@ -346,7 +346,6 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
             }
         } else if (msg.header.msg_type === "chat_history") {
             chatHistory.value = msg.content;
-            console.log(msg.content);
         } else if (msg.header.msg_type === "context_setup_response" || msg.header.msg_type === "context_info_response") {
             let incomingIntegrations;
             if (msg.header.msg_type === "context_setup_response") {
@@ -384,7 +383,7 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
     };
 
     const loadNotebook = (notebookJSON: any, filename: string) => {
-        console.log("Loading notebook", notebookJSON);
+        console.log("Loading notebook", filename);
 
         const notebook = beakerNotebookRef.value;
         beakerSession.value?.session.loadNotebook(notebookJSON);
