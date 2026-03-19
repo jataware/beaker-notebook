@@ -47,6 +47,7 @@ config.baseHost = baseHost;
 const app = createApp(App, {config});
 const router = createRouter(config);
 
+app.provide('siteConfig', siteConfig);
 app.use(createPinia());
 app.use(router);
 app.use(PrimeVue, {

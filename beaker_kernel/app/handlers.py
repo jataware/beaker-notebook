@@ -120,6 +120,9 @@ class PageHandler(JupyterHandler, ):
             'username': self.current_user.name if self.current_user else None,
             '_xsrf': self.xsrf_token.decode(),
         }
+        env_vars = self.get_env()
+        if env_vars:
+            config["env"] = env_vars
 
         # Replace the Jinja2 placeholder with actual JSON
         # The index.html has: <script id="site-config" type="application/json">{{ siteConfig }}</script>
@@ -131,6 +134,11 @@ class PageHandler(JupyterHandler, ):
 
         self.set_header('Content-Type', 'text/html')
         self.write(html)
+
+    def get_env(self) -> dict[str, str]:
+        envs = {key: value for key, value in os.environ.items() if key.startswith("BEAKER_UI_")}
+        return envs
+
 
 
 class ConfigController(JupyterHandler):
