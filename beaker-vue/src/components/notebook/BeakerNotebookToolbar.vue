@@ -376,17 +376,29 @@ const refreshExportTypes = async () => {
         return true
     }).map(([format, formatInfo]) => {
         const mimetype = formatInfo.output_mimetype;
-        const labelMap = {
-            streamline: "notebook (AI ✨)",
-            full_context_notebook: "notebook (full agent context)",
-        }
+        const labelMap: Record<string, string> = {
+            asciidoc: "📄 AsciiDoc (.asciidoc)",
+            chat: "🤖 Chat (.html)",
+            html: "🌐 HTML (.html)",
+            latex: "📐 LaTeX (.tex)",
+            markdown: "📝 Markdown (.md)",
+            notebook: "📓 Notebook (.ipynb)",
+            pdf: "📕 PDF (.pdf)",
+            python: "🐍 Python (.py)",
+            rst: "📄 reStructuredText (.rst)",
+            script: "📜 Script (.py)",
+            slides: "🖥️ Slides (.html)",
+            streamline: "✨ Notebook (AI streamlined)",
+            full_context_notebook: "📓 Notebook (full agent context)",
+        };
         const label = labelMap[format] ?? format;
         return {
             label,
+            sortKey: format,
             tooltip: mimetype,
             command: () => {exportAction(format, mimetype)},
         };
-    }).sort((a, b) => a.label.localeCompare(b.label));
+    }).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 };
 
 onBeforeMount(async () => {
