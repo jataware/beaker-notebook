@@ -547,6 +547,7 @@ class BeakerKernel(KernelProxyManager):
     @message_handler
     async def llm_request(self, message: JupyterMessage):
         from archytas.exceptions import AuthenticationError
+        from archytas.react import FailedTaskError
         content: dict = message.content
         request = content.get("request", None)
         if not request:
@@ -570,6 +571,8 @@ class BeakerKernel(KernelProxyManager):
                 task = asyncio.create_task(self.context.agent.react_async(request, react_context={"message": message}))
                 self.running_actions[request_key] = task
                 result = await task
+            except FailedTaskError as err:
+                result = err.message
             except AuthenticationError as err:
                 self.send_response(
                     stream="iopub",
