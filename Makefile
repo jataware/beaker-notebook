@@ -7,8 +7,8 @@ init:
 
 .PHONY:build
 build:
-	rm -r beaker-ts/dist/* beaker-vue/dist/* beaker-vue/html/* beaker_kernel/app/ui/* || true
-	make beaker_kernel/app/ui/index.html
+	$(MAKE) beaker_kernel/app/ui/index.html
+	$(MAKE) beaker-vue/dist
 	hatch build
 
 .PHONY:clean
@@ -37,17 +37,22 @@ dev:beaker_kernel/app/ui/index.html
 		echo "Don't forget to set your OPENAI key in the .env file!"; \
 	fi
 
-beaker-vue/node_modules:beaker-vue/package*.json
+beaker-ts/node_modules:beaker-ts/package*.json
 	(cd beaker-ts/ && npm install --include=dev && npm run build) && \
+	touch beaker-ts/node_modules
+
+beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/node_modules
 	(cd beaker-vue && npm install --include=dev) && \
 	touch beaker-vue/node_modules
 
-beaker_kernel/app/ui/index.html:beaker-vue/node_modules beaker-vue/**
-	(cd beaker-ts/ && npm install && npm run build) && \
-	(cd beaker-vue/ && npm install && npm run build) && \
-	rsync -r --exclude="*.map" beaker-vue/html/* beaker_kernel/app/ui/
-	#rm -r beaker_kernel/app/ui/* || true; \
+beaker-vue/dist:beaker-vue/node_modules $(shell find beaker-vue/src/ -name '*.ts')
+	(cd beaker-vue && npm run build-lib) && \
+	touch beaker-vue/dist
 
-.PHONY:changed-files
-changed-files:
-	find dev_ui/ \( -name "build" -prune \) -o -cnewer dev_ui/build/index.js \( -name '*.js' -or -name '*.ts' \) -ls
+beaker-vue/html:beaker-vue/node_modules $(shell find beaker-vue/src/ -name '*.ts' -or -name '*.vue')
+	(cd beaker-vue && npm run build-ui) && \
+	touch beaker-vue/html
+
+beaker_kernel/app/ui/index.html:beaker-vue/node_modules beaker-vue/html
+	rsync -r --exclude="*.map" beaker-vue/html/* beaker_kernel/app/ui/
+
