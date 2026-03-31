@@ -4,12 +4,13 @@ const hashSum = require("hash-sum");
 
 // Read in both json files
 const pkg = JSON.parse(fs.readFileSync(packageFile).toString());
+const bkupPkg = JSON.parse(fs.readFileSync(backupPackageFile).toString());
 
 // Update exports in package.json data
-pkg["exports"] = {};
+pkg["exports"] = bkupPkg["exports"];
 
 // Write update package file
-fs.writeFileSync(packageFile, JSON.stringify(pkg, null, 2), {"encoding": "utf8"})
+fs.writeFileSync(packageFile, JSON.stringify(pkg, null, 2) + "\n", {"encoding": "utf8"})
 
 if (fs.existsSync(backupPackageFile)) {
     const pkgSum = hashSum(fs.readFileSync(packageFile).toString());

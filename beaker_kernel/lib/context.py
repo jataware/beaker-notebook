@@ -58,6 +58,8 @@ class BeakerContext:
     FULL_NAME: ClassVar[str]
     WEIGHT: ClassVar[int] = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
     AGENT_CLS: "ClassVar[type[BeakerAgent]]"
+    ASSET_DIR: ClassVar[Optional[os.PathLike|str]] = None
+    RENDERERS: ClassVar[Optional[Dict[str, Dict[str, str]]]] = None
 
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
@@ -80,9 +82,9 @@ class BeakerContext:
     kernel_state: Optional[dict]
     integrations: list[BaseIntegrationProvider]
 
-    procedure_location: ClassVar[Optional[os.PathLike]]
+    procedure_location: ClassVar[Optional[os.PathLike|str]]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "BeakerAgent", config: Dict[str, Any],
+    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any],
                  integrations: list[BaseIntegrationProvider] = None):
         self.intercepts = []
         self.integrations = integrations if integrations is not None else []
@@ -148,11 +150,12 @@ class BeakerContext:
                 self.agent.disable(workflow_tool)
 
     def __init_subclass__(cls):
+        mod = inspect.getmodule(cls)
         # Initialize default values for class variables if not already set
         if not hasattr(cls, "AGENT_CLS") and hasattr(cls, "agent_cls"):
             cls.AGENT_CLS = cls.agent_cls
         if not hasattr(cls, "SLUG"):
-            package_str = inspect.getmodule(cls).__package__
+            package_str = mod.__package__
             if package_str:
                 cls.SLUG = package_str.split(".")[-1]
             else:
@@ -164,6 +167,27 @@ class BeakerContext:
             full_name = re.sub(r'Context$', '', full_name)
             full_name = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', full_name)
             cls.FULL_NAME = full_name
+
+        if (asset_dir := getattr(cls, "ASSET_DIR", None)):
+            # If the path is absolute, assume that it is still relative to the directory which contains the context file.
+            # e.g. if it's set to "/static" assume it should be "/path/to/package/my_context/static"
+            if os.path.isabs(asset_dir):
+                asset_dir = f".{asset_dir}"
+            mod_path = Path(inspect.getabsfile(cls)).parent
+            asset_path = mod_path / asset_dir
+            if asset_path.exists() and asset_path.is_dir():
+                setattr(cls, "ASSET_DIR", str(asset_path))
+
+            renderers = getattr(cls, "RENDERERS", None)
+            if renderers and asset_path.is_dir():
+                for mimetype, config in renderers.items():
+                    renderer_file = config.get("file", "renderers.js")
+                    renderer_path = asset_path / renderer_file
+                    if not (renderer_path.exists() and renderer_path.is_file()):
+                        logger.warning(
+                            f"Renderer file '{renderer_file}' for mime type '{mimetype}' "
+                            f"not found in asset dir for context '{cls.__name__}'."
+                        )
 
         # If a subclass has an auto_context, it should be used instead of the parent's.
         subclass_autocontext = getattr(cls, "auto_context", None)
@@ -418,6 +442,15 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 for uuid, workflow in self.workflows.items()
             }
         }
+        custom_renderers = {}
+        if self.RENDERERS:
+            for mimetype, config in self.RENDERERS.items():
+                renderer_file = config.get("file", "renderers.js")
+                export_name = config.get("export", "default")
+                custom_renderers[mimetype] = {
+                    "url": f"/assets/context/{self.SLUG}/{renderer_file}",
+                    "name": export_name,
+                }
 
         payload = {
             "language": self.subkernel.JUPYTER_LANGUAGE,
@@ -430,6 +463,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             "agent": agent_details,
             "debug": self.beaker_kernel.debug_enabled,
             "verbose": self.beaker_kernel.verbose,
+            "custom_renderers": custom_renderers,
         }
 
         return payload

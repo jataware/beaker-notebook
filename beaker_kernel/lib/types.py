@@ -1,4 +1,5 @@
 import inspect
+import os
 import typing
 from beaker_kernel.lib.utils import slugify, to_import_string
 from collections import deque
@@ -288,7 +289,7 @@ def reify_dataclasses(target, typedef=None, verbose: bool = True):
             return target
         if issubclass(origin, Mapping):
             return {key: reify_dataclasses(value, args[1], verbose=verbose) for key, value in target.items()}
-        elif issubclass(origin, (list, tuple, set, deque)):
+        elif issubclass(origin, (list, tuple, set)):
             return origin(reify_dataclasses(value, args[0], verbose=verbose) for value in target)
         else:
             return target
@@ -310,6 +311,9 @@ class ContextInfo:
     subkernels: dict[str, SubkernelInfo]
     languages: dict[str, LanguageInfo]
     procedures: dict[str, ProcedureInfo]
+
+    asset_dir: typing.Optional[os.PathLike|str|bytes]
+    has_renderers: bool
 
     version: typing.Optional[str] = field(default=None)
     last_updated: datetime = field(default_factory=datetime.now)
@@ -367,6 +371,9 @@ class ContextInfo:
         # Fetch workflow information from class
         workflows = context_cls.discover_workflows()
 
+        asset_dir = context_cls.ASSET_DIR
+        has_renderers = context_cls.RENDERERS is not None
+
         # Build output class
         result = cls(
             slug=context_cls.SLUG,
@@ -385,6 +392,8 @@ class ContextInfo:
             integrations=integrations,
             subkernels=subkernels,
             languages=languages,
+            asset_dir=asset_dir,
+            has_renderers=has_renderers,
             procedures=procedures,
             metadata=metadata,
         )

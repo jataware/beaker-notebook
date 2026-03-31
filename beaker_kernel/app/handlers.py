@@ -81,7 +81,7 @@ class PageHandler(JupyterHandler, ):
     async def get(self, path: str, include_body: bool = True) -> None:
 
         # Always serve index.html as routing is performed in app.
-        beakerapp: BaseBeakerApp = self.settings["serverapp"]
+        beakerapp: "BaseBeakerApp" = self.settings["serverapp"]
         base_url = beakerapp.base_url.rstrip('/')
         index_path = Path(beakerapp.ui_path).absolute() / "index.html"
 
@@ -284,7 +284,7 @@ class ConfigHandler(JupyterHandler):
         # is handling this request, as reported by the request headers.
         # If APP_URL is not provided, assume it is the same as BASE_URL.
 
-        beakerapp: BaseBeakerApp = self.settings["serverapp"]
+        beakerapp: "BaseBeakerApp" = self.settings["serverapp"]
         base_path = beakerapp.base_url or "/"
 
         base_url = os.environ.get("JUPYTER_BASE_URL", f"{self.request.protocol}://{self.request.host}{base_path}")
@@ -543,15 +543,24 @@ class StatsHandler(JupyterHandler):
         return self.write(json.dumps(output))
 
 
-from jupyter_server.serverapp import ServerApp
-def register_handlers(app: ServerApp):
+def register_handlers(app: "BaseBeakerApp"):
     pages = []
 
+    context_manager: BeakerContextManager = app.context_manager
+    contexts = context_manager.list_contexts()
+    for context in contexts:
+        if context.asset_dir is not None:
+            if os.path.isdir(context.asset_dir):
+                app.handlers.append((f"/assets/context/{context.slug}/(.*)", StaticFileHandler, {"path": context.asset_dir}))
+            else:
+                logger.warning(f"Asset path for context {context.slug} ({context.asset_dir}) cannot be found or is not a directory.")
+
     # TODO: fix beaker app registration
-    beaker_app: BeakerApp = app.config.get("app", None)
+    beaker_app: Optional[BeakerApp] = app.config.get("app", None)
     if beaker_app and beaker_app.asset_dir:
         if os.path.isdir(beaker_app.asset_dir):
             app.handlers.append((f"/assets/{beaker_app.slug}/(.*)", StaticFileHandler, {"path": beaker_app.asset_dir}))
+
 
     routes = {}
     if beaker_app and beaker_app.pages:

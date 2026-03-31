@@ -114,12 +114,41 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
     })
 
     const setSignalHandlers = async (session) => {
-        session.iopubMessage.connect((session, msg) => {
+        session.iopubMessage.connect(async (session, msg) => {
           emit("iopub-msg", msg);
           if (messages.isStatusMsg(msg)) {
             const newStatus = msg?.content?.execution_state || 'unknown';
             status.value = rawSession.status;
             emit("session-status-changed", newStatus);
+          }
+          if (msg.header.msg_type === "context_info_response") {
+            // TODO: Clear previously loaded custom renderers on context switch to prevent
+            // stale renderers from persisting when switching between contexts.
+            if (msg.content.info?.custom_renderers) {
+              console.debug("Custom Renderers", msg.content.info.custom_renderers);
+              // Group by URL to avoid re-importing the same module multiple times
+              const byUrl = new Map<string, Array<{mimetype: string, name: string}>>();
+              for (const [mimetype, config] of Object.entries(msg.content.info.custom_renderers) as [string, any][]) {
+                const list = byUrl.get(config.url) ?? [];
+                list.push({ mimetype, name: config.name });
+                byUrl.set(config.url, list);
+              }
+              for (const [url, entries] of byUrl) {
+                try {
+                  const mod = await import(/* @vite-ignore */ url);
+                  for (const { mimetype, name } of entries) {
+                    const renderer = mod[name] ?? mod.default;
+                    if (renderer) {
+                      rawSession.renderer.addRenderer(renderer);
+                    } else {
+                      console.warn(`Custom renderer export "${name}" for ${mimetype} not found in ${url}`);
+                    }
+                  }
+                } catch (err) {
+                  console.error(`Failed to load custom renderer module from ${url}:`, err);
+                }
+              }
+            }
           }
         });
         session.session.anyMessage.connect((_: unknown, {msg, direction}) => {

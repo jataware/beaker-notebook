@@ -1,4 +1,4 @@
-import { ref, computed, watch, nextTick, inject, type Ref, type ComputedRef } from 'vue';
+import { ref, computed, watch, nextTick, inject, reactive, type Ref, type ComputedRef } from 'vue';
 import { JupyterMimeRenderer } from 'beaker-kernel';
 import type { IBeakerCell, IMimeRenderer } from 'beaker-kernel';
 import type { BeakerNotebookComponentType } from '../components/notebook/BeakerNotebook.vue';

@@ -24,6 +24,7 @@
                         code-cell-output
                         preview-container-table-wrapper
                     "
+                    :collapse="true"
                     :mimeBundle="item"
                 />
             </Fieldset>

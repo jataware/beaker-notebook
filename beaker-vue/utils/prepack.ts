@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { packageFile, backupPackageFile, distDir} from "./buildSetup";
-
+import { merge } from "lodash"
 
 // Backup original file before making changes
 fs.copyFileSync(packageFile, backupPackageFile);
@@ -11,7 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(packageFile).toString());
 const exportData = JSON.parse(fs.readFileSync(path.join(distDir, "exports.json")).toString());
 
 // Update exports in package.json data
-pkg["exports"] = exportData;
+pkg["exports"] = merge(pkg["exports"], exportData);
 
 // Write update package file
 fs.writeFileSync(packageFile, JSON.stringify(pkg, null, 2), {"encoding": "utf8"})

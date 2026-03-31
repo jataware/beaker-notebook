@@ -4,14 +4,16 @@ import type { IMimeRenderer, MimetypeString } from 'beaker-kernel';
 import type { PartialJSONObject } from '@lumino/coreutils';
 import VueJsonPretty from 'vue-json-pretty';
 import { marked } from 'marked';
-import TablePreview from './components/render/TablePreview.vue';
+import TableRenderer from './components/render/TableRenderer.vue';
 
 export interface BeakerRenderOutput {
     component: Component;
     bindMapping: {[key: string]: any};
 }
 
-export const JSONRenderer: IMimeRenderer<BeakerRenderOutput> = {
+export type BeakerMimeRenderer = IMimeRenderer<BeakerRenderOutput>;
+
+export const JSONRenderer: BeakerMimeRenderer = {
     rank: 60,
     mimetypes: ["application/json", "text/json"],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
@@ -32,7 +34,7 @@ export const JSONRenderer: IMimeRenderer<BeakerRenderOutput> = {
     }
 }
 
-export const MarkdownRenderer: IMimeRenderer<BeakerRenderOutput> = {
+export const MarkdownRenderer: BeakerMimeRenderer = {
     rank: 40,
     mimetypes: ["text/markdown", "text/x-markdown"],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
@@ -56,7 +58,7 @@ export const MarkdownRenderer: IMimeRenderer<BeakerRenderOutput> = {
 }
 
 
-export const LatexRenderer: IMimeRenderer<BeakerRenderOutput> = {
+export const LatexRenderer: BeakerMimeRenderer = {
     rank: 40,
     mimetypes: ["text/latex", "application/latex"],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
@@ -85,7 +87,7 @@ export const LatexRenderer: IMimeRenderer<BeakerRenderOutput> = {
     }
 }
 
-export const TableRenderer: IMimeRenderer<BeakerRenderOutput> = {
+export const TableRenderer: BeakerMimeRenderer = {
     rank: 40,
     mimetypes: [
         "text/csv",
@@ -95,7 +97,7 @@ export const TableRenderer: IMimeRenderer<BeakerRenderOutput> = {
     ],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
         return {
-            component: TablePreview,
+            component: TableRenderer,
             bindMapping: {
                 data: data,
                 mimeType: mimeType
@@ -104,7 +106,7 @@ export const TableRenderer: IMimeRenderer<BeakerRenderOutput> = {
     }
 }
 
-export const JavascriptRenderer: IMimeRenderer<BeakerRenderOutput> = {
+export const JavascriptRenderer: BeakerMimeRenderer = {
     rank: 45,
     mimetypes: [
         "text/javascript",
@@ -130,7 +132,7 @@ export const JavascriptRenderer: IMimeRenderer<BeakerRenderOutput> = {
     }
 }
 
-export function wrapJupyterRenderer(jupyterRenderer: IMimeRenderer<HTMLElement>): IMimeRenderer<BeakerRenderOutput> {
+export function wrapJupyterRenderer(jupyterRenderer: IMimeRenderer<HTMLElement>): BeakerMimeRenderer {
     return {
         rank: jupyterRenderer.rank - 10,
         mimetypes: jupyterRenderer.mimetypes,

@@ -1,6 +1,6 @@
 import inspect
 from dataclasses import is_dataclass, asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import traitlets
 from traitlets import Type, default
@@ -39,6 +39,7 @@ class BeakerContextManager(LoggingConfigurable):
         super().__init__(*args, **kwargs)
         self._contexts: dict[str, dict] = {}
         self.update_contexts()
+        # TODO: Defining handlers here is clunky, There should be a more elegant way.
         self.parent.handlers.extend(self.api_cls.handlers)
 
     def update_contexts(self):
@@ -52,59 +53,17 @@ class BeakerContextManager(LoggingConfigurable):
         instance = cls.instance(parent=self)
         return instance
 
-    def _serialize_context(self, context_info: ContextInfo) -> dict:
-        """Convert a ContextInfo dataclass to a dict for storage."""
-        def dict_factory(*args, **kwargs):
-            try:
-                frame = inspect.currentframe()
-                if frame:
-                    parent_frame = frame.f_back
-                    obj_cls = parent_frame.f_locals.get("obj", None)
-                    if obj_cls:
-                        kwargs.setdefault("_obj_cls", to_import_string(obj_cls))
-            except Exception:
-                pass
-            obj = dict(*args, **kwargs)
-            return obj
-
-        if is_dataclass(context_info):
-            return asdict(context_info, dict_factory=dict_factory)
-        return context_info
-
-    def _deserialize_context(self, record: dict, verbose: bool = True) -> ContextInfo:
-        """Convert a stored dict back to a ContextInfo."""
-        cls: type = import_item(record["cls"])
-        from beaker_kernel.lib.types import reify_dataclasses
-        return reify_dataclasses(
-            ContextInfo(
-                slug=record["slug"],
-                short_name=record["short_name"],
-                full_name=record["full_name"],
-                cls=cls,
-                description=record["description"],
-                weight=record.get("weight", None),
-                version=record.get("version", None),
-                actions=record["actions"],
-                tools=record["tools"],
-                agent=record["agent"],
-                integrations=record["integrations"],
-                workflows=record["workflows"],
-                subkernels=record["subkernels"],
-                languages=record["languages"],
-                procedures=record["procedures"],
-                metadata=record["metadata"],
-            ),
-            verbose=verbose,
-        )
+    def _deserialize_context(self, record: Any, verbose: bool = True) -> ContextInfo:
+        return record
 
     def register_context(self, context: type[BeakerContext] | BeakerContext | ContextInfo) -> dict:
         if isinstance(context, BeakerContext):
             context = context.__class__
         if isinstance(context, type) and issubclass(context, BeakerContext):
-            record = self._serialize_context(ContextInfo.from_class(context, verbose=True))
+            record = ContextInfo.from_class(context, verbose=True)
         else:
-            record = self._serialize_context(context)
-        slug = record["slug"]
+            record = context
+        slug = record.slug
         existing_record = self._contexts.get(slug)
         if existing_record:
             differences = find_differences(existing_record, record)
