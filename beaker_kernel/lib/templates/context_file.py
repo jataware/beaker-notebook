@@ -30,11 +30,13 @@ class {context_class}(BeakerContext):
     This is the context class.
     \"\"\"
 
-    compatible_subkernels = ["python3"]
+    AGENT_CLS = {agent_class}
     SLUG = "{context_name}"
 
+    compatible_subkernels = ["python3"]
+
     def __init__(self, beaker_kernel: "BeakerKernel", config: Dict[str, Any]):
-        super().__init__(beaker_kernel, {agent_class}, config)
+        super().__init__(beaker_kernel, self.AGENT_CLS, config)
 
     async def setup(self, context_info=None, parent_header=None):
         # Custom setup can be done here
