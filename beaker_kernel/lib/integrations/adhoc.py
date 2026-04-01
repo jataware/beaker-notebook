@@ -369,6 +369,11 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
         substitutions = {}
         # handling None cases in failed renders keeps them editable but not usable by the agent
         rendered_apis = [spec.render(self, substitutions) for spec in self.specifications]
+        # Cache rendered documentation for direct context injection via load_integration_docs
+        self._rendered_docs = {
+            api["slug"]: api["documentation"]
+            for api in rendered_apis if api is not None
+        }
         self.adhoc_api = AdhocApi(
             apis=[api for api in rendered_apis if api is not None],
             **self.adhoc_config_options
@@ -378,6 +383,10 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
         # TODO: future way to not fully reinitialize to make it less slow.
         self.build_adhoc()
 
+    def get_rendered_docs(self, slug: str) -> Optional[str]:
+        """Returns the full rendered documentation for an integration by slug."""
+        return self._rendered_docs.get(slug)
+
     @property
     def prompt(self):
         agent_details = {spec.slug: spec.description for spec in self.specifications}
@@ -386,9 +395,10 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
             self.prompt_instructions if self.prompt_instructions else "",
             ""
             f"{self.display_name}:",
-            "You have access to the following integrations to use with the `draft_integration_code` and `consult_integration_docs` tools,",
+            "You have access to the following integrations to use with the `draft_integration_code`, `consult_integration_docs`, and `load_integration_docs` tools,",
             "as well as their descriptions for when and why you should use the given integration, delimited in three backticks.",
-            "Only use these integrations with the `draft_integration_code` and `consult_integration_docs` tools.",
+            "Use `load_integration_docs` to load an integration's full documentation directly into your context when you need to work extensively with it.",
+            "Use `draft_integration_code` and `consult_integration_docs` for quick, targeted requests.",
             "",
             delimiter
         ]
@@ -568,6 +578,58 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
             logger.warning(f"add example: failed to add resource: {e}")
             return "Add resource tool failed."
         return f"Example has been added to {integration}."
+
+    @tool
+    async def load_integration_docs(self, integration: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
+        """
+Loads the full documentation for an integration directly into your context window. Use this when you need to
+work extensively with an integration — for example, when writing or debugging code that interacts with the
+integration's API. Once loaded, the documentation stays in your context for the remainder of the current query,
+so you can reference it directly without additional tool calls.
+
+Prefer this tool when you anticipate multiple interactions with an integration. For quick one-off questions,
+`consult_integration_docs` or `draft_integration_code` may be more efficient.
+
+Args:
+    integration (str): The name/slug of the integration to load documentation for.
+
+Returns:
+    str: The full documentation for the integration.
+        """
+        docs = self.get_rendered_docs(integration)
+        if docs is None:
+            available = [spec.slug for spec in self.specifications]
+            return f"Integration '{integration}' not found. Available integrations: {', '.join(available)}"
+
+        # Mark integration as active on the context so auto_context includes it on subsequent turns
+        if hasattr(agent, 'context') and hasattr(agent.context, 'active_integrations'):
+            agent.context.active_integrations.add(integration)
+
+        return f"Documentation for '{integration}' has been loaded into your context:\n\n{docs}"
+
+    @tool
+    async def unload_integration_docs(self, integration: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
+        """
+Unloads a previously loaded integration's documentation from your context window. Use this after you have
+finished working with an integration to free up context space.
+
+You should call this tool when:
+- You have completed the user's task involving the integration
+- You no longer need to reference the integration's documentation
+
+Args:
+    integration (str): The name/slug of the integration to unload.
+
+Returns:
+    str: Confirmation that the documentation was unloaded.
+        """
+        if hasattr(agent, 'context') and hasattr(agent.context, 'active_integrations'):
+            if integration in agent.context.active_integrations:
+                agent.context.active_integrations.discard(integration)
+                return f"Documentation for '{integration}' has been unloaded from your context."
+            else:
+                return f"Integration '{integration}' is not currently loaded."
+        return f"Integration '{integration}' is not currently loaded."
 
     @tool
     async def draft_integration_code(self, integration: str, goal: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
