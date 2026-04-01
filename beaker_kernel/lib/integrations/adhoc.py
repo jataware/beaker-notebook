@@ -608,6 +608,30 @@ Returns:
         return f"Documentation for '{integration}' has been loaded into your context:\n\n{docs}"
 
     @tool
+    async def unload_integration_docs(self, integration: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
+        """
+Unloads a previously loaded integration's documentation from your context window. Use this after you have
+finished working with an integration to free up context space.
+
+You should call this tool when:
+- You have completed the user's task involving the integration
+- You no longer need to reference the integration's documentation
+
+Args:
+    integration (str): The name/slug of the integration to unload.
+
+Returns:
+    str: Confirmation that the documentation was unloaded.
+        """
+        if hasattr(agent, 'context') and hasattr(agent.context, 'active_integrations'):
+            if integration in agent.context.active_integrations:
+                agent.context.active_integrations.discard(integration)
+                return f"Documentation for '{integration}' has been unloaded from your context."
+            else:
+                return f"Integration '{integration}' is not currently loaded."
+        return f"Integration '{integration}' is not currently loaded."
+
+    @tool
     async def draft_integration_code(self, integration: str, goal: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
         """
 Drafts python code for an integration request given a specified goal, such as a query for a specific study. You can use this tool to
