@@ -252,12 +252,16 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
 
             # Include full documentation for integrations loaded via load_integration_docs
             if self.active_integrations:
+                logger.info(f"Active integrations for auto_context: {self.active_integrations}")
                 for provider in self.integrations:
                     if hasattr(provider, 'get_rendered_docs'):
                         for slug in list(self.active_integrations):
                             docs = provider.get_rendered_docs(slug)
                             if docs:
+                                logger.info(f"Injecting docs for '{slug}' into auto_context ({len(docs)} chars)")
                                 parts.append(f"## Loaded Integration Documentation: {slug}\n\n{docs}")
+                            else:
+                                logger.warning(f"No rendered docs found for active integration '{slug}'")
         content = "\n\n".join(parts)
         return content
 
