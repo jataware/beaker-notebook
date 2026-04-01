@@ -371,7 +371,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
         rendered_apis = [spec.render(self, substitutions) for spec in self.specifications]
         # Cache rendered documentation for direct context injection via load_integration_docs
         self._rendered_docs = {
-            api.slug: api.documentation
+            api["slug"]: api["documentation"]
             for api in rendered_apis if api is not None
         }
         self.adhoc_api = AdhocApi(
