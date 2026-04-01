@@ -75,6 +75,7 @@ class BeakerContext:
                  integrations: list[BaseIntegrationProvider] = None):
         self.intercepts = []
         self.integrations = integrations if integrations is not None else []
+        self.active_integrations: set[str] = set()
         self.jinja_env = None
         self.templates = {}
         self.workflows = {}
@@ -248,6 +249,15 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 integration.prompt for integration in self.integrations
             ]
             parts.append("---".join(integration_prompts))
+
+            # Include full documentation for integrations loaded via load_integration_docs
+            if self.active_integrations:
+                for provider in self.integrations:
+                    if hasattr(provider, 'get_rendered_docs'):
+                        for slug in list(self.active_integrations):
+                            docs = provider.get_rendered_docs(slug)
+                            if docs:
+                                parts.append(f"## Loaded Integration Documentation: {slug}\n\n{docs}")
         content = "\n\n".join(parts)
         return content
 
