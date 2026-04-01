@@ -58,12 +58,6 @@ class BeakerAgent(ReActAgent):
         for tool in self.tools.values():
             set_tool_execution_context(tool)
 
-    async def post_loop(self, skip_summarization: bool = False):
-        # Clear active integrations so the next query starts with just summaries
-        if hasattr(self.context, 'active_integrations'):
-            self.context.active_integrations.clear()
-        await super().post_loop(skip_summarization=skip_summarization)
-
     async def react_async(self, query: str, react_context: dict = None) -> str:
         return await super().react_async(query, react_context)
 
