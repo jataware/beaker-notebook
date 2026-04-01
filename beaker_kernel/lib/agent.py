@@ -59,7 +59,12 @@ class BeakerAgent(ReActAgent):
             set_tool_execution_context(tool)
 
     async def react_async(self, query: str, react_context: dict = None) -> str:
-        return await super().react_async(query, react_context)
+        try:
+            return await super().react_async(query, react_context)
+        finally:
+            # Clear loaded integration docs after each query to avoid context bloat
+            if hasattr(self.context, 'active_integrations'):
+                self.context.active_integrations.clear()
 
     async def execute(self, *args, **kwargs) -> str:
         return await super().execute(*args, **kwargs)
