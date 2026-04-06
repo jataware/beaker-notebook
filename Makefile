@@ -1,6 +1,14 @@
 SHELL=/usr/bin/env bash
 BASEDIR = $(shell pwd)
 
+define npm_build_deps
+	$(shell find $(1)/src/ -name '*.ts' -or -name '*.vue') \
+	$(1)/package*.json \
+	$(1)/tsconfig*.json \
+	$(wildcard $(1)/vite.config*.ts $(1)/vite.config*.json) \
+	$(1)/node_modules
+endef
+
 .PHONY:init
 init:
 	make .env beaker-vue/node_modules
@@ -38,18 +46,22 @@ dev:beaker_kernel/app/ui/index.html
 	fi
 
 beaker-ts/node_modules:beaker-ts/package*.json
-	(cd beaker-ts/ && npm install --include=dev && npm run build) && \
+	(cd beaker-ts/ && npm install --include=dev) && \
 	touch beaker-ts/node_modules
 
-beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/node_modules
+beaker-ts/dist:$(call npm_build_deps,beaker-ts)
+	(cd beaker-ts/ && npm run build) && \
+	touch beaker-ts/dist
+
+beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/dist
 	(cd beaker-vue && npm install --include=dev) && \
 	touch beaker-vue/node_modules
 
-beaker-vue/dist:beaker-vue/node_modules $(shell find beaker-vue/src/ -name '*.ts')
+beaker-vue/dist:$(call npm_build_deps,beaker-vue)
 	(cd beaker-vue && npm run build-lib) && \
 	touch beaker-vue/dist
 
-beaker-vue/html:beaker-vue/node_modules $(shell find beaker-vue/src/ -name '*.ts' -or -name '*.vue')
+beaker-vue/html:$(call npm_build_deps,beaker-vue)
 	(cd beaker-vue && npm run build-ui) && \
 	touch beaker-vue/html
 
