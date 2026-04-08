@@ -1,20 +1,37 @@
 {
   "extends": "@tsconfig/node22/tsconfig.json",
-  "include": [
-    "vite.config.*",
-    "vitest.config.*",
-    "cypress.config.*",
-    "nightwatch.conf.*",
-    "playwright.config.*",
-    "eslint.config.*"
-  ],
   "compilerOptions": {
-    "noEmit": true,
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "outDir": "dist",
 
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["node"]
-  }
+    "types": ["node", "vite"],
+    "strict": false,
+    "jsx": "preserve",
+    "jsxImportSource": "vue",
+    "declaration": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true,
+    "emitDeclarationOnly": false,
+
+    "allowArbitraryExtensions": true,
+    "resolveJsonModule": true,
+
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "verbatimModuleSyntax": false, // Disables requirement that all types are imported using type identifier
+
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+  },
+  "include": [
+    "src/build/**/*"
+  ],
+  "exclude": [
+    // "node_modules/**",
+  ]
 }

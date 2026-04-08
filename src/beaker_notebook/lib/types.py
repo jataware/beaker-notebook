@@ -1,5 +1,4 @@
 import inspect
-import os
 import typing
 from dataclasses import dataclass, field, is_dataclass, Field
 from datetime import datetime
@@ -239,9 +238,6 @@ class ContextInfo:
     languages: dict[str, LanguageInfo]
     procedures: dict[str, ProcedureInfo]
 
-    asset_dir: typing.Optional[os.PathLike|str|bytes]
-    has_renderers: bool
-
     version: typing.Optional[str] = field(default=None)
     last_updated: datetime = field(default_factory=datetime.now)
     metadata: dict[str, typing.Any] = field(default_factory=lambda: {})
@@ -298,9 +294,6 @@ class ContextInfo:
         # Fetch workflow information from class
         workflows = context_cls.discover_workflows()
 
-        asset_dir = context_cls.ASSET_DIR
-        has_renderers = context_cls.RENDERERS is not None
-
         # Build output class
         result = cls(
             slug=context_cls.SLUG,
@@ -319,8 +312,6 @@ class ContextInfo:
             integrations=integrations,
             subkernels=subkernels,
             languages=languages,
-            asset_dir=asset_dir,
-            has_renderers=has_renderers,
             procedures=procedures,
             metadata=metadata,
         )

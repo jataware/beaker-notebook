@@ -123,39 +123,37 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
             emit("session-status-changed", newStatus);
           }
           if (msg.header.msg_type === "context_info_response") {
-            // Remove any renderers loaded for the prior context so they don't shadow
-            // standard renderers after a context switch.
-            const rendererStore = (rawSession.renderer as any)._renderers;
-            if (rendererStore) {
-              for (const mimetype of customRendererMimetypes.value) {
-                delete rendererStore[mimetype];
-              }
-            }
-            customRendererMimetypes.value = new Set();
+            // Load custom renderers from package and context asset URLs.
+            // On context switch, clear context-level renderers (they're scoped to the
+            // previous context) but keep package-level renderers.
+            const assetUrls = msg.content.info?.asset_urls;
+            rawSession.renderer.removeRenderersByTag("context");
 
-            if (msg.content.info?.custom_renderers) {
-              console.debug("Custom Renderers", msg.content.info.custom_renderers);
-              // Group by URL to avoid re-importing the same module multiple times
-              const byUrl = new Map<string, Array<{mimetype: string, name: string}>>();
-              for (const [mimetype, config] of Object.entries(msg.content.info.custom_renderers) as [string, any][]) {
-                const list = byUrl.get(config.url) ?? [];
-                list.push({ mimetype, name: config.name });
-                byUrl.set(config.url, list);
-              }
-              for (const [url, entries] of byUrl) {
+            if (assetUrls) {
+              // Load package-level renderers (idempotent — addRenderer only replaces
+              // if new renderer has equal or better rank)
+              if (assetUrls.package) {
                 try {
-                  const mod = await import(/* @vite-ignore */ url);
-                  for (const { mimetype, name } of entries) {
-                    const renderer = mod[name] ?? mod.default;
-                    if (renderer) {
-                      rawSession.renderer.addRenderer(renderer);
-                      customRendererMimetypes.value.add(mimetype);
-                    } else {
-                      console.warn(`Custom renderer export "${name}" for ${mimetype} not found in ${url}`);
-                    }
+                  const mod = await import(/* @vite-ignore */ assetUrls.package + "renderers.js");
+                  if (Array.isArray(mod.default)) {
+                    mod.default.forEach((r: any) => rawSession.renderer.addRenderer(r, "package"));
+                    console.debug(`Loaded ${mod.default.length} package renderer(s)`);
                   }
                 } catch (err) {
-                  console.error(`Failed to load custom renderer module from ${url}:`, err);
+                  console.debug(`No package renderer module at ${assetUrls.package}renderers.js`);
+                }
+              }
+
+              // Load context-level renderers
+              if (assetUrls.context) {
+                try {
+                  const mod = await import(/* @vite-ignore */ assetUrls.context + "renderers.js");
+                  if (Array.isArray(mod.default)) {
+                    mod.default.forEach((r: any) => rawSession.renderer.addRenderer(r, "context"));
+                    console.debug(`Loaded ${mod.default.length} context renderer(s)`);
+                  }
+                } catch (err) {
+                  console.debug(`No context renderer module at ${assetUrls.context}renderers.js`);
                 }
               }
             }

@@ -92,11 +92,15 @@ defineExpose({
 });
 
 onBeforeMount(() => {
-    beakerSession.cellRegistry[cell.value.id] = instance.vnode;
+    if (cell.value?.id) {
+        beakerSession.cellRegistry[cell.value.id] = instance.vnode;
+    }
 });
 
 onBeforeUnmount(() => {
-    delete beakerSession.cellRegistry[cell.value.id];
+    if (cell.value?.id) {
+        delete beakerSession.cellRegistry[cell.value.id];
+    }
 });
 </script>
 

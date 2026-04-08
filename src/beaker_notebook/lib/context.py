@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import dataclasses
+import importlib
 import inspect
 import itertools
 import json
@@ -216,26 +217,17 @@ class BeakerContext:
             full_name = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', full_name)
             cls.FULL_NAME = full_name
 
-        if (asset_dir := getattr(cls, "ASSET_DIR", None)):
-            # If the path is absolute, assume that it is still relative to the directory which contains the context file.
-            # e.g. if it's set to "/static" assume it should be "/path/to/package/my_context/static"
-            if os.path.isabs(asset_dir):
-                asset_dir = f".{asset_dir}"
-            mod_path = Path(inspect.getabsfile(cls)).parent
-            asset_path = mod_path / asset_dir
-            if asset_path.exists() and asset_path.is_dir():
-                setattr(cls, "ASSET_DIR", str(asset_path))
-
-            renderers = getattr(cls, "RENDERERS", None)
-            if renderers and asset_path.is_dir():
-                for mimetype, config in renderers.items():
-                    renderer_file = config.get("file", "renderers.js")
-                    renderer_path = asset_path / renderer_file
-                    if not (renderer_path.exists() and renderer_path.is_file()):
-                        logger.warning(
-                            f"Renderer file '{renderer_file}' for mime type '{mimetype}' "
-                            f"not found in asset dir for context '{cls.__name__}'."
-                        )
+        # Discover the parent package's PKG_SLUG for asset URL construction
+        pkg_parts = (mod.__package__ or "").split(".")
+        cls._PKG_SLUG = None
+        for i in range(len(pkg_parts), 0, -1):
+            try:
+                ancestor = importlib.import_module(".".join(pkg_parts[:i]))
+                if hasattr(ancestor, "PKG_SLUG"):
+                    cls._PKG_SLUG = ancestor.PKG_SLUG
+                    break
+            except ImportError:
+                continue
 
         # If a subclass has an auto_context, it should be used instead of the parent's.
         subclass_autocontext = getattr(cls, "auto_context", None)
@@ -610,15 +602,10 @@ class BeakerContext:
                 for uuid, workflow in self.workflows.items()
             }
         }
-        custom_renderers = {}
-        if self.RENDERERS:
-            for mimetype, config in self.RENDERERS.items():
-                renderer_file = config.get("file", "renderers.js")
-                export_name = config.get("export", "default")
-                custom_renderers[mimetype] = {
-                    "url": f"/assets/context/{self.SLUG}/{renderer_file}",
-                    "name": export_name,
-                }
+        asset_urls = {}
+        if self._PKG_SLUG:
+            asset_urls["package"] = f"/assets/package/{self._PKG_SLUG}/"
+            asset_urls["context"] = f"/assets/package/{self._PKG_SLUG}/{self.SLUG}/"
 
         payload = {
             "language": self.subkernel.JUPYTER_LANGUAGE,
@@ -631,7 +618,7 @@ class BeakerContext:
             "agent": agent_details,
             "debug": self.beaker_kernel.debug_enabled,
             "verbose": self.beaker_kernel.verbose,
-            "custom_renderers": custom_renderers,
+            "asset_urls": asset_urls,
         }
 
         return payload

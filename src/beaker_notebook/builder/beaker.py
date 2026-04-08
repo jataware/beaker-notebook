@@ -113,6 +113,79 @@ class BeakerBuildHook(BuildHookInterface):
                 output[os.path.join(integration_cls.slug, data_key)] = abs_path
         return output
 
+    def build_ui_assets(self):
+        """
+        If the project has a ui/ directory with a package.json, run npm install
+        and npm run build to produce the built assets before packaging.
+        """
+        import subprocess
+
+        ui_dir = Path(self.root) / "ui"
+        if not (ui_dir / "package.json").is_file():
+            return
+
+        npm_cmd = shutil.which("npm")
+        if npm_cmd is None:
+            print("Warning: ui/ directory found but npm is not available. Skipping UI build.")
+            print("         Built assets must already be present in the package for them to be included.")
+            return
+
+        print(f"Building UI assets from {ui_dir}...")
+        result = subprocess.run(
+            [npm_cmd, "install"],
+            cwd=ui_dir,
+        )
+        if result.returncode != 0:
+            raise BuildError("npm install failed during wheel build.")
+
+        result = subprocess.run(
+            [npm_cmd, "run", "build"],
+            cwd=ui_dir,
+        )
+        if result.returncode != 0:
+            raise BuildError("UI build (npm run build) failed during wheel build.")
+
+        print("UI assets built successfully.")
+        print()
+
+    def find_asset_packages(self, packages=None) -> dict[str, str]:
+        """
+        Scan top-level packages for an ASSET_DIR constant and return entry point targets.
+
+        Returns a dict mapping package slug to the entry point target string (e.g. "mypkg:ASSET_DIR").
+        """
+        results = {}
+        if packages is None:
+            packages = self.build_config.packages
+        for package in packages:
+            if package.startswith('src/'):
+                package = str(Path(package).relative_to(Path('src/')))
+            mod_str = package.replace(os.path.sep, '.')
+            init_path = Path(self.root) / package / '__init__.py'
+            if not init_path.exists():
+                continue
+            with open(init_path) as f:
+                src = f.read()
+            try:
+                tree = ast.parse(src, init_path)
+            except SyntaxError:
+                continue
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "ASSET_DIR":
+                            # Found ASSET_DIR; look for PKG_SLUG too
+                            pkg_slug = mod_str
+                            for inner_node in tree.body:
+                                if isinstance(inner_node, ast.Assign):
+                                    for inner_target in inner_node.targets:
+                                        if isinstance(inner_target, ast.Name) and inner_target.id == "PKG_SLUG":
+                                            if isinstance(inner_node.value, ast.Constant) and isinstance(inner_node.value.value, str):
+                                                pkg_slug = inner_node.value.value
+                            results[pkg_slug] = f"{mod_str}:ASSET_DIR"
+                            break
+        return results
+
     def add_packages_to_path(self, paths=None):
         if paths is None:
             paths = self.build_config.packages
@@ -146,6 +219,9 @@ class BeakerBuildHook(BuildHookInterface):
                 local_path = str((root / src).resolve())
                 sys.path.insert(0, local_path)
                 self.inserted_paths.add(local_path)
+
+        # Build UI assets if a ui/ directory exists
+        self.build_ui_assets()
 
         from beaker_notebook.lib.app import BeakerApp
         from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
@@ -190,6 +266,24 @@ class BeakerBuildHook(BuildHookInterface):
                     entry_point_map[slug] = target
                 else:
                     print(f"  Skipping '{slug}' ({target}) because it has already been defined as '{entry_point_map[slug]}")
+            print()
+
+        # Discover packages that define ASSET_DIR and auto-generate beaker.assets entry points
+        asset_packages = self.find_asset_packages()
+        if asset_packages:
+            entry_point_name = "beaker.assets"
+            if entry_point_name in self.metadata.core.entry_points:
+                entry_point_map = self.metadata.core.entry_points[entry_point_name]
+            else:
+                entry_point_map = {}
+                self.metadata.core.entry_points[entry_point_name] = entry_point_map
+            print("Found the following asset packages:")
+            for pkg_name, target in asset_packages.items():
+                if pkg_name not in entry_point_map:
+                    print(f"  '{pkg_name}': {target}")
+                    entry_point_map[pkg_name] = target
+                else:
+                    print(f"  Skipping '{pkg_name}' ({target}) because it has already been defined as '{entry_point_map[pkg_name]}'")
             print()
 
         if integration_data:

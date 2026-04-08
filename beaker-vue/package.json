@@ -9,19 +9,23 @@
     "prebuild": "npm run type-check",
     "build": "run-s clean build-all routes",
     "build-ui": "vite build --config vite.config.app.ts",
-    "build-lib": "vite build --config vite.config.lib.ts",
+    "build-lib": "vite build --config vite.config.lib.ts && vue-tsc -p tsconfig.node.json",
     "build-all": "run-s build-ui build-lib",
     "build-and-serve": "run-s build serve",
-    "routes": "NODE_ENV=production vite-node utils/extractRoutes.ts",
+    "postbuild-lib": "chmod +x ./dist/build/extractRoutes.cjs",
+    "routes": "NODE_ENV=production npx extract-routes src/router/index.ts",
     "preview": "vite preview",
     "test:unit": "vitest",
     "test:e2e": "playwright test",
-    "prepack": "vite-node utils/prepack",
-    "postpack": "vite-node utils/postpack",
+    "prepack": "vite-node src/build/prepack",
+    "postpack": "vite-node src/build/postpack",
     "type-check": "vue-tsc --build --noEmit",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
     "clean": "rimraf dist/* html/*"
+  },
+  "bin": {
+    "extract-routes": "./dist/build/extractRoutes.cjs"
   },
   "main": "./dist/lib/index.js",
   "module": "./dist/lib/index.mjs",
@@ -32,9 +36,9 @@
     "./tsconfig.renderers.json"
   ],
   "exports": {
-    "./build": {
-      "types": "./dist/util/build.d.ts",
-      "import": "./dist/util/build.mjs"
+    "./build/build": {
+      "types": "./dist/build/build.d.ts",
+      "default": "./dist/build/build"
     },
     "./tsconfig.renderers.json": "./tsconfig.renderers.json"
   },

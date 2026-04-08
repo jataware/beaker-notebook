@@ -58,8 +58,15 @@ def project():
     default=False,
     help="Do not include a sample context."
 )
+@click.option(
+    "--with-ui", "-u", "include_ui",
+    type=bool,
+    is_flag=True,
+    default=False,
+    help="Include UI scaffolding (renderers, components, pages)."
+)
 @click.pass_context
-def new_project(ctx: click.Context, name, no_interact, dependencies, no_context):
+def new_project(ctx: click.Context, name, no_interact, dependencies, no_context, include_ui):
     """
     Creates a new Beaker Python project.
 
@@ -120,6 +127,12 @@ def new_project(ctx: click.Context, name, no_interact, dependencies, no_context)
             while dependency := click.prompt("Dependency definition", default="", show_default=False):
                 dependencies.append(dependency)
 
+    # UI scaffolding prompt (package-level)
+    if not include_ui and not no_interact:
+        include_ui = click.confirm("Would you like to include UI scaffolding (renderers, components, pages)?", default=False)
+
+    # Context prompt
+    include_context_ui = False
     if not no_context:
         if no_interact:
             class_base_name_default = ''.join(word.capitalize() for word in normalized_name.split('-'))
@@ -127,6 +140,7 @@ def new_project(ctx: click.Context, name, no_interact, dependencies, no_context)
                 "context_name": normalized_name,
                 "class_base_name": class_base_name_default,
             }
+            include_context_ui = include_ui
         else:
             if click.confirm("Would you like to include an example context?", default=True):
                 context_config = context.prompt_for_missing_new_context_options(
@@ -137,6 +151,11 @@ def new_project(ctx: click.Context, name, no_interact, dependencies, no_context)
                     }
                 )
                 context_config['context_target_dir'] = "{package_name}/{context_subdir}"
+                # Context-specific UI prompt (only if package UI was accepted)
+                if include_ui:
+                    include_context_ui = click.confirm(
+                        "Include context-specific UI/renderers for this context?", default=False,
+                    )
             else:
                 context_config = {}
     else:
@@ -148,6 +167,8 @@ def new_project(ctx: click.Context, name, no_interact, dependencies, no_context)
     project_config = hatch_config['template']['plugins']['beaker-new-project']
     project_config['package-name'] = name
     project_config['dependencies'] = dependencies
+    project_config['include-ui'] = include_ui
+    project_config['include-context-ui'] = include_context_ui
     if context_config:
         hatch_context_config = {key.replace("_", "-"): value for key, value in context_config.items()}
         hatch_config['template']['plugins']['beaker-new-context'] = hatch_context_config
@@ -200,6 +221,62 @@ def new_project(ctx: click.Context, name, no_interact, dependencies, no_context)
 #         env=os.environ,
 #         cwd=project.root,
 #     )
+
+
+@project.command(name="build-ui")
+@click.argument("path", required=False, default=None, type=click.Path(path_type=Path))
+@click.option(
+    "--install/--no-install", "run_install",
+    default=True,
+    help="Run npm install before building. (default: True)",
+)
+def build_ui(path, run_install):
+    """
+    Build the UI assets for the current project.
+
+    Runs npm install and npm run build in the project's ui/ directory,
+    outputting built assets to the assets/ directory.
+    """
+    import shutil
+
+    pyproject_path = find_pyproject_file(path)
+    if not pyproject_path:
+        search_path = path.absolute() if path else Path.cwd()
+        raise click.ClickException(f"{search_path} does not appear to be part of a valid project.")
+
+    project_root = pyproject_path.parent
+    ui_dir = project_root / "ui"
+
+    if not ui_dir.is_dir():
+        raise click.ClickException(
+            f"No ui/ directory found at {ui_dir}.\n"
+            f"  Run 'beaker project new --with-ui' or 'beaker context new --with-ui' to create one."
+        )
+
+    npm_cmd = shutil.which("npm")
+    if npm_cmd is None:
+        raise click.ClickException(
+            "npm is not installed or not on PATH. Install Node.js to build UI assets."
+        )
+
+    if run_install:
+        click.echo(f"Running npm install in {ui_dir}...")
+        result = subprocess.run(
+            [npm_cmd, "install"],
+            cwd=ui_dir,
+        )
+        if result.returncode != 0:
+            raise click.ClickException("npm install failed. Check the output above.")
+
+    click.echo(f"Building UI assets...")
+    result = subprocess.run(
+        [npm_cmd, "run", "build"],
+        cwd=ui_dir,
+    )
+    if result.returncode != 0:
+        raise click.ClickException("UI build failed. Check the output above.")
+
+    click.echo("UI build complete.")
 
 
 @project.command()
