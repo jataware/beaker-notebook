@@ -8,6 +8,7 @@
     "jsx": "preserve",
     "jsxImportSource": "vue",
     "declaration": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -33,6 +34,7 @@
     "src/**/*.vue"
   ],
   "exclude": [
+    "src/build/",
     "node_modules/**"
   ]
 }

@@ -66,10 +66,16 @@ export class JupyterMimeRenderer extends MimeRenderer {
     private _factory: IRenderMime.IRendererFactory;
 }
 
+interface TaggedRenderer {
+    renderer: IMimeRenderer;
+    tag?: string;
+}
+
 export class BeakerRenderer {
 
     constructor(options?: IBeakerRendererOptions) {
-        this._renderers = {}
+        this._renderers = {};
+        this._tagged = {};
         for (const factory of standardRendererFactories) {
             const renderer = new JupyterMimeRenderer(factory);
             this.addRenderer(renderer);
@@ -79,16 +85,35 @@ export class BeakerRenderer {
         }
     }
 
-    public addRenderer(renderer: IMimeRenderer) {
+    /**
+     * Register a renderer. If a tag is provided, the renderer can later be
+     * removed as a group via {@link removeRenderersByTag}.
+     */
+    public addRenderer(renderer: IMimeRenderer, tag?: string) {
         for (const mimetype of renderer.mimetypes) {
-            if (!Object.keys(this._renderers).includes(mimetype)) {
+            const existing = this._tagged[mimetype];
+            if (!existing) {
                 this._renderers[mimetype] = renderer;
+                this._tagged[mimetype] = { renderer, tag };
             }
-            else {
-                const prev_renderer = this._renderers[mimetype];
-                if (renderer.rank <= prev_renderer.rank) {
-                    this._renderers[mimetype] = renderer;
-                }
+            else if (renderer.rank <= existing.renderer.rank) {
+                this._renderers[mimetype] = renderer;
+                this._tagged[mimetype] = { renderer, tag };
+            }
+        }
+    }
+
+    /**
+     * Remove all renderers that were registered with the given tag.
+     * For any mimetype left empty after removal, falls back to the
+     * next-best renderer if one was previously shadowed — but in practice
+     * this just removes the entry since we don't keep a priority queue.
+     */
+    public removeRenderersByTag(tag: string) {
+        for (const [mimetype, entry] of Object.entries(this._tagged)) {
+            if (entry.tag === tag) {
+                delete this._renderers[mimetype];
+                delete this._tagged[mimetype];
             }
         }
     }
@@ -118,4 +143,5 @@ export class BeakerRenderer {
     }
 
     private _renderers: {[key: string]: IMimeRenderer};
+    private _tagged: {[key: string]: TaggedRenderer};
 }

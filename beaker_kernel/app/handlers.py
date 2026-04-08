@@ -18,7 +18,7 @@ from jupyterlab_server import LabServerApp
 from tornado import web, httputil
 from tornado.web import StaticFileHandler, RequestHandler, HTTPError
 
-from beaker_kernel.lib.autodiscovery import autodiscover
+from beaker_kernel.lib.autodiscovery import autodiscover, autodiscover_assets
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.context import BeakerContext
 from beaker_kernel.lib.subkernel import BeakerSubkernel
@@ -312,6 +312,11 @@ class ConfigHandler(JupyterHandler):
         if beaker_app:
             config_data["appConfig"] = beaker_app.as_dict()
 
+        # Include resolved routes (with any dynamic import definitions from asset routes.json)
+        resolved_routes = getattr(beakerapp, "resolved_routes", None)
+        if resolved_routes:
+            config_data["routes"] = resolved_routes
+
         # Ensure a proper xsrf cookie value is set.
         cookie_name = self.settings.get("xsrf_cookie_name", "_xsrf")
         xsrf_token = self.xsrf_token.decode("utf8")
@@ -535,24 +540,32 @@ class StatsHandler(JupyterHandler):
 
 def register_handlers(app: "BaseBeakerApp"):
     pages = []
-
-    context_manager: BeakerContextManager = app.context_manager
-    contexts = context_manager.list_contexts()
-    for context in contexts:
-        if context.asset_dir is not None:
-            if os.path.isdir(context.asset_dir):
-                app.handlers.append((f"/assets/context/{context.slug}/(.*)", StaticFileHandler, {"path": context.asset_dir}))
-            else:
-                logger.warning(f"Asset path for context {context.slug} ({context.asset_dir}) cannot be found or is not a directory.")
-
-    # TODO: fix beaker app registration
-    beaker_app: Optional[BeakerApp] = app.config.get("app", None)
-    if beaker_app and beaker_app.asset_dir:
-        if os.path.isdir(beaker_app.asset_dir):
-            app.handlers.append((f"/assets/{beaker_app.slug}/(.*)", StaticFileHandler, {"path": beaker_app.asset_dir}))
-
-
+    app_pages = []  # list(beaker_app.pages or []) + [route["name"] for route in app_routes_data.values() if "name" in route]
     routes = {}
+
+    # Serve package-level asset directories discovered via beaker.assets entry points
+    package_assets = autodiscover_assets()
+    for pkg_name, asset_dir in package_assets.items():
+        app.handlers.append((f"/assets/package/{pkg_name}/(.*)", StaticFileHandler, {"path": asset_dir}))
+
+    beaker_app: Optional[BeakerApp] = app.config.get("app", None)
+
+    # Build routes with merge semantics: defaults → app pages → asset routes.json
+    # Each layer overrides matching paths from previous layers.
+
+    # 1. Start with default routes
+    route_file = Path(app.ui_path) / "routes.json"
+    if route_file.exists():
+        routes = json.loads(route_file.read_text())
+    else:
+        routes = {
+            "/": {
+                "path": "/",
+                "name": "home",
+            },
+        }
+
+    # 2. App pages override/extend defaults
     if beaker_app and beaker_app.pages:
         for page_name, page in beaker_app.pages.items():
             page_path = f"/{page_name}"
@@ -566,18 +579,34 @@ def register_handlers(app: "BaseBeakerApp"):
                     "name": "home",
                 }
 
-    else:
-        route_file = Path(app.ui_path) / "routes.json"
-        if route_file.exists():
-            routes: dict[str, dict] = json.loads(route_file.read_text())
-        else:
-            # If no json file exists, ensure that at least 'home' exists
-            routes = {
-                "/": {
-                    "path": "/",
-                    "name": "home",
-                },
-            }
+    # 3. Asset routes.json overrides/extends everything (supports dynamic page imports)
+    if beaker_app and beaker_app.asset_dir:
+        if os.path.isdir(beaker_app.asset_dir):
+            app.handlers.append((f"/assets/{beaker_app.slug}/(.*)", StaticFileHandler, {"path": beaker_app.asset_dir}))
+            app_routes_path = os.path.join(beaker_app.asset_dir, "routes.json")
+            if os.path.isfile(app_routes_path):
+                with open(app_routes_path) as app_routes_file:
+                    app_routes_data = json.load(app_routes_file)
+                    if isinstance(app_routes_data, dict):
+                        # Resolve relative import paths to absolute asset URLs
+                        # and normalize keys to use the path field
+                        asset_base_url = f"/assets/{beaker_app.slug}"
+                        for route_key, route_data in list(app_routes_data.items()):
+                            if "import" in route_data and not route_data["import"].startswith("/"):
+                                route_data["import"] = f"{asset_base_url}/{route_data['import']}"
+                            # Ensure route has a path (use key if not explicitly set)
+                            if "path" not in route_data:
+                                route_data["path"] = route_key if route_key.startswith("/") else f"/{route_key}"
+                            # Ensure route has a name (use key if not explicitly set)
+                            if "name" not in route_data:
+                                route_data["name"] = route_key.strip("/") or "home"
+                        # Re-key by path so it merges correctly with the other route sources
+                        for route_key, route_data in list(app_routes_data.items()):
+                            path_key = route_data["path"]
+                            if path_key != route_key:
+                                app_routes_data[path_key] = route_data
+                                del app_routes_data[route_key]
+                        routes.update(app_routes_data)
 
     if "/" not in routes:
         routes["/"] = {
@@ -585,12 +614,15 @@ def register_handlers(app: "BaseBeakerApp"):
             "name": "home",
         }
 
+    # Store resolved routes on the app so ConfigHandler can include them
+    app.resolved_routes = routes
+
     for path, route in routes.items():
         name = route["name"]
         path = path.strip('/')
         if path.startswith(('_', '.')):
             continue
-        if beaker_app and name != "home":
+        if beaker_app and beaker_app.pages and name != "home":
             if name in beaker_app.pages:
                 pages.append(path)
         else:

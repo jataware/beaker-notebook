@@ -163,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, defineExpose, inject, computed, onBeforeMount, getCurrentInstance, onBeforeUnmount, watch, toRaw } from "vue";
+import { defineProps, defineExpose, inject, computed, onBeforeMount, getCurrentInstance, onBeforeUnmount, watch, toRaw, nextTick, type Ref } from "vue";
 import Button from "primevue/button";
 import InputGroup from 'primevue/inputgroup';
 import InputText from 'primevue/inputtext';
@@ -202,6 +202,7 @@ const enum QueryStatuses {
 }
 
 const activeQueryCell = inject<IBeakerCell | null>("activeQueryCell");
+const userClickedQueryCell = inject<Ref<boolean> | null>("userClickedQueryCell", null);
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const instance = getCurrentInstance();
 
@@ -254,14 +255,22 @@ const expandThoughts = (event: Event, forceOpen = false) => {
     const currentCell = toRaw(cell.value);
 
     if (forceOpen) {
+        // Auto-expand (agent started running) — don't signal user click
         activeQueryCell.value = currentCell;
         return;
     }
 
-    const currentActiveCell = toRaw(activeQueryCell.value);
+    // Explicit user click on magnifying glass — always signal as user click
+    if (userClickedQueryCell) userClickedQueryCell.value = true;
 
+    const currentActiveCell = toRaw(activeQueryCell.value);
     if (currentActiveCell?.id === currentCell?.id) {
+        // Same cell re-clicked — trigger reactivity so the watch fires again
         activeQueryCell.value = null;
+        nextTick(() => {
+            if (userClickedQueryCell) userClickedQueryCell.value = true;
+            activeQueryCell.value = currentCell;
+        });
     } else {
         activeQueryCell.value = currentCell;
     }

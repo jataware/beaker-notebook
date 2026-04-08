@@ -9,3 +9,4 @@ export * as themes from './themes';
 export * as utils from './util';
 export * as router from './router';
 export * as renderers from './renderers';
+export type { BeakerMimeRenderer, BeakerRenderOutput } from './renderers';

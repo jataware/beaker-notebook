@@ -51,10 +51,6 @@ export const libConfig: UserConfig = {
     lib: {
       entry: entryPoints,
       formats: ["es"],
-      fileName: (format, entryName) => {
-        return `${entryName}.${(entryName.includes('util/build') ? 'mjs' : 'js')}`
-      },
-
     },
     rollupOptions: {
       onwarn(warning, warn) {
