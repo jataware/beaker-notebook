@@ -42,10 +42,19 @@ def context():
     type=str,
     help="Base root name for generating classes such as the subclasses of BeakerContext and BeakerAgent.",
 )
-def new_context(name, class_base_name):
+@click.option(
+    "--with-ui", "-u", "include_ui",
+    type=bool,
+    is_flag=True,
+    default=False,
+    help="Include UI scaffolding (renderers, components, pages).",
+)
+def new_context(name, class_base_name, include_ui):
     """
     Creates a new context in the current project.
     """
+    from pathlib import Path
+
     pyproject_path = find_pyproject_file()
     if not pyproject_path:
         raise click.ClickException("You do not seem to be running within a valid project.")
@@ -74,6 +83,10 @@ def new_context(name, class_base_name):
         options["class_base_name"] = class_base_name
 
     options = prompt_for_missing_new_context_options(options)
+
+    # UI scaffolding prompt
+    if not include_ui:
+        include_ui = click.confirm("Include UI scaffolding (renderers, components, pages)?", default=False)
 
     context_target_dir = project_source_path / options["context_subdirectory"]
 
@@ -109,6 +122,9 @@ def new_context(name, class_base_name):
         )
         if result.returncode > 0:
             raise click.ClickException("There was an error setting up your new Beaker project. Please check the output above.")
+
+    if include_ui:
+        _scaffold_ui_for_context(project.root, project_source_path, options["context_name"])
 
 
 @context.command(name="dump")
@@ -215,6 +231,141 @@ def list_contexts():
             click.echo("\n".join(output))
     else:
         click.echo("No contexts were found. Please check that you are running in the correct environment.")
+
+
+def _scaffold_ui_for_context(project_root, project_source_path, context_name: str):
+    """
+    Create package-level UI scaffolding (if not already present) and a context-level
+    renderers.ts stub. Called after the Hatch template has created the context files.
+    """
+    from pathlib import Path
+
+    ui_dir = project_root / "ui"
+    pkg_slug = project_source_path.name
+    assets_dir = project_source_path / "assets"
+
+    # Compute the relative path from ui/ to the package's assets/ dir for vite outDir
+    assets_relpath = os.path.relpath(assets_dir, ui_dir)
+
+    # 1. Create package-level ui/ directory if it doesn't exist
+    if not ui_dir.exists():
+        click.echo("Creating package-level UI scaffolding...")
+
+        # ui/package.json
+        (ui_dir / "src").mkdir(parents=True, exist_ok=True)
+        (ui_dir / "package.json").write_text(f"""\
+{{
+  "name": "{pkg_slug}-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {{
+    "build": "vite build",
+    "dev": "vite build --watch"
+  }},
+  "dependencies": {{
+    "beaker-kernel": "*",
+    "beaker-vue": "*",
+    "vue": "^3.4.0"
+  }},
+  "devDependencies": {{
+    "@vitejs/plugin-vue": "^5.0.0",
+    "@vitejs/plugin-vue-jsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0",
+    "vite-plugin-css-injected-by-js": "^3.5.0"
+  }}
+}}
+""")
+
+        # ui/vite.config.ts
+        # Use forward slashes for the path (vite/node convention)
+        vite_out_dir = assets_relpath.replace(os.sep, "/") + "/"
+        (ui_dir / "vite.config.ts").write_text(f"""\
+import {{ defineBeakerRendererConfig }} from 'beaker-vue/build';
+
+export default defineBeakerRendererConfig({{
+    build: {{
+        outDir: '{vite_out_dir}',
+        lib: {{
+            entry: {{
+                "renderers": "./src/renderers.ts",
+            }},
+        }},
+    }},
+}});
+""")
+
+        # ui/tsconfig.json
+        (ui_dir / "tsconfig.json").write_text("""\
+{
+  "extends": "beaker-vue/tsconfig.renderers.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.vue"
+  ]
+}
+""")
+
+        # ui/src/renderers.ts (package-level stub)
+        (ui_dir / "src" / "renderers.ts").write_text("""\
+import type { BeakerMimeRenderer } from 'beaker-vue';
+
+// Package-level renderers.
+// Export an array of BeakerMimeRenderer objects.
+const renderers: BeakerMimeRenderer[] = [];
+export default renderers;
+""")
+
+        # assets/.gitkeep (inside the package directory)
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        (assets_dir / ".gitkeep").touch()
+
+    # 2. Add PKG_SLUG and ASSET_DIR to package __init__.py if not present
+    init_path = project_source_path / "__init__.py"
+    if init_path.exists():
+        init_contents = init_path.read_text()
+        if "ASSET_DIR" not in init_contents:
+            with open(init_path, "a") as f:
+                f.write(f"""\
+from pathlib import Path
+
+PKG_SLUG = "{pkg_slug}"
+ASSET_DIR = str(Path(__file__).parent / "assets")
+""")
+
+    # 3. Create context-level UI stub
+    context_ui_dir = ui_dir / "src" / context_name
+    if not context_ui_dir.exists():
+        click.echo(f"Creating context-level UI stub for '{context_name}'...")
+        context_ui_dir.mkdir(parents=True, exist_ok=True)
+        (context_ui_dir / "renderers.ts").write_text(f"""\
+import type {{ BeakerMimeRenderer }} from 'beaker-vue';
+
+// Context-level renderers for '{context_name}'.
+// Export an array of BeakerMimeRenderer objects.
+const renderers: BeakerMimeRenderer[] = [];
+export default renderers;
+""")
+
+    # 4. Add context entry to vite.config.ts if not already present
+    vite_config_path = ui_dir / "vite.config.ts"
+    if vite_config_path.exists():
+        vite_contents = vite_config_path.read_text()
+        context_entry = f'"{context_name}/renderers"'
+        if context_entry not in vite_contents:
+            # Insert the context entry point alongside the existing entries
+            vite_contents = vite_contents.replace(
+                '"renderers": "./src/renderers.ts",',
+                f'"renderers": "./src/renderers.ts",\n                "{context_name}/renderers": "./src/{context_name}/renderers.ts",',
+            )
+            vite_config_path.write_text(vite_contents)
 
 
 def prompt_for_missing_new_context_options(options: dict[str, any], defaults: dict[str, any] | None = None) -> dict[str, any]:

@@ -53,7 +53,7 @@ for location in RAW_LIB_LOCATIONS:
     if location not in LIB_LOCATIONS and os.path.exists(location):
         LIB_LOCATIONS.append(location)
 
-ResourceType = typing.Literal["contexts", "subkernels", "apps", "commands", "integrations", "data"]
+ResourceType = typing.Literal["contexts", "subkernels", "apps", "commands", "integrations", "data", "assets"]
 
 def find_resource_dirs(resource_type: str, extra_locations: typing.Optional[list[os.PathLike]]=None) -> typing.Generator[os.PathLike, None, None]:
     """
@@ -196,3 +196,28 @@ def autodiscover(mapping_type: ResourceType) -> AutodiscoveryItems:
             DeprecationWarning
         )
     return items
+
+
+def autodiscover_assets() -> dict[str, str]:
+    """
+    Discovers installed packages that provide UI assets via the ``beaker.assets`` entry point group.
+
+    Each entry point should resolve to a string path (absolute) pointing to the package's asset directory.
+
+    Returns:
+        A dict mapping package names to absolute asset directory paths.
+    """
+    assets: dict[str, str] = {}
+    for ep in entry_points(group="beaker.assets"):
+        try:
+            asset_dir = ep.load()
+            if isinstance(asset_dir, str) and os.path.isdir(asset_dir):
+                assets[ep.name] = asset_dir
+            else:
+                logger.warning(
+                    f"beaker.assets entry point '{ep.name}' resolved to '{asset_dir}' "
+                    f"which is not a valid directory. Skipping."
+                )
+        except Exception:
+            logger.warning(f"Failed to load beaker.assets entry point '{ep.name}'.", exc_info=True)
+    return assets

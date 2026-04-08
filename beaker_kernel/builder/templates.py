@@ -1,5 +1,5 @@
 from hatch.template.plugin.interface import TemplateInterface
-from hatch.template.files_default import PyProject, Readme as HatchReadme
+from hatch.template.files_default import PyProject, PackageRoot, Readme as HatchReadme
 
 from beaker_kernel.lib.templates import InitFile
 from beaker_kernel.lib.templates.paths import package_name
@@ -8,6 +8,10 @@ from beaker_kernel.lib.templates.context_file import ContextFile
 from beaker_kernel.lib.templates.readme_file import ReadmeFile
 from beaker_kernel.lib.templates.procedure_file import ProcedureFile
 from beaker_kernel.lib.templates.subkernel_file import SubkernelFile
+from beaker_kernel.lib.templates.ui_files import (
+    UIPackageJsonFile, UIViteConfigFile, UITsConfigFile, UIRenderersFile,
+    UIContextRenderersFile, UIAssetsGitkeepFile,
+)
 
 class BeakerNewProjectTemplateHook(TemplateInterface):
     PLUGIN_NAME = 'beaker-new-project'
@@ -25,10 +29,24 @@ class BeakerNewProjectTemplateHook(TemplateInterface):
         if extra_dependencies:
             config["dependencies"].update(extra_dependencies)
 
+        config["include_ui"] = self.plugin_config.get("include-ui", False)
+        config["include_context_ui"] = self.plugin_config.get("include-context-ui", False)
+
     def get_files(self, config):
-        return [
+        files = [
             ReadmeFile(),
         ]
+        if config.get("include_ui"):
+            files.extend([
+                UIPackageJsonFile(),
+                UIViteConfigFile(),
+                UITsConfigFile(),
+                UIRenderersFile(),
+                UIAssetsGitkeepFile(),
+            ])
+            if config.get("include_context_ui") and config.get("context_name"):
+                files.append(UIContextRenderersFile())
+        return files
 
     def finalize_files(self, config: dict, files: list):
         """Allow modification of files for new projects before they are written to the file system."""
@@ -43,6 +61,29 @@ class BeakerNewProjectTemplateHook(TemplateInterface):
 require-runtime-dependencies = true
 
 """
+
+        # If include_ui is set, add PKG_SLUG and ASSET_DIR to the package __init__.py
+        if config.get("include_ui"):
+            package_root_file = file_map.get(PackageRoot, None)
+            if package_root_file:
+                pkg_slug = config.get("package_name", "")
+                package_root_file.contents += f'''\
+from pathlib import Path
+
+PKG_SLUG = "{pkg_slug}"
+ASSET_DIR = str(Path(__file__).parent / "assets")
+'''
+
+        # If context-specific UI is enabled, add the context entry to vite.config.ts
+        if config.get("include_context_ui") and config.get("context_name"):
+            vite_file = file_map.get(UIViteConfigFile, None)
+            if vite_file:
+                context_name = config["context_name"]
+                vite_file.contents = vite_file.contents.replace(
+                    '"renderers": "./src/renderers.ts",',
+                    f'"renderers": "./src/renderers.ts",\n                "{context_name}/renderers": "./src/{context_name}/renderers.ts",',
+                )
+
         # If we have both the default Hatch readme file and the Beaker readme file, remove the Hatch version of the file
         if HatchReadme in file_map and ReadmeFile in file_map:
             files.remove(file_map.get(HatchReadme))

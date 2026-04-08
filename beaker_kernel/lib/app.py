@@ -311,6 +311,21 @@ class BeakerApp:
     _pages: dict[str, Page]
 
     def __init_subclass__(cls):
+        # Discover the parent package's PKG_SLUG for asset URL construction
+        mod = inspect.getmodule(cls)
+
+        if mod is not None:
+            pkg_parts = (mod.__package__ or "").split(".")
+            cls._PKG_SLUG = None
+            for i in range(len(pkg_parts), 0, -1):
+                try:
+                    ancestor = importlib.import_module(".".join(pkg_parts[:i]))
+                    if hasattr(ancestor, "ASSET_DIR"):
+                        cls.asset_dir = ancestor.ASSET_DIR
+                        break
+                except ImportError:
+                    continue
+
         if not cls.slug:
             raise ValueError("ClassVar 'slug' is required.")
         if not cls.asset_dir:

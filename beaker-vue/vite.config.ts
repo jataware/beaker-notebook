@@ -7,8 +7,10 @@ import vueJsx from '@vitejs/plugin-vue-jsx';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { globSync } from 'glob';
 
+import { sanitizeJupyterEval } from "./src/build/build";
+
 export const entryPoints: {[key: string]: string} = Object.fromEntries(
-  globSync("src/**/*.{vue,ts}").flatMap(file => {
+  globSync("src/**/*.{vue,ts}", {ignore: "src/build/**"}).flatMap(file => {
     const importPath = path.relative(
       'src',
       file.slice(0, file.length - path.extname(file).length)
@@ -36,15 +38,7 @@ export const baseConfig: UserConfig = {
     vue(),
     vueJsx(),
     topLevelAwait(),
-    {
-      name: "sanitize-eval",
-      transform(src, id) {
-        // Custom inline plugin to replace 'eval()' calls with 'console.debug()'.
-        if (id.includes("@jupyterlab/coreutils/lib/pageconfig")) {
-          return src.replaceAll(/\beval\b/g, 'console.debug');
-        }
-      }
-    }
+    sanitizeJupyterEval(),
   ],
   resolve: {
     alias: {
