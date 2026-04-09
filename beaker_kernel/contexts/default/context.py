@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from beaker_kernel.lib.agent import BeakerAgent
     from beaker_kernel.lib.subkernel import BeakerSubkernel
 
+from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
+
+
 class DefaultContext(BeakerContext):
     """
     Default Beaker context
@@ -25,7 +28,8 @@ class DefaultContext(BeakerContext):
     SLUG: str = "default"
 
     def __init__(self, beaker_kernel: "BeakerKernel", config: Dict[str, Any]):
-        super().__init__(beaker_kernel, self.agent_cls, config)
+        skill_integration_provider = SkillIntegrationProvider()
+        super().__init__(beaker_kernel, self.agent_cls, config, integrations=[skill_integration_provider])
 
     @classmethod
     def available_subkernels(cls) -> dict["str", "BeakerSubkernel"]:

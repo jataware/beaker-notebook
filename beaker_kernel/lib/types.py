@@ -28,7 +28,7 @@ def is_tool(target: typing.Any) -> bool:
     return callable(target) and hasattr(target, "_is_tool")
 
 
-IntegrationTypes: typing.TypeAlias = typing.Literal["api", "database", "dataset"]
+IntegrationTypes: typing.TypeAlias = typing.Literal["api", "database", "dataset", "skill"]
 
 
 @dataclass(kw_only=True)
@@ -67,6 +67,33 @@ class IntegrationExample:
     code: str
     notes: typing.Optional[str]
 
+@dataclass(kw_only=True)
+class SkillMetadataResource(Resource):
+    """Parsed SKILL.md frontmatter fields."""
+    resource_type: str = "skill_metadata"
+    skill_name: str
+    description: str
+    license: typing.Optional[str] = None
+    compatibility: typing.Optional[str] = None
+    allowed_tools: typing.Optional[str] = None
+    skill_metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(kw_only=True)
+class SkillInstructionsResource(Resource):
+    """The markdown body of SKILL.md (everything after frontmatter)."""
+    resource_type: str = "skill_instructions"
+    content: str
+
+
+@dataclass(kw_only=True)
+class SkillFileResource(Resource):
+    """A file from the skill's scripts/, references/, or assets/ directories."""
+    resource_type: str = "skill_file"
+    name: str
+    relative_path: str
+    content: typing.Optional[str] = field(default=None)
+
 
 @dataclass
 class Integration:
@@ -96,6 +123,15 @@ class Integration:
         for resource in resource_list:
             if resource.resource_id:
                 self.resources[resource.resource_id] = resource
+
+
+@dataclass
+class SkillIntegration(Integration):
+    """An integration backed by an Agent Skill."""
+    datatype: IntegrationTypes = "skill"
+    source_type: str = "local"  # "local" or "remote"
+    base_path: typing.Optional[str] = None
+    base_url: typing.Optional[str] = None
 
 
 @dataclass
