@@ -70,6 +70,9 @@ artifacts = [
   "beaker_kernel/app/ui",
 ]
 
+[tool.hatch.envs.hatch-build]
+system-packages = true
+
 # Beaker builder, loaded as a custom hook since it's not yet registered.
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "beaker_kernel/builder/beaker.py"
