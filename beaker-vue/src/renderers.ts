@@ -4,7 +4,7 @@ import type { IMimeRenderer, MimetypeString } from 'beaker-kernel';
 import type { PartialJSONObject } from '@lumino/coreutils';
 import VueJsonPretty from 'vue-json-pretty';
 import { marked } from 'marked';
-import TableRenderer from './components/render/TableRenderer.vue';
+import TableRendererComponent from './components/render/TableRenderer.vue';
 
 export interface BeakerRenderOutput {
     component: Component;
@@ -97,7 +97,7 @@ export const TableRenderer: BeakerMimeRenderer = {
     ],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
         return {
-            component: TableRenderer,
+            component: TableRendererComponent,
             bindMapping: {
                 data: data,
                 mimeType: mimeType
