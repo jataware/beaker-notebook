@@ -241,7 +241,7 @@ import Tag from 'primevue/tag';
 
 import * as cookie from 'cookie';
 
-import CodeEditor from './CodeEditor.vue';
+import CodeEditor from '../misc/CodeEditor.vue';
 
 import { useRoute } from 'vue-router';
 

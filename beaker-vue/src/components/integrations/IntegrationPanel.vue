@@ -16,6 +16,7 @@
                 />
             </InputGroup>
             <div
+                v-if="!readOnly"
                 style="
                     display: flex;
                     flex-direction: column;
@@ -31,7 +32,7 @@
                     <Button
                         style="height: 32px"
                         icon="pi pi-plus"
-                        label="Add New Integration"
+                        label="New Integration"
                     />
                 </RouterLink>
             </div>
@@ -84,7 +85,7 @@
                                 <span v-if="expandedIntegration === integration.uuid">
                                     <RouterLink
                                         :to="`/integrations?selected=${integration?.uuid}${sessionIdParam}`"
-                                        aria-label="Edit {{ integration?.name }} "
+                                        :aria-label="(getIntegrationProviderType(integration) === 'adhoc' ? 'Edit' : 'View') + ' ' + integration?.name"
                                     >
                                         <Button
                                             v-if="getIntegrationProviderType(integration) === 'adhoc'"
@@ -95,6 +96,17 @@
                                             "
                                             icon="pi pi-pencil"
                                             label="Edit"
+                                        />
+                                        <Button
+                                            v-else
+                                            style="
+                                                width: fit-content;
+                                                height: 32px;
+                                                margin-right: 0.5rem;
+                                            "
+                                            icon="pi pi-eye"
+                                            label="View"
+                                            severity="secondary"
                                         />
                                     </RouterLink>
                                 </span>
@@ -126,10 +138,18 @@ import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType } from "@/util/integration";
 import { RouterLink } from "vue-router";
+import { read } from "fs";
 
 const searchText = ref(undefined);
 
-// TODO: change to props
+interface PropTypes {
+    readOnly: boolean;
+}
+
+const props = withDefaults(defineProps<PropTypes>(), {
+    readOnly: false,
+});
+
 const integrations = defineModel<IntegrationMap>()
 
 const urlParams = new URLSearchParams(window.location.search);

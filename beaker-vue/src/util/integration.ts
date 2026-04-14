@@ -21,6 +21,28 @@ export interface IntegrationAttachedFile extends IntegrationResource {
     content?: string
 }
 
+export interface SkillMetadataResource extends IntegrationResource {
+    resource_type: "skill_metadata";
+    skill_name: string
+    description: string
+    license?: string
+    compatibility?: string
+    allowed_tools?: string
+    skill_metadata: Record<string, string>
+}
+
+export interface SkillInstructionsResource extends IntegrationResource {
+    resource_type: "skill_instructions";
+    content: string
+}
+
+export interface SkillFileResource extends IntegrationResource {
+    resource_type: "skill_file";
+    name: string
+    relative_path: string
+    content?: string
+}
+
 export type IntegrationResourceMap = {
     [id in string]: IntegrationResource
 }
@@ -33,6 +55,7 @@ export interface Integration {
     name: string
     url: string
     provider: string
+    datatype?: string
     // important: resources are loaded via a second API call and may not exist or be filled on the object
     resources?: IntegrationResourceMap;
 }
@@ -99,6 +122,10 @@ export const addIntegration = async (sessionId: string, body: object): Promise<I
 
 export const updateIntegration = async (sessionId: string, integrationId: string, body: object): Promise<Integration> => {
     return await integrationApiWrapper<Integration>("POST", {sessionId, integrationId}, body);
+}
+
+export const getResource = async (sessionId: string, integrationId: string, resourceType: string, resourceId: string): Promise<IntegrationResource> => {
+    return await integrationApiWrapper<IntegrationResource>("GET", {sessionId, integrationId, resourceType, resourceId});
 }
 
 export const listResources = async (sessionId: string, integrationId: string) => {

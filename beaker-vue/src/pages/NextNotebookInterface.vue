@@ -196,7 +196,7 @@ import SideMenu from "../components/sidemenu/SideMenu.vue";
 import SideMenuPanel from "../components/sidemenu/SideMenuPanel.vue";
 import FileContentsPanel from '../components/panels/FileContentsPanel.vue';
 import { ChatHistoryPanel, type IChatHistory } from '../components/panels/ChatHistoryPanel';
-import IntegrationPanel from '../components/panels/IntegrationPanel.vue';
+import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
 import PreviewPanel from '../components/panels/PreviewPanel.vue';
 import BeakerNotebook from '../components/notebook/BeakerNotebook.vue';
 import BeakerNotebookToolbar from '../components/notebook/BeakerNotebookToolbar.vue';

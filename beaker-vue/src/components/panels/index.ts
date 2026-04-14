@@ -1,11 +1,9 @@
 export { default as ConfigPanel } from './ConfigPanel.vue';
 export { default as ContextPanel } from './ContextPanel.vue';
 export { default as DebugPanel } from './DebugPanel.vue';
-export { default as ExamplesPanel } from './ExamplesPanel.vue';
 export { default as FileContentsPanel } from './FileContentsPanel.vue';
 export { default as FilePanel } from './FilePanel.vue';
 export { default as InfoPanel } from './InfoPanel.vue';
-export { default as IntegrationPanel } from './IntegrationPanel.vue';
 export { default as KernelStatePanel } from './KernelStatePanel.vue';
 export { default as MediaPanel } from './MediaPanel.vue';
 export { default as MessagesPanel } from './MessagesPanel.vue';

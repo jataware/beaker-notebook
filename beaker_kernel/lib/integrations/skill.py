@@ -76,11 +76,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     def __init__(self, display_name: str = "Agent Skills"):
         super().__init__(display_name)
         logger.warning(f"Initializing SkillIntegrationProvider {display_name}")
-        self._skills: list[SkillIntegration] = []
+        self._skills: list[SkillIntegration] = list(self.discover_integrations().values())
         self._loaded: dict[str, set[tuple[str, str]]] = {}
-        self._load_skills_config()
 
-    def _get_skill_scan_dirs(self) -> list[Path]:
+    @classmethod
+    def _get_skill_scan_dirs(cls) -> list[Path]:
         """Return skill directories to scan, ordered from most specific (project)
         to most general (user/system).
 
@@ -113,10 +113,23 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         return dirs
 
-    def _load_skills_config(self):
+    @classmethod
+    def discover_integrations(cls) -> dict[str, SkillIntegration]:
         """Discover and load skills from skills.json, standard skill directories,
         and the cross-client .agents/skills/ convention."""
+        skills: dict[str, SkillIntegration] = {}
         loaded_names: set[str] = set()
+
+        def _load_deduped(source: str):
+            try:
+                skill = cls._load_skill(source)
+                if skill.name in loaded_names:
+                    logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
+                else:
+                    loaded_names.add(skill.name)
+                    skills[skill.uuid] = skill
+            except Exception:
+                logger.exception("Failed to load skill from source: %s", source)
 
         # Load from skills.json in data dirs
         for data_dir in find_resource_dirs("data"):
@@ -130,39 +143,28 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                         logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
                     else:
                         for source in data:
-                            self._load_skill_deduped(source, loaded_names)
+                            _load_deduped(source)
                 except Exception:
                     logger.exception("Failed to read skills.json at %s", config_path)
 
         # Scan all skill directories for SKILL.md files
-        for skills_dir in self._get_skill_scan_dirs():
+        for skills_dir in cls._get_skill_scan_dirs():
             logger.debug("Scanning skills directory: %s", skills_dir)
             for skill_md in skills_dir.glob("*/SKILL.md"):
-                self._load_skill_deduped(str(skill_md.parent), loaded_names)
+                _load_deduped(str(skill_md.parent))
 
-    def _load_skill_deduped(self, source: str, loaded_names: set[str]):
-        """Load a skill, skipping if a skill with the same name is already loaded."""
-        try:
-            skill = self._load_skill(source)
-            if skill.name in loaded_names:
-                logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
-                self._skills.remove(skill)
-            else:
-                loaded_names.add(skill.name)
-        except Exception:
-            logger.exception("Failed to load skill from source: %s", source)
+        return skills
 
-    def _load_skill(self, source: str) -> SkillIntegration:
-        """Load a single skill from a local path or remote URL.
-
-        Returns the loaded SkillIntegration (also appended to self._skills).
-        """
+    @classmethod
+    def _load_skill(cls, source: str) -> SkillIntegration:
+        """Load a single skill from a local path or remote URL."""
         if source.startswith(("http://", "https://")):
-            return self._load_remote_skill(source)
+            return cls._load_remote_skill(source)
         else:
-            return self._load_local_skill(source)
+            return cls._load_local_skill(source)
 
-    def _load_local_skill(self, path: str) -> SkillIntegration:
+    @classmethod
+    def _load_local_skill(cls, path: str) -> SkillIntegration:
         """Load a skill from a local directory or SKILL.md path."""
         skill_path = Path(path)
         if skill_path.is_file() and skill_path.name == "SKILL.md":
@@ -180,16 +182,15 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         content = skill_md_path.read_text(encoding="utf-8")
         frontmatter, body = parse_skill_md(content)
 
-        skill = self._build_skill_integration(
+        return cls._build_skill_integration(
             frontmatter=frontmatter,
             body=body,
             source_type="local",
             base_path=str(skill_dir),
         )
-        self._skills.append(skill)
-        return skill
 
-    def _load_remote_skill(self, url: str) -> SkillIntegration:
+    @classmethod
+    def _load_remote_skill(cls, url: str) -> SkillIntegration:
         """Load a skill from a remote URL."""
         if url.rstrip("/").endswith("SKILL.md"):
             skill_url = url
@@ -203,17 +204,16 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         frontmatter, body = parse_skill_md(response.text)
 
-        skill = self._build_skill_integration(
+        return cls._build_skill_integration(
             frontmatter=frontmatter,
             body=body,
             source_type="remote",
             base_url=base_url,
         )
-        self._skills.append(skill)
-        return skill
 
+    @classmethod
     def _build_skill_integration(
-        self,
+        cls,
         frontmatter: dict,
         body: str,
         source_type: str,
@@ -227,7 +227,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         skill = SkillIntegration(
             name=name,
             description=description,
-            provider=f"agent-skill:{self.slug}",
+            provider=f"agent-skill:{cls.slug}",
             source_type=source_type,
             base_path=base_path,
             base_url=base_url,
@@ -281,7 +281,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         skill = self.get_integration(integration_id)
         if resource_id not in skill.resources:
             raise KeyError(f"Resource not found: {resource_id}")
-        return skill.resources[resource_id]
+        resource = skill.resources[resource_id]
+        # Auto-load content on demand for file resources
+        if isinstance(resource, SkillFileResource) and resource.content is None:
+            resource.content = self._fetch_file_content(skill, resource.relative_path)
+        return resource
 
     # --- Prompt (Tier 1: metadata only) ---
 

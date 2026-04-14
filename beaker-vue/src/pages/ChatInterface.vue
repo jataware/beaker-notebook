@@ -178,7 +178,7 @@ import PreviewPanel from '../components/panels/PreviewPanel.vue';
 import MediaPanel from '../components/panels/MediaPanel.vue';
 import DebugPanel from '../components/panels/DebugPanel.vue';
 import AgentActivityPane from '../components/chat-interface/AgentActivityPane.vue';
-import IntegrationPanel from '../components/panels/IntegrationPanel.vue';
+import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
 import { listIntegrations, type IntegrationMap } from '@/util/integration';
 
 const beakerInterfaceRef = ref();
