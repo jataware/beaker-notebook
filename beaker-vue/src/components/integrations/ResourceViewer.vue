@@ -159,7 +159,8 @@ const resourceIcon = (resource: IntegrationResource): string => {
     if (resource.resource_type === 'skill_file') {
         const lang = languageForPath((resource as SkillFileResource).relative_path);
         if (lang === "markdown") {
-            return 'pi pi-list';
+            // TODO: Make icons more appropriate
+            return 'pi pi-file';
         }
         return 'pi pi-file';
     }
