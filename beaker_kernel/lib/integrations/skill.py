@@ -9,6 +9,7 @@ import requests
 import yaml
 from archytas.tool_utils import tool, AgentRef
 
+from ..autodiscovery import find_resource_dirs
 from ..types import (
     Integration,
     Resource,
@@ -79,41 +80,89 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         self._loaded: dict[str, set[tuple[str, str]]] = {}
         self._load_skills_config()
 
+    def _get_skill_scan_dirs(self) -> list[Path]:
+        """Return skill directories to scan, ordered from most specific (project)
+        to most general (user/system).
+
+        Follows the Agent Skills convention:
+          - Project-level: ./.beaker/skills/, ./.agents/skills/
+          - User-level:    ~/.beaker/skills/, ~/.agents/skills/
+          - Data dirs:     {data_dir}/skills/ (from find_resource_dirs)
+        """
+        dirs: list[Path] = []
+
+        # Project-level (most specific)
+        for name in (".beaker/skills", ".agents/skills"):
+            p = Path.cwd() / name
+            if p.is_dir():
+                dirs.append(p)
+
+        # User-level
+        home = Path.home()
+        for name in (".beaker/skills", ".agents/skills"):
+            p = home / name
+            if p.is_dir():
+                dirs.append(p)
+
+        # Data dirs from autodiscovery (general → specific, but we process
+        # them after the more specific project/user dirs above)
+        for data_dir in find_resource_dirs("data"):
+            p = Path(data_dir) / "skills"
+            if p.is_dir():
+                dirs.append(p)
+
+        return dirs
+
     def _load_skills_config(self):
-        """Load skill sources from skills.json found in data directories."""
-        logger.warning(f"Initializing SkillIntegrationProvider _load_skill_config")
-        sources: list[str] = []
-        logger.warning(f"data_basedirs: {self.data_basedirs}")
-        for basedir in self.data_basedirs:
-            logger.warning(f"Looking for skills.json file in {basedir}")
-            config_path = Path(basedir) / "skills.json"
-            if config_path.exists():
-                logger.warning(f"Found skills.json file at {config_path}")
-            else:
-                logger.warning(f"Didn't find {config_path}")
+        """Discover and load skills from skills.json, standard skill directories,
+        and the cross-client .agents/skills/ convention."""
+        loaded_names: set[str] = set()
 
+        # Load from skills.json in data dirs
+        for data_dir in find_resource_dirs("data"):
+            config_path = Path(data_dir) / "skills.json"
             if config_path.is_file():
-                with open(config_path) as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    sources.extend(data)
-                else:
-                    logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
-                break  # Use most specific config found
-        for source in sources:
-            try:
-                self._load_skill(source)
-            except Exception:
-                logger.exception("Failed to load skill from source: %s", source)
+                logger.debug("Found skills.json at %s", config_path)
+                try:
+                    with open(config_path) as f:
+                        data = json.load(f)
+                    if not isinstance(data, list):
+                        logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
+                    else:
+                        for source in data:
+                            self._load_skill_deduped(source, loaded_names)
+                except Exception:
+                    logger.exception("Failed to read skills.json at %s", config_path)
 
-    def _load_skill(self, source: str):
-        """Load a single skill from a local path or remote URL."""
+        # Scan all skill directories for SKILL.md files
+        for skills_dir in self._get_skill_scan_dirs():
+            logger.debug("Scanning skills directory: %s", skills_dir)
+            for skill_md in skills_dir.glob("*/SKILL.md"):
+                self._load_skill_deduped(str(skill_md.parent), loaded_names)
+
+    def _load_skill_deduped(self, source: str, loaded_names: set[str]):
+        """Load a skill, skipping if a skill with the same name is already loaded."""
+        try:
+            skill = self._load_skill(source)
+            if skill.name in loaded_names:
+                logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
+                self._skills.remove(skill)
+            else:
+                loaded_names.add(skill.name)
+        except Exception:
+            logger.exception("Failed to load skill from source: %s", source)
+
+    def _load_skill(self, source: str) -> SkillIntegration:
+        """Load a single skill from a local path or remote URL.
+
+        Returns the loaded SkillIntegration (also appended to self._skills).
+        """
         if source.startswith(("http://", "https://")):
-            self._load_remote_skill(source)
+            return self._load_remote_skill(source)
         else:
-            self._load_local_skill(source)
+            return self._load_local_skill(source)
 
-    def _load_local_skill(self, path: str):
+    def _load_local_skill(self, path: str) -> SkillIntegration:
         """Load a skill from a local directory or SKILL.md path."""
         skill_path = Path(path)
         if skill_path.is_file() and skill_path.name == "SKILL.md":
@@ -131,14 +180,16 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         content = skill_md_path.read_text(encoding="utf-8")
         frontmatter, body = parse_skill_md(content)
 
-        self._skills.append(self._build_skill_integration(
+        skill = self._build_skill_integration(
             frontmatter=frontmatter,
             body=body,
             source_type="local",
             base_path=str(skill_dir),
-        ))
+        )
+        self._skills.append(skill)
+        return skill
 
-    def _load_remote_skill(self, url: str):
+    def _load_remote_skill(self, url: str) -> SkillIntegration:
         """Load a skill from a remote URL."""
         if url.rstrip("/").endswith("SKILL.md"):
             skill_url = url
@@ -152,12 +203,14 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         frontmatter, body = parse_skill_md(response.text)
 
-        self._skills.append(self._build_skill_integration(
+        skill = self._build_skill_integration(
             frontmatter=frontmatter,
             body=body,
             source_type="remote",
             base_url=base_url,
-        ))
+        )
+        self._skills.append(skill)
+        return skill
 
     def _build_skill_integration(
         self,
@@ -334,12 +387,13 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return instructions.content
 
     @tool
-    async def load_skill_resource(self, skill_name: str, relative_path: str, agent: AgentRef) -> str:
+    async def load_skill_resource(self, skill_name: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
         """Load a resource file (script, reference doc, or asset) from a skill.
 
         Args:
             skill_name: The name or slug of the skill.
             relative_path: The relative path of the resource file (e.g. "references/use_cases.md").
+            persist: Set to true if the resource should be persisted in the message history or false to summarize to prevent context bloat (default: False)
 
         Returns:
             str: The file content, or a status message if already loaded.
