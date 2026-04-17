@@ -14,7 +14,7 @@ from beaker_kernel.lib.integrations.skill import (
     parse_example_md,
     extract_file_references,
 )
-from beaker_kernel.lib.types import (
+from beaker_kernel.lib.integrations.types import (
     SkillExampleResource,
     SkillFileResource,
     SkillInstructionsResource,

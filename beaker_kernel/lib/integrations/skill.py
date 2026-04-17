@@ -9,8 +9,8 @@ import requests
 import yaml
 from archytas.tool_utils import tool, AgentRef
 
-from ..autodiscovery import find_resource_dirs
-from ..types import (
+from beaker_kernel.lib.autodiscovery import find_resource_dirs
+from beaker_kernel.lib.integrations.types import (
     Integration,
     Resource,
     SkillExampleResource,
@@ -108,7 +108,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
     def __init__(self, display_name: str = "Agent Skills", skill_paths: Optional[list[str|os.PathLike]] = None):
         super().__init__(display_name)
-        logger.warning(f"Initializing SkillIntegrationProvider {display_name}")
+        logger.debug(f"Initializing SkillIntegrationProvider {display_name}")
         self._skills: list[SkillIntegration] = list(self.discover_integrations(paths=skill_paths).values())
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 

@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
 from pathlib import Path
 
-from ..types import Integration, Resource
-from ..autodiscovery import find_resource_dirs
+from beaker_kernel.lib.integrations.types import Integration, Resource
+from beaker_kernel.lib.autodiscovery import find_resource_dirs
 
 class BaseIntegrationProvider(ABC):
 

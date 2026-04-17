@@ -23,7 +23,7 @@ from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async
 from beaker_kernel.lib.config import config as beaker_config
 from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-from beaker_kernel.lib.types import Integration
+from beaker_kernel.lib.integrations.types import Integration
 from beaker_kernel.lib.workflow import Workflow, WorkflowState, WorkflowStageProgress, create_available_workflows_prompt
 
 
