@@ -53,6 +53,25 @@
                     </div>
                 </div>
             </Fieldset>
+
+            <Fieldset legend="Code Examples" v-if="exampleResources.length > 0">
+                <p>
+                    Code examples demonstrating usage patterns for this skill.
+                </p>
+                <div class="skill-resource-list">
+                    <div
+                        class="skill-resource-item"
+                        v-for="example in exampleResources"
+                        :key="example.resource_id"
+                    >
+                        <i class="pi pi-code"></i>
+                        <div class="skill-example-info">
+                            <span class="skill-resource-path">{{ example.filename }}</span>
+                            <span class="skill-example-title">{{ example.title }}</span>
+                        </div>
+                    </div>
+                </div>
+            </Fieldset>
         </div>
     </div>
 </template>
@@ -64,8 +83,10 @@ import { computed } from 'vue';
 import {
     type Integration,
     type IntegrationInterfaceState,
+    type IntegrationResource,
     type SkillMetadataResource,
     type SkillFileResource,
+    type SkillExampleResource,
     filterByResourceType,
 } from '../../util/integration';
 
@@ -103,6 +124,12 @@ const hasMetadata = computed<boolean>(() => {
 const fileResources = computed<SkillFileResource[]>(() => {
     const resources = filterByResourceType<SkillFileResource>(
         selectedIntegration.value?.resources, "skill_file");
+    return Object.values(resources);
+});
+
+const exampleResources = computed<SkillExampleResource[]>(() => {
+    const resources = filterByResourceType<SkillExampleResource>(
+        selectedIntegration.value?.resources, "skill_example");
     return Object.values(resources);
 });
 
@@ -168,11 +195,25 @@ const fileResources = computed<SkillFileResource[]>(() => {
     gap: 0.5rem;
     padding: 0.35rem 0.5rem;
     border-radius: 4px;
-    font-family: monospace;
     font-size: 0.9rem;
 
     &:hover {
         background-color: var(--p-surface-100);
     }
+}
+
+.skill-resource-path {
+    font-family: monospace;
+}
+
+.skill-example-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.skill-example-title {
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
 }
 </style>

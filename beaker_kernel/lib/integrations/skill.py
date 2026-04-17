@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Optional
+from typing import TYPE_CHECKING, ClassVar, Optional, Mapping
 
 import requests
 import yaml
@@ -13,6 +13,7 @@ from ..autodiscovery import find_resource_dirs
 from ..types import (
     Integration,
     Resource,
+    SkillExampleResource,
     SkillFileResource,
     SkillInstructionsResource,
     SkillIntegration,
@@ -50,7 +51,9 @@ def extract_file_references(body: str) -> list[str]:
     for match in link_pattern.finditer(body):
         path = match.group(1)
         if not path.startswith(("http://", "https://", "#", "mailto:")):
-            references.append(path)
+            # Skip examples/ paths — they are handled as SkillExampleResources
+            if not path.startswith("examples/") and path != "examples/":
+                references.append(path)
 
     # Backtick-quoted file paths: `some/path.ext`
     # Match paths that contain a / and end with a file extension
@@ -60,6 +63,36 @@ def extract_file_references(body: str) -> list[str]:
 
     # Deduplicate preserving order
     return list(dict.fromkeys(references))
+
+
+def parse_example_md(content: str) -> tuple[str, str]:
+    """Extract (title, description) from an example markdown file.
+
+    Expects the format:
+        # Title line
+        <blank line>
+        Description paragraph...
+    """
+    lines = content.strip().splitlines()
+    title = ""
+    description = ""
+    if lines and lines[0].startswith("# "):
+        title = lines[0][2:].strip()
+    # Collect the first non-empty paragraph after the title
+    desc_lines = []
+    in_desc = False
+    for line in lines[1:]:
+        stripped = line.strip()
+        if not in_desc:
+            if stripped:
+                in_desc = True
+                desc_lines.append(stripped)
+        else:
+            if not stripped or stripped.startswith("#"):
+                break
+            desc_lines.append(stripped)
+    description = " ".join(desc_lines)
+    return title, description
 
 
 class SkillIntegrationProvider(BaseIntegrationProvider):
@@ -73,10 +106,10 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     slug: ClassVar[str] = "agent-skill"
     mutable: ClassVar[bool] = False
 
-    def __init__(self, display_name: str = "Agent Skills"):
+    def __init__(self, display_name: str = "Agent Skills", skill_paths: Optional[list[str|os.PathLike]] = None):
         super().__init__(display_name)
         logger.warning(f"Initializing SkillIntegrationProvider {display_name}")
-        self._skills: list[SkillIntegration] = list(self.discover_integrations().values())
+        self._skills: list[SkillIntegration] = list(self.discover_integrations(paths=skill_paths).values())
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 
     @classmethod
@@ -114,7 +147,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return dirs
 
     @classmethod
-    def discover_integrations(cls) -> dict[str, SkillIntegration]:
+    def discover_integrations(cls, paths: Optional[list[str|os.PathLike]]) -> Mapping[str, SkillIntegration]:
         """Discover and load skills from skills.json, standard skill directories,
         and the cross-client .agents/skills/ convention."""
         skills: dict[str, SkillIntegration] = {}
@@ -131,8 +164,14 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             except Exception:
                 logger.exception("Failed to load skill from source: %s", source)
 
+        if paths is None:
+            resource_dirs = list(find_resource_dirs("data"))
+            skills_dirs = cls._get_skill_scan_dirs()
+        else:
+            resource_dirs = skills_dirs = [Path(path) for path in paths]
+
         # Load from skills.json in data dirs
-        for data_dir in find_resource_dirs("data"):
+        for data_dir in resource_dirs:
             config_path = Path(data_dir) / "skills.json"
             if config_path.is_file():
                 logger.debug("Found skills.json at %s", config_path)
@@ -148,7 +187,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                     logger.exception("Failed to read skills.json at %s", config_path)
 
         # Scan all skill directories for SKILL.md files
-        for skills_dir in cls._get_skill_scan_dirs():
+        for skills_dir in skills_dirs:
             logger.debug("Scanning skills directory: %s", skills_dir)
             for skill_md in skills_dir.glob("*/SKILL.md"):
                 _load_deduped(str(skill_md.parent))
@@ -256,8 +295,43 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 relative_path=ref_path,
             ))
 
-        skill.add_resources([metadata_resource, instructions_resource] + file_resources)
+        example_resources = cls._discover_examples(skill, source_type, base_path, base_url)
+
+        skill.add_resources([metadata_resource, instructions_resource] + file_resources + example_resources)
         return skill
+
+    @classmethod
+    def _discover_examples(
+        cls,
+        skill: SkillIntegration,
+        source_type: str,
+        base_path: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> list[SkillExampleResource]:
+        """Discover example files from the skill's examples/ directory.
+
+        For local skills, scans the examples/ subdirectory. For remote skills,
+        examples must be declared in the frontmatter (not yet implemented).
+        Only reads the first few lines of each file to extract title and description.
+        """
+        resources = []
+        if source_type == "local" and base_path:
+            examples_dir = Path(base_path) / "examples"
+            if examples_dir.is_dir():
+                for example_path in sorted(examples_dir.glob("*.md")):
+                    try:
+                        content = example_path.read_text(encoding="utf-8")
+                        title, description = parse_example_md(content)
+                        resources.append(SkillExampleResource(
+                            integration=skill.uuid,
+                            filename=example_path.name,
+                            title=title or example_path.stem,
+                            description=description,
+                            content=None,  # Loaded on demand (tier 3)
+                        ))
+                    except Exception:
+                        logger.exception("Failed to parse example: %s", example_path)
+        return resources
 
     # --- Abstract method implementations ---
 
@@ -282,9 +356,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         if resource_id not in skill.resources:
             raise KeyError(f"Resource not found: {resource_id}")
         resource = skill.resources[resource_id]
-        # Auto-load content on demand for file resources
+        # Auto-load content on demand for file and example resources
         if isinstance(resource, SkillFileResource) and resource.content is None:
             resource.content = self._fetch_file_content(skill, resource.relative_path)
+        elif isinstance(resource, SkillExampleResource) and resource.content is None:
+            resource.content = self._fetch_file_content(skill, f"examples/{resource.filename}")
         return resource
 
     # --- Prompt (Tier 1: metadata only) ---
@@ -303,6 +379,10 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 continue
             parts.append(f"Skill: {metadata.skill_name}")
             parts.append(f"  Description: {metadata.description}")
+            if skill.base_path:
+                parts.append(f"  Location: {skill.base_path}")
+            elif skill.base_url:
+                parts.append(f"  Location: {skill.base_url}")
             if metadata.compatibility:
                 parts.append(f"  Compatibility: {metadata.compatibility}")
             file_resources = [
@@ -311,6 +391,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             if file_resources:
                 paths = ", ".join(r.relative_path for r in file_resources)
                 parts.append(f"  Available resources: {paths}")
+            example_resources = [
+                r for r in skill.resources.values() if isinstance(r, SkillExampleResource)
+            ]
+            if example_resources:
+                parts.append(f"  Code examples: {len(example_resources)}")
             parts.append("")
         parts.append(
             "Use `load_skill_instructions(skill_name)` to load a skill's full "
@@ -319,6 +404,10 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         parts.append(
             "Use `load_skill_resource(skill_name, relative_path)` to load a "
             "skill's reference files or scripts."
+        )
+        parts.append(
+            "Use `load_skill_examples(skill_name, filenames)` to load code "
+            "examples for a skill. Available examples are listed when instructions are loaded."
         )
         return "\n".join(parts)
 
@@ -388,7 +477,25 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             return f"No instructions found for skill '{skill_name}'."
 
         self._mark_loaded(session_id, skill.name, "instructions")
-        return instructions.content
+
+        result = instructions.content
+
+        # Append code example listing if any exist
+        examples = [
+            r for r in skill.resources.values() if isinstance(r, SkillExampleResource)
+        ]
+        if examples:
+            result += "\n\n## Available Code Examples\n"
+            for ex in examples:
+                result += f"\n- **{ex.filename}**: {ex.title}"
+                if ex.description:
+                    result += f"\n  {ex.description}"
+            result += (
+                "\n\nUse `load_skill_examples(skill_name, filenames)` to load "
+                "one or more code examples before writing code."
+            )
+
+        return result
 
     @tool
     async def load_skill_resource(self, skill_name: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
@@ -425,3 +532,59 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         self._mark_loaded(session_id, skill.name, relative_path)
         return file_resource.content
+
+    @tool
+    async def load_skill_examples(self, skill_name: str, filenames: list[str], agent: AgentRef) -> str:
+        """Load one or more code examples for a skill. Call this after loading
+        instructions and before writing code, to see working usage patterns.
+
+        Args:
+            skill_name: The name or slug of the skill.
+            filenames: List of example filenames to load (e.g. ["airport_intelligence.md", "flight_tracking.md"]).
+
+        Returns:
+            str: The concatenated example contents, separated by headers.
+        """
+        session_id = self._get_session_id(agent)
+        skill = self._find_skill_by_name(skill_name)
+
+        all_examples = {
+            r.filename: r
+            for r in skill.resources.values()
+            if isinstance(r, SkillExampleResource)
+        }
+
+        parts = []
+        already_loaded = []
+        not_found = []
+
+        for filename in filenames:
+            if self._is_loaded(session_id, skill.name, f"examples/{filename}"):
+                already_loaded.append(filename)
+                continue
+
+            example = all_examples.get(filename)
+            if not example:
+                not_found.append(filename)
+                continue
+
+            # Load content on demand
+            if example.content is None:
+                example.content = self._fetch_file_content(skill, f"examples/{filename}")
+
+            self._mark_loaded(session_id, skill.name, f"examples/{filename}")
+            parts.append(f"# Example: {example.title}\n\n{example.content}")
+
+        result_parts = []
+        if parts:
+            result_parts.append("\n\n---\n\n".join(parts))
+        if already_loaded:
+            result_parts.append(f"Already loaded in this session: {', '.join(already_loaded)}")
+        if not_found:
+            available = ", ".join(sorted(all_examples.keys()))
+            result_parts.append(
+                f"Not found: {', '.join(not_found)}. "
+                f"Available examples: {available}"
+            )
+
+        return "\n\n".join(result_parts) if result_parts else f"No examples found for skill '{skill_name}'."

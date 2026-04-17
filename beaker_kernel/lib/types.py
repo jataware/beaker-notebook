@@ -95,6 +95,16 @@ class SkillFileResource(Resource):
     content: typing.Optional[str] = field(default=None)
 
 
+@dataclass(kw_only=True)
+class SkillExampleResource(Resource):
+    """A code example from the skill's examples/ directory."""
+    resource_type: str = "skill_example"
+    filename: str
+    title: str
+    description: str
+    content: typing.Optional[str] = field(default=None)
+
+
 @dataclass
 class Integration:
     name: str

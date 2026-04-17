@@ -3,7 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.autodiscovery import autodiscover
+from beaker_kernel.lib.autodiscovery import autodiscover, AutodiscoveryItems
 
 from .agent import DefaultAgent
 
@@ -11,8 +11,6 @@ if TYPE_CHECKING:
     from beaker_kernel.kernel import BeakerKernel
     from beaker_kernel.lib.agent import BeakerAgent
     from beaker_kernel.lib.subkernel import BeakerSubkernel
-
-from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
 
 
 class DefaultContext(BeakerContext):
@@ -22,18 +20,13 @@ class DefaultContext(BeakerContext):
     Useful for most things out of the box, but has not been specialized.
     """
 
-    agent_cls: "BeakerAgent" = DefaultAgent
-
-    WEIGHT: int = 10
-    SLUG: str = "default"
-
-    def __init__(self, beaker_kernel: "BeakerKernel", config: Dict[str, Any]):
-        skill_integration_provider = SkillIntegrationProvider()
-        super().__init__(beaker_kernel, self.agent_cls, config, integrations=[skill_integration_provider])
+    AGENT_CLS = DefaultAgent
+    WEIGHT = 10
+    SLUG = "default"
 
     @classmethod
     def available_subkernels(cls) -> dict["str", "BeakerSubkernel"]:
-        subkernels: Dict[str, BeakerSubkernel] = autodiscover("subkernels")
+        subkernels: AutodiscoveryItems[BeakerSubkernel] = autodiscover("subkernels")
         subkernel_list = sorted(subkernels.values(), key=lambda subkernel: (subkernel.WEIGHT, subkernel.SLUG))
         return {subkernel.SLUG: subkernel for subkernel in subkernel_list}
 

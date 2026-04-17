@@ -13,7 +13,7 @@ import urllib.parse
 from dataclasses import asdict
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias, Collection
 from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
@@ -79,15 +79,20 @@ class BeakerContext:
     kernel_state_function_name: str = "send_kernel_state"
 
     notebook_state: Optional[dict]
-    kernel_state: Optional[dict]
-    integrations: list[BaseIntegrationProvider]
+    integrations: set[BaseIntegrationProvider]
 
     procedure_location: ClassVar[Optional[os.PathLike|str]]
 
     def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any],
-                 integrations: list[BaseIntegrationProvider] = None):
+                 integrations: Optional[Collection[BaseIntegrationProvider]] = None):
+        match integrations:
+            case None:
+                integrations = set()
+            case _:
+                integrations = set(integrations)
+
         self.intercepts = []
-        self.integrations = integrations if integrations is not None else []
+        self.integrations = self.default_integration_providers | self.extra_integration_providers() | integrations
         self.jinja_env = None
         self.templates = {}
         self.workflows = self.discover_workflows()
@@ -210,6 +215,15 @@ class BeakerContext:
             raise ValueError(f"Kernel state fetching function '{self.kernel_state_function_name}' must be a coroutine (awaitable) if defined.")
         if state_func and inspect.iscoroutinefunction(state_func):
             return state_func
+
+    @property
+    def default_integration_providers(self) -> set[BaseIntegrationProvider]:
+        from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
+        return { SkillIntegrationProvider("Default Skills"), }
+
+    @classmethod
+    def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
+        return set()
 
     def disable_tools(self):
         # TODO: Identical toolnames don't work

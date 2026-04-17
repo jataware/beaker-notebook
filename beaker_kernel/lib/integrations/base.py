@@ -1,6 +1,6 @@
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ClassVar, Optional, Generator
+from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
 from pathlib import Path
 
 from ..types import Integration, Resource
@@ -46,7 +46,7 @@ class BaseIntegrationProvider(ABC):
 
     @classmethod
     @abstractmethod
-    def discover_integrations(cls) -> dict[str, Integration]:
+    def discover_integrations(cls, **kwargs) -> Mapping[str, Integration]:
         ...
 
     @classmethod

@@ -43,6 +43,14 @@ export interface SkillFileResource extends IntegrationResource {
     content?: string
 }
 
+export interface SkillExampleResource extends IntegrationResource {
+    resource_type: "skill_example";
+    filename: string
+    title: string
+    description: string
+    content?: string
+}
+
 export type IntegrationResourceMap = {
     [id in string]: IntegrationResource
 }

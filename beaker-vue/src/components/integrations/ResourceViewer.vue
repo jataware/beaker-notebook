@@ -111,6 +111,7 @@ import {
     type IntegrationResource,
     type SkillInstructionsResource,
     type SkillFileResource,
+    type SkillExampleResource,
     getResource,
 } from '../../util/integration';
 
@@ -132,7 +133,7 @@ const loadingContent = ref<boolean>(false);
 const allResources = computed<IntegrationResource[]>(() => {
     const resources = model.value.integrations[model.value.selected]?.resources ?? {};
     return Object.values(resources).filter(r =>
-        r.resource_type === 'skill_instructions' || r.resource_type === 'skill_file'
+        r.resource_type === 'skill_instructions' || r.resource_type === 'skill_file' || r.resource_type === 'skill_example'
     );
 });
 
@@ -149,6 +150,10 @@ const resourceLabel = (resource: IntegrationResource): string => {
     if (resource.resource_type === 'skill_file') {
         return (resource as SkillFileResource).relative_path;
     }
+    if (resource.resource_type === 'skill_example') {
+        const ex = resource as SkillExampleResource;
+        return `examples/${ex.filename}`;
+    }
     return resource.resource_id;
 };
 
@@ -157,12 +162,10 @@ const resourceIcon = (resource: IntegrationResource): string => {
         return 'pi pi-book';
     }
     if (resource.resource_type === 'skill_file') {
-        const lang = languageForPath((resource as SkillFileResource).relative_path);
-        if (lang === "markdown") {
-            // TODO: Make icons more appropriate
-            return 'pi pi-file';
-        }
         return 'pi pi-file';
+    }
+    if (resource.resource_type === 'skill_example') {
+        return 'pi pi-code';
     }
     return 'pi pi-box';
 };
@@ -188,18 +191,20 @@ const viewResource = async (resource: IntegrationResource) => {
             content: instr.content,
             language: 'markdown',
         };
-    } else if (resource.resource_type === 'skill_file') {
-        const file = resource as SkillFileResource;
-        const label = file.relative_path;
-        const language = languageForPath(file.relative_path);
+    } else if (resource.resource_type === 'skill_file' || resource.resource_type === 'skill_example') {
+        const res = resource as SkillFileResource | SkillExampleResource;
+        const label = resource.resource_type === 'skill_file'
+            ? (res as SkillFileResource).relative_path
+            : `examples/${(res as SkillExampleResource).filename}`;
+        const language = languageForPath(label);
 
         // If content already cached, show immediately
-        if (file.content) {
+        if (res.content) {
             viewState.value = {
                 view: 'focused',
                 resourceId: resource.resource_id,
                 label,
-                content: file.content,
+                content: res.content,
                 language,
             };
             return;
@@ -209,10 +214,11 @@ const viewResource = async (resource: IntegrationResource) => {
         viewState.value = { view: 'focused', resourceId: resource.resource_id, label, content: undefined, language };
         loadingContent.value = true;
         try {
-            const fetched = await getResource(props.sessionId, integrationId, resource.resource_type, resource.resource_id) as SkillFileResource;
+            const fetched = await getResource(props.sessionId, integrationId, resource.resource_type, resource.resource_id);
+            const fetchedContent = (fetched as any).content;
             // Cache on the resource object in the shared state
-            file.content = fetched.content;
-            viewState.value = { ...viewState.value, content: fetched.content ?? undefined } as ViewState;
+            res.content = fetchedContent;
+            viewState.value = { ...viewState.value, content: fetchedContent ?? undefined } as ViewState;
         } catch (e) {
             console.error('Failed to load resource content:', e);
         } finally {
