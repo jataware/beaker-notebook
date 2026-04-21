@@ -85,12 +85,19 @@ class BeakerContext:
 
     procedure_location: ClassVar[Optional[os.PathLike|str]]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any],
-                integrations: Optional[list[BaseIntegrationProvider]] = None):
-
+    def __init__(
+        self,
+        beaker_kernel: "BeakerKernel",
+        agent_cls: "Optional[type[BeakerAgent]]" = None,
+        config: Optional[Dict[str, Any]] = None,
+        integrations: Optional[list[BaseIntegrationProvider]] = None
+    ):
         if integrations is None:
             integrations = []
+        if agent_cls is None:
+            agent_cls = self.AGENT_CLS
         integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
+
         self.intercepts = []
         self.integrations = IntegrationProviderRegistry(integrations)
         self.jinja_env = None
@@ -98,19 +105,16 @@ class BeakerContext:
         self.workflows = self.discover_workflows()
         self.current_workflow_state = None
         self.beaker_kernel = beaker_kernel
-        self.config = config
+        self.config = config or {}
         self.subkernel = self.get_subkernel()
 
         self.agent = agent_cls(
             context=self,
             tools=self.subkernel.tools,
         )
-        if TYPE_CHECKING and self.__annotations__:
-            self.__annotations__["agent"] = agent_cls
 
         self.current_llm_query = None
         self.notebook_state = None
-        # self.kernel_state = None
 
         self.disable_tools()
 

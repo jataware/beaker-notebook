@@ -14,7 +14,7 @@ class ContextFile(TemplateFile):
     ]
 
     TEMPLATE = """\
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
 
 from beaker_kernel.lib import BeakerContext
 from beaker_kernel.lib.utils import action
@@ -35,8 +35,8 @@ class {context_class}(BeakerContext):
 
     compatible_subkernels = ["python3"]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", config: Dict[str, Any]):
-        super().__init__(beaker_kernel, self.AGENT_CLS, config)
+    def __init__(self, beaker_kernel: "BeakerKernel", config: Optional[Dict[str, Any]] = None):
+        super().__init__(beaker_kernel, config=config)
 
     async def setup(self, context_info=None, parent_header=None):
         # Custom setup can be done here
