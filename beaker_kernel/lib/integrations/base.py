@@ -1,7 +1,8 @@
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
 from pathlib import Path
+from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
+from uuid import uuid4
 
 from beaker_kernel.lib.integrations.types import Integration, Resource
 from beaker_kernel.lib.autodiscovery import find_resource_dirs
@@ -10,14 +11,17 @@ class BaseIntegrationProvider(ABC):
 
     provider_type: ClassVar[str]
     mutable: ClassVar[bool] = False
-    slug: ClassVar[str]
     display_name: ClassVar[str]
 
+    id: str
+
+    slug: str
     prompt_instructions: Optional[str]
 
-    def __init__(self, display_name: Optional[str] = None):
+    def __init__(self, display_name: Optional[str] = None, id: Optional[str] = None):
         if display_name is not None:
             self.__class__.display_name = display_name
+        self.id = id if id is not None else str(uuid4())
         self.prompt_instructions = None
 
     @classmethod
@@ -92,10 +96,10 @@ class BaseIntegrationProvider(ABC):
         return None
 
     @classmethod
-    def get_data_basedirs(cls) -> list[os.PathLike]:
+    def get_data_basedirs(cls, slug: str) -> list[os.PathLike]:
         data_dirs = []
         for data_dir in find_resource_dirs("data"):
-            base_dir = os.path.join(data_dir, cls.slug)
+            base_dir = os.path.join(data_dir, slug)
             if os.path.isdir(base_dir):
                 data_dirs.append(base_dir)
         alt_integration_dir = os.environ.get("INTEGRATION_PATH", "./integrations")
@@ -108,7 +112,7 @@ class BaseIntegrationProvider(ABC):
 
     @property
     def data_basedirs(self):
-        return self.get_data_basedirs()
+        return self.get_data_basedirs(self.slug)
 
     @abstractmethod
     def list_integrations(self) -> list[Integration]:

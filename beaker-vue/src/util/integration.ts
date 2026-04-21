@@ -102,6 +102,7 @@ async function integrationApiWrapper<T>(
     body?: object
 ): Promise<T> {
     const path = `/beaker/integrations/${toRoute(route)}`
+    console.log(path)
     const response = await fetch(path, {
         method,
         headers: {

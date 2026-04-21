@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Optional, Mapping
+from typing_extensions import Self
+from uuid import uuid4
 
 import requests
 import yaml
@@ -22,8 +24,101 @@ from beaker_kernel.lib.integrations.types import (
 from .base import BaseIntegrationProvider
 if TYPE_CHECKING:
     from beaker_kernel.lib.agent import BeakerAgent
+    from archytas.chat_history import ChatHistory
+    from archytas.agent import Agent
+    from archytas.models.base import BaseArchytasModel
+    from langchain_core.messages import ToolMessage
 
 logger = logging.getLogger(__name__)
+
+
+async def _summarize_skill_resource(
+    message: "ToolMessage",
+    chat_history: "ChatHistory",
+    agent: "Agent",
+    model: "Optional[BaseArchytasModel]" = None,
+) -> None:
+    """Elide a loaded skill resource after its react loop completes.
+
+    Keeps the tool result in history as a short pointer so the agent can
+    re-invoke the tool to recover the content. Respects the ``persist``
+    arg: when True, the content is left intact.
+    """
+    artifact = getattr(message, "artifact", None) or {}
+    tool_name = artifact.get("tool_name")
+    if not tool_name:
+        return
+
+    _, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+    if not tool_call:
+        return
+    args = tool_call.get("args") or {}
+
+    if args.get("persist"):
+        artifact["summarized"] = True
+        return
+
+    skill_name = args.get("skill_name", "<unknown>")
+    relative_path = args.get("relative_path", "<unknown>")
+
+    message.content = (
+        f"Resource '{relative_path}' from skill '{skill_name}' was loaded "
+        f"in a prior step and its contents have been elided to save context. "
+        f"Call `load_skill_resource(skill_name={skill_name!r}, "
+        f"relative_path={relative_path!r})` again if you need to re-read it."
+    )
+    artifact["summarized"] = True
+
+    tool_fn = agent.tools.get(tool_name)
+    provider = getattr(tool_fn, "__self__", None) if tool_fn else None
+    if provider is not None:
+        try:
+            skill = provider._find_skill_by_name(skill_name)
+        except ValueError:
+            return
+        session_id = provider._get_session_id(agent)
+        provider._loaded.get(session_id, set()).discard((skill.name, relative_path))
+
+
+async def _summarize_skill_examples(
+    message: "ToolMessage",
+    chat_history: "ChatHistory",
+    agent: "Agent",
+    model: "Optional[BaseArchytasModel]" = None,
+) -> None:
+    """Elide loaded skill examples after their react loop completes."""
+    artifact = getattr(message, "artifact", None) or {}
+    tool_name = artifact.get("tool_name")
+    if not tool_name:
+        return
+
+    _, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+    if not tool_call:
+        return
+    args = tool_call.get("args") or {}
+
+    skill_name = args.get("skill_name", "<unknown>")
+    filenames = args.get("filenames") or []
+
+    message.content = (
+        f"Examples {filenames} from skill '{skill_name}' were loaded in a "
+        f"prior step and their contents have been elided to save context. "
+        f"Call `load_skill_examples(skill_name={skill_name!r}, filenames=[...])` "
+        f"again if you need to re-read any of them."
+    )
+    artifact["summarized"] = True
+
+    tool_fn = agent.tools.get(tool_name)
+    provider = getattr(tool_fn, "__self__", None) if tool_fn else None
+    if provider is not None:
+        try:
+            skill = provider._find_skill_by_name(skill_name)
+        except ValueError:
+            return
+        session_id = provider._get_session_id(agent)
+        marks = provider._loaded.get(session_id, set())
+        for fn in filenames:
+            marks.discard((skill.name, f"examples/{fn}"))
 
 
 def parse_skill_md(content: str) -> tuple[dict, str]:
@@ -106,9 +201,9 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     slug: ClassVar[str] = "agent-skill"
     mutable: ClassVar[bool] = False
 
-    def __init__(self, display_name: str = "Agent Skills", skill_paths: Optional[list[str|os.PathLike]] = None):
-        super().__init__(display_name)
-        logger.debug(f"Initializing SkillIntegrationProvider {display_name}")
+    def __init__(self, display_name: str = "Agent Skills", id: Optional[str] = None, skill_paths: Optional[list[str|os.PathLike]] = None):
+        super().__init__(display_name, id=id)
+        logger.debug(f"Initializing SkillIntegrationProvider {display_name} ({self.id})")
         self._skills: list[SkillIntegration] = list(self.discover_integrations(paths=skill_paths).values())
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 
@@ -147,15 +242,15 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return dirs
 
     @classmethod
-    def discover_integrations(cls, paths: Optional[list[str|os.PathLike]]) -> Mapping[str, SkillIntegration]:
+    def discover_integrations(cls, *, paths: Optional[list[str|os.PathLike]] = None, **kwargs) -> Mapping[str, SkillIntegration]:
         """Discover and load skills from skills.json, standard skill directories,
         and the cross-client .agents/skills/ convention."""
         skills: dict[str, SkillIntegration] = {}
         loaded_names: set[str] = set()
 
-        def _load_deduped(source: str):
+        def _load_deduped(source: str, base_path: Optional[str]=None):
             try:
-                skill = cls._load_skill(source)
+                skill = cls._load_skill(source, base_path=base_path)
                 if skill.name in loaded_names:
                     logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
                 else:
@@ -165,14 +260,20 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 logger.exception("Failed to load skill from source: %s", source)
 
         if paths is None:
-            resource_dirs = list(find_resource_dirs("data"))
-            skills_dirs = cls._get_skill_scan_dirs()
+            resource_dirs = [Path(resource_dir) for resource_dir in find_resource_dirs("data")]
+            skills_dirs = [Path(skill_dir) for skill_dir in cls._get_skill_scan_dirs()]
         else:
             resource_dirs = skills_dirs = [Path(path) for path in paths]
 
         # Load from skills.json in data dirs
         for data_dir in resource_dirs:
-            config_path = Path(data_dir) / "skills.json"
+            if data_dir.is_file() and data_dir.name == "skills.json":
+                config_path = data_dir
+                data_dir = config_path.parent
+            elif data_dir.is_dir():
+                config_path = data_dir / "skills.json"
+            else:
+                continue
             if config_path.is_file():
                 logger.debug("Found skills.json at %s", config_path)
                 try:
@@ -182,7 +283,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                         logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
                     else:
                         for source in data:
-                            _load_deduped(source)
+                            _load_deduped(source, base_path=str(data_dir))
                 except Exception:
                     logger.exception("Failed to read skills.json at %s", config_path)
 
@@ -190,16 +291,19 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         for skills_dir in skills_dirs:
             logger.debug("Scanning skills directory: %s", skills_dir)
             for skill_md in skills_dir.glob("*/SKILL.md"):
-                _load_deduped(str(skill_md.parent))
+                _load_deduped(str(skill_md.parent), base_path=str(skills_dir))
 
         return skills
 
     @classmethod
-    def _load_skill(cls, source: str) -> SkillIntegration:
+    def _load_skill(cls, source: str, base_path: Optional[str]=None) -> SkillIntegration:
         """Load a single skill from a local path or remote URL."""
         if source.startswith(("http://", "https://")):
             return cls._load_remote_skill(source)
         else:
+            # If the source reference is relative, convert it to an absolute path relative to the folder the json file is in.
+            if not Path(source).is_absolute() and base_path is not None:
+                source = str((Path(base_path) / source).absolute())
             return cls._load_local_skill(source)
 
     @classmethod
@@ -266,7 +370,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         skill = SkillIntegration(
             name=name,
             description=description,
-            provider=f"agent-skill:{cls.slug}",
+            provider=f"{cls.provider_type}:{cls.slug}",
             source_type=source_type,
             base_path=base_path,
             base_url=base_url,
@@ -497,7 +601,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         return result
 
-    @tool
+    @tool(summarizer=_summarize_skill_resource)
     async def load_skill_resource(self, skill_name: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
         """Load a resource file (script, reference doc, or asset) from a skill.
 
@@ -533,7 +637,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         self._mark_loaded(session_id, skill.name, relative_path)
         return file_resource.content
 
-    @tool
+    @tool(summarizer=_summarize_skill_examples)
     async def load_skill_examples(self, skill_name: str, filenames: list[str], agent: AgentRef) -> str:
         """Load one or more code examples for a skill. Call this after loading
         instructions and before writing code, to see working usage patterns.

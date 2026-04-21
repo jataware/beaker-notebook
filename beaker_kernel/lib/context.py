@@ -60,6 +60,7 @@ class BeakerContext:
     AGENT_CLS: "ClassVar[type[BeakerAgent]]"
     ASSET_DIR: ClassVar[Optional[os.PathLike|str]] = None
     RENDERERS: ClassVar[Optional[Dict[str, Dict[str, str]]]] = None
+    INTEGRATION_PROVIDERS: ClassVar[list[tuple[type[BaseIntegrationProvider], tuple, dict[str, Any]]]] = []
 
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
@@ -83,16 +84,10 @@ class BeakerContext:
 
     procedure_location: ClassVar[Optional[os.PathLike|str]]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any],
-                 integrations: Optional[Collection[BaseIntegrationProvider]] = None):
-        match integrations:
-            case None:
-                integrations = set()
-            case _:
-                integrations = set(integrations)
+    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any]):
 
         self.intercepts = []
-        self.integrations = self.default_integration_providers | self.extra_integration_providers() | integrations
+        self.integrations = self.default_integration_providers | self.extra_integration_providers()
         self.jinja_env = None
         self.templates = {}
         self.workflows = self.discover_workflows()
@@ -223,7 +218,10 @@ class BeakerContext:
 
     @classmethod
     def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
-        return set()
+        integrations = set()
+        for integration_cls, args, kwargs in cls.INTEGRATION_PROVIDERS:
+            integrations.add(integration_cls(*args, **kwargs))
+        return integrations
 
     def disable_tools(self):
         # TODO: Identical toolnames don't work
@@ -529,17 +527,17 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 if target_id is None:
                     msg = "Provider targets must specify desired provider: e.g. `provider:my_provider`"
                     raise ValueError(msg)
-                _provider_type, provider_slug = target_id.split(":", maxsplit=1)
+                _provider_type, provider_id = target_id.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.slug == provider_slug
+                        if provider.id == provider_id
                     )
                     function = getattr(provider, content.get("function"))
                     result = await ensure_async(function(*args, **kwargs))
                     result = self._call_message_result_wrapper(result)
                 except StopIteration as e:
-                    msg = f"Provider not found in integrations. `{provider_slug}` not in {[p.slug for p in self.integrations]}"
+                    msg = f"Provider not found in integrations. `{provider_id}` not in {[p.slug for p in self.integrations]}"
                     raise KeyError(msg) from e
             # mapping from an integration uuid to its parent provider, to call a method on that parent
             case "integration":
@@ -554,14 +552,14 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 except StopIteration as e:
                     msg = f"Integration `{target_id}` not found in {[i.slug for i in all_integrations]}"
                     raise KeyError(msg) from e
-                _provider_type, provider_slug = integration.provider.split(":", maxsplit=1)
+                _provider_type, provider_id = integration.provider.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.slug == provider_slug
+                        if provider.slug == provider_id
                     )
                 except StopIteration as e:
-                    msg = f"Provider not found: `{provider_slug}` in {[provider.slug for provider in self.integrations]}"
+                    msg = f"Provider not found: `{provider_id}` in {[provider.slug for provider in self.integrations]}"
                     raise KeyError(msg) from e
                 function = getattr(provider, content.get("function"))
                 result = await ensure_async(function(*args, **kwargs))

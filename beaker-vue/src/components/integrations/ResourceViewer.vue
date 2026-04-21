@@ -132,8 +132,11 @@ const loadingContent = ref<boolean>(false);
 
 const allResources = computed<IntegrationResource[]>(() => {
     const resources = model.value.integrations[model.value.selected]?.resources ?? {};
-    return Object.values(resources).filter(r =>
-        r.resource_type === 'skill_instructions' || r.resource_type === 'skill_file' || r.resource_type === 'skill_example'
+    console.log({resources});
+    return Object.values(resources).filter(r => {
+        console.log(r)
+        return r.resource_type === 'skill_instructions' || r.resource_type === 'skill_file' || r.resource_type === 'skill_example';
+    }
     );
 });
 

@@ -272,7 +272,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
                     continue
                 spec = AdhocSpecificationIntegration.from_dict(
                     location=spec_dir,
-                    provider=cls.slug,
+                    provider=cls.id,
                     content=spec_data
                 )
                 specs[spec_uuid] = spec

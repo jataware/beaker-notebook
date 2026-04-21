@@ -11,7 +11,7 @@ IntegrationTypes: typing.TypeAlias = typing.Literal["api", "database", "dataset"
 
 @dataclass(kw_only=True)
 class Resource:
-    resource_type: typing.ClassVar[str]
+    resource_type: str = "generic"
     integration: typing.Optional[str] = None
     # optional -- if not included on handwritten yaml, it will be generated
     resource_id: typing.Optional[str] = None
@@ -22,7 +22,7 @@ class Resource:
 
 @dataclass(kw_only=True)
 class FileResource(Resource):
-    resource_type = "file"
+    resource_type: str = "file"
     # user facing name
     name: str
     # optional - None could be an unsaved new file held in memory but not on disk
@@ -33,7 +33,7 @@ class FileResource(Resource):
 
 @dataclass(kw_only=True)
 class ExampleResource(Resource):
-    resource_type = "example"
+    resource_type: str = "example"
     query: str
     code: str
     notes: typing.Optional[str] = field(default=None)
@@ -48,7 +48,7 @@ class IntegrationExample:
 @dataclass(kw_only=True)
 class SkillMetadataResource(Resource):
     """Parsed SKILL.md frontmatter fields."""
-    resource_type = "skill_metadata"
+    resource_type: str = "skill_metadata"
     skill_name: str
     description: str
     license: typing.Optional[str] = None
@@ -60,14 +60,14 @@ class SkillMetadataResource(Resource):
 @dataclass(kw_only=True)
 class SkillInstructionsResource(Resource):
     """The markdown body of SKILL.md (everything after frontmatter)."""
-    resource_type = "skill_instructions"
+    resource_type: str = "skill_instructions"
     content: str
 
 
 @dataclass(kw_only=True)
 class SkillFileResource(Resource):
     """A file from the skill's scripts/, references/, or assets/ directories."""
-    resource_type = "skill_file"
+    resource_type: str = "skill_file"
     name: str
     relative_path: str
     content: typing.Optional[str] = field(default=None)
@@ -76,7 +76,7 @@ class SkillFileResource(Resource):
 @dataclass(kw_only=True)
 class SkillExampleResource(Resource):
     """A code example from the skill's examples/ directory."""
-    resource_type = "skill_example"
+    resource_type: str = "skill_example"
     filename: str
     title: str
     description: str
