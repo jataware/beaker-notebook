@@ -241,7 +241,7 @@ class TestLocalSkillLoading:
 
     def test_skill_integration_fields(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         assert isinstance(skill, SkillIntegration)
         assert skill.datatype == "skill"
         assert skill.source_type == "local"
@@ -315,7 +315,8 @@ class TestDiscoveryPaths:
         data_dir.mkdir()
 
         # Create skill via skills.json
-        json_skill_dir = tmp_path / "json-skill"
+        json_skill_dir = tmp_path / "shared-name"
+        # json_skill_dir = tmp_path / "json-skill"
         json_skill_dir.mkdir()
         (json_skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
             ---
@@ -395,7 +396,7 @@ class TestDeduplication:
 class TestResources:
     def test_metadata_resource(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         metadata_resources = provider.list_resources(skill.uuid, resource_type="skill_metadata")
         assert len(metadata_resources) == 1
         meta = metadata_resources[0]
@@ -408,7 +409,7 @@ class TestResources:
 
     def test_instructions_resource(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         instr_resources = provider.list_resources(skill.uuid, resource_type="skill_instructions")
         assert len(instr_resources) == 1
         instr = instr_resources[0]
@@ -417,7 +418,7 @@ class TestResources:
 
     def test_file_resources_enumerated(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         file_resources = provider.list_resources(skill.uuid, resource_type="skill_file")
         paths = {r.relative_path for r in file_resources}
         assert "references/guide.md" in paths
@@ -427,14 +428,14 @@ class TestResources:
     def test_file_resources_content_not_loaded(self, skills_data_dir: Path):
         """File resource content should be None until explicitly fetched."""
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         file_resources = provider.list_resources(skill.uuid, resource_type="skill_file")
         for r in file_resources:
             assert r.content is None
 
     def test_get_resource_by_id(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         all_resources = provider.list_resources(skill.uuid)
         for resource in all_resources:
             fetched = provider.get_resource(skill.uuid, resource.resource_id)
@@ -442,7 +443,7 @@ class TestResources:
 
     def test_get_resource_missing_raises(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         with pytest.raises(KeyError):
             provider.get_resource(skill.uuid, "nonexistent-id")
 
@@ -460,7 +461,7 @@ class TestPrompt:
 
     def test_prompt_includes_location(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         assert f"Location: {skill.base_path}" in provider.prompt
 
     def test_prompt_includes_compatibility(self, skills_data_dir: Path):
@@ -493,14 +494,14 @@ class TestPrompt:
 class TestFileFetching:
     def test_fetch_local_file(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         content = provider._fetch_file_content(skill, "references/guide.md")
         assert "# Guide" in content
         assert "guide content" in content
 
     def test_fetch_local_file_missing_raises(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         with pytest.raises(FileNotFoundError):
             provider._fetch_file_content(skill, "references/nonexistent.md")
 
@@ -644,7 +645,7 @@ class TestParseExampleMd:
 class TestCodeExamples:
     def test_examples_discovered(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         examples = [
             r for r in skill.resources.values()
             if isinstance(r, SkillExampleResource)
@@ -655,7 +656,7 @@ class TestCodeExamples:
 
     def test_example_titles_parsed(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         examples = {
             r.filename: r for r in skill.resources.values()
             if isinstance(r, SkillExampleResource)
@@ -665,7 +666,7 @@ class TestCodeExamples:
 
     def test_example_descriptions_parsed(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         examples = {
             r.filename: r for r in skill.resources.values()
             if isinstance(r, SkillExampleResource)
@@ -675,7 +676,7 @@ class TestCodeExamples:
 
     def test_example_content_not_loaded_at_discovery(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         examples = [
             r for r in skill.resources.values()
             if isinstance(r, SkillExampleResource)
@@ -685,7 +686,7 @@ class TestCodeExamples:
 
     def test_example_content_loaded_via_get_resource(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         example = next(
             r for r in skill.resources.values()
             if isinstance(r, SkillExampleResource) and r.filename == "basic_usage.md"
@@ -701,7 +702,7 @@ class TestCodeExamples:
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(MINIMAL_SKILL_MD)
         provider = _make_provider([], extra_scan_dirs=[skills_dir])
-        loaded_skill = provider._find_skill_by_name("minimal-skill")
+        loaded_skill = provider._find_skill_by_slug("no-examples-skill")
         examples = [
             r for r in loaded_skill.resources.values()
             if isinstance(r, SkillExampleResource)
@@ -710,6 +711,6 @@ class TestCodeExamples:
 
     def test_fetch_example_content(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_name("full-skill")
+        skill = provider._find_skill_by_slug("full-skill")
         content = provider._fetch_file_content(skill, "examples/basic_usage.md")
         assert "hello world" in content

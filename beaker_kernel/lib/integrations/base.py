@@ -2,6 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
+from typing_extensions import Self
 from uuid import uuid4
 
 from beaker_kernel.lib.integrations.types import Integration, Resource
@@ -12,10 +13,10 @@ class BaseIntegrationProvider(ABC):
     provider_type: ClassVar[str]
     mutable: ClassVar[bool] = False
     display_name: ClassVar[str]
+    slug: ClassVar[str]
 
     id: str
 
-    slug: str
     prompt_instructions: Optional[str]
 
     def __init__(self, display_name: Optional[str] = None, id: Optional[str] = None):
@@ -47,6 +48,26 @@ class BaseIntegrationProvider(ABC):
         for integration in integrations:
             parts.append(str(integration))
         return "\n".join(parts)
+
+    @classmethod
+    def _merge(cls, a: Self, b: Self) -> Self:
+        raise NotImplementedError(
+            f"{cls.__name__} does not support merging; registering two "
+            f"instances in the same context is ambiguous."
+        )
+
+    @classmethod
+    def merge(cls, a: Self, b: Self) -> Self:
+        """Combine two providers of this class into one. Default refuses; override to opt in."""
+        if type(a) is not cls or type(b) is not cls:
+            raise TypeError(
+                f"{cls.__name__}.merge requires both arguments to be {cls.__name__} "
+                f"instances (got {type(a).__name__}, {type(b).__name__})"
+            )
+        if a is b:
+            # It's the same object, so just return either of them
+            return a
+        return cls._merge(a, b)
 
     @classmethod
     @abstractmethod
@@ -96,8 +117,10 @@ class BaseIntegrationProvider(ABC):
         return None
 
     @classmethod
-    def get_data_basedirs(cls, slug: str) -> list[os.PathLike]:
+    def get_data_basedirs(cls, slug: Optional[str] = None) -> list[os.PathLike]:
         data_dirs = []
+        if slug is None:
+            slug = cls.slug
         for data_dir in find_resource_dirs("data"):
             base_dir = os.path.join(data_dir, slug)
             if os.path.isdir(base_dir):

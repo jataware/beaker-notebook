@@ -50,6 +50,7 @@ class SkillMetadataResource(Resource):
     """Parsed SKILL.md frontmatter fields."""
     resource_type: str = "skill_metadata"
     skill_name: str
+    skill_slug: str
     description: str
     license: typing.Optional[str] = None
     compatibility: typing.Optional[str] = None
@@ -92,7 +93,8 @@ class Integration:
     uuid: str = field(default_factory=lambda: str(uuid4()))
 
     # created if not present -- UUID! but must be easily json serializable
-    slug: typing.Optional[str] = field(default=None)
+    slug: str = field(default_factory=lambda: typing.cast(str, None))
+    # slug: typing.Optional[str] = field(default=None)
     datatype: IntegrationTypes = field(default="api")
     url: typing.Optional[str] = field(default=None)
     img_url: typing.Optional[str] = field(default=None)

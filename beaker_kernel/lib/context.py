@@ -23,6 +23,7 @@ from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async
 from beaker_kernel.lib.config import config as beaker_config
 from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
+from beaker_kernel.lib.integrations.registry import IntegrationProviderRegistry
 from beaker_kernel.lib.integrations.types import Integration
 from beaker_kernel.lib.workflow import Workflow, WorkflowState, WorkflowStageProgress, create_available_workflows_prompt
 
@@ -80,14 +81,18 @@ class BeakerContext:
     kernel_state_function_name: str = "send_kernel_state"
 
     notebook_state: Optional[dict]
-    integrations: set[BaseIntegrationProvider]
+    integrations: IntegrationProviderRegistry
 
     procedure_location: ClassVar[Optional[os.PathLike|str]]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any]):
+    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "type[BeakerAgent]", config: Dict[str, Any],
+                integrations: Optional[list[BaseIntegrationProvider]] = None):
 
+        if integrations is None:
+            integrations = []
+        integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
         self.intercepts = []
-        self.integrations = self.default_integration_providers | self.extra_integration_providers()
+        self.integrations = IntegrationProviderRegistry(integrations)
         self.jinja_env = None
         self.templates = {}
         self.workflows = self.discover_workflows()

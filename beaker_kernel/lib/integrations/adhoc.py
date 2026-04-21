@@ -254,7 +254,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
         }
 
     @classmethod
-    def discover_integrations(cls) -> dict[str, AdhocSpecificationIntegration]:
+    def discover_integrations(cls, **kwargs) -> dict[str, AdhocSpecificationIntegration]:
         specs: dict[str, AdhocSpecificationIntegration] = {}
         for spec_dir in cls.iter_data("specifications"):
             if not spec_dir.is_dir():
@@ -272,7 +272,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
                     continue
                 spec = AdhocSpecificationIntegration.from_dict(
                     location=spec_dir,
-                    provider=cls.id,
+                    provider=cls.slug,
                     content=spec_data
                 )
                 specs[spec_uuid] = spec

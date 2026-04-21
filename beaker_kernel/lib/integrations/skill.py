@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Optional, Mapping
+from typing import TYPE_CHECKING, ClassVar, Optional, Mapping, cast
 from typing_extensions import Self
 from uuid import uuid4
 
@@ -25,7 +25,6 @@ from .base import BaseIntegrationProvider
 if TYPE_CHECKING:
     from beaker_kernel.lib.agent import BeakerAgent
     from archytas.chat_history import ChatHistory
-    from archytas.agent import Agent
     from archytas.models.base import BaseArchytasModel
     from langchain_core.messages import ToolMessage
 
@@ -35,7 +34,7 @@ logger = logging.getLogger(__name__)
 async def _summarize_skill_resource(
     message: "ToolMessage",
     chat_history: "ChatHistory",
-    agent: "Agent",
+    agent: "BeakerAgent",
     model: "Optional[BaseArchytasModel]" = None,
 ) -> None:
     """Elide a loaded skill resource after its react loop completes.
@@ -58,32 +57,40 @@ async def _summarize_skill_resource(
         artifact["summarized"] = True
         return
 
-    skill_name = args.get("skill_name", "<unknown>")
+    skill_slug = args.get("skill_slug", "<unknown>")
     relative_path = args.get("relative_path", "<unknown>")
+    try:
+        if model is not None:
+            token_count = await model.get_num_tokens_from_messages([message])
+        else:
+            token_count = "<unknown>"
+    except:
+        token_count = "<unknown>"
 
-    message.content = (
-        f"Resource '{relative_path}' from skill '{skill_name}' was loaded "
-        f"in a prior step and its contents have been elided to save context. "
-        f"Call `load_skill_resource(skill_name={skill_name!r}, "
-        f"relative_path={relative_path!r})` again if you need to re-read it."
-    )
+
+    message.content = f"""
+Resource '{relative_path}' from skill '{skill_slug}' was loaded, but its contents have been elided to save context.
+The contents of the resource have been cached and can be retrieved by reloading the resource, such as by
+calling `load_skill_resource(skill_slug={skill_slug!r}, relative_path={relative_path!r})` again.
+The full resource has a size of approximately {token_count} tokens.
+""".strip()
     artifact["summarized"] = True
 
     tool_fn = agent.tools.get(tool_name)
     provider = getattr(tool_fn, "__self__", None) if tool_fn else None
     if provider is not None:
         try:
-            skill = provider._find_skill_by_name(skill_name)
+            skill = provider._find_skill_by_slug(skill_slug)
         except ValueError:
             return
         session_id = provider._get_session_id(agent)
-        provider._loaded.get(session_id, set()).discard((skill.name, relative_path))
+        provider._loaded.get(session_id, set()).discard((skill.slug, relative_path))
 
 
 async def _summarize_skill_examples(
     message: "ToolMessage",
     chat_history: "ChatHistory",
-    agent: "Agent",
+    agent: "BeakerAgent",
     model: "Optional[BaseArchytasModel]" = None,
 ) -> None:
     """Elide loaded skill examples after their react loop completes."""
@@ -97,28 +104,27 @@ async def _summarize_skill_examples(
         return
     args = tool_call.get("args") or {}
 
-    skill_name = args.get("skill_name", "<unknown>")
+    skill_slug = args.get("skill_slug", "<unknown>")
     filenames = args.get("filenames") or []
 
-    message.content = (
-        f"Examples {filenames} from skill '{skill_name}' were loaded in a "
-        f"prior step and their contents have been elided to save context. "
-        f"Call `load_skill_examples(skill_name={skill_name!r}, filenames=[...])` "
-        f"again if you need to re-read any of them."
-    )
+    message.content = f"""
+Examples {filenames} from skill '{skill_slug}' were loaded, but their contents have been elided to save context.
+The contents of the skills have been cached and can be retrieved by reloading the resource, such as by
+calling `load_skill_examples(skill_slug={skill_slug!r}, filenames=[...])` again if you need to re-read any of them.
+""".strip()
     artifact["summarized"] = True
 
     tool_fn = agent.tools.get(tool_name)
-    provider = getattr(tool_fn, "__self__", None) if tool_fn else None
+    provider: "Optional[SkillIntegrationProvider]" = cast("Optional[SkillIntegrationProvider]", getattr(tool_fn, "__self__", None)) if tool_fn else None
     if provider is not None:
         try:
-            skill = provider._find_skill_by_name(skill_name)
+            skill = provider._find_skill_by_slug(skill_slug)
         except ValueError:
             return
         session_id = provider._get_session_id(agent)
         marks = provider._loaded.get(session_id, set())
         for fn in filenames:
-            marks.discard((skill.name, f"examples/{fn}"))
+            marks.discard((skill.slug, f"examples/{fn}"))
 
 
 def parse_skill_md(content: str) -> tuple[dict, str]:
@@ -246,15 +252,15 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         """Discover and load skills from skills.json, standard skill directories,
         and the cross-client .agents/skills/ convention."""
         skills: dict[str, SkillIntegration] = {}
-        loaded_names: set[str] = set()
+        loaded_slugs: set[str] = set()
 
         def _load_deduped(source: str, base_path: Optional[str]=None):
             try:
                 skill = cls._load_skill(source, base_path=base_path)
-                if skill.name in loaded_names:
+                if skill.slug in loaded_slugs:
                     logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
                 else:
-                    loaded_names.add(skill.name)
+                    loaded_slugs.add(skill.slug)
                     skills[skill.uuid] = skill
             except Exception:
                 logger.exception("Failed to load skill from source: %s", source)
@@ -296,6 +302,14 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return skills
 
     @classmethod
+    def _merge(cls, a: Self, b: Self) -> Self:
+        existing_skills = {skill.slug for skill in a._skills}
+        for skill in b._skills:
+            if skill.slug not in existing_skills:
+                a._skills.append(skill)
+        return a
+
+    @classmethod
     def _load_skill(cls, source: str, base_path: Optional[str]=None) -> SkillIntegration:
         """Load a single skill from a local path or remote URL."""
         if source.startswith(("http://", "https://")):
@@ -325,7 +339,10 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         content = skill_md_path.read_text(encoding="utf-8")
         frontmatter, body = parse_skill_md(content)
 
+        slug = str(skill_dir.name)
+
         return cls._build_skill_integration(
+            slug=slug,
             frontmatter=frontmatter,
             body=body,
             source_type="local",
@@ -360,6 +377,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         frontmatter: dict,
         body: str,
         source_type: str,
+        slug: Optional[str] = None,
         base_path: Optional[str] = None,
         base_url: Optional[str] = None,
     ) -> SkillIntegration:
@@ -369,6 +387,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         skill = SkillIntegration(
             name=name,
+            slug=cast(str, slug),
             description=description,
             provider=f"{cls.provider_type}:{cls.slug}",
             source_type=source_type,
@@ -379,6 +398,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         metadata_resource = SkillMetadataResource(
             integration=skill.uuid,
             skill_name=name,
+            skill_slug=skill.slug,
             description=description,
             license=frontmatter.get("license"),
             compatibility=frontmatter.get("compatibility"),
@@ -442,7 +462,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     def list_integrations(self) -> list[Integration]:
         return list(self._skills)
 
-    def get_integration(self, integration_id: str) -> Integration:
+    def get_integration(self, integration_id: str) -> SkillIntegration:
         for skill in self._skills:
             if skill.uuid == integration_id:
                 return skill
@@ -482,6 +502,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             if not metadata:
                 continue
             parts.append(f"Skill: {metadata.skill_name}")
+            parts.append(f"  Slug: {metadata.skill_slug}")
             parts.append(f"  Description: {metadata.description}")
             if skill.base_path:
                 parts.append(f"  Location: {skill.base_path}")
@@ -502,28 +523,28 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 parts.append(f"  Code examples: {len(example_resources)}")
             parts.append("")
         parts.append(
-            "Use `load_skill_instructions(skill_name)` to load a skill's full "
+            "Use `load_skill_instructions(skill_slug)` to load a skill's full "
             "instructions before using it."
         )
         parts.append(
-            "Use `load_skill_resource(skill_name, relative_path)` to load a "
+            "Use `load_skill_resource(skill_slug, relative_path)` to load a "
             "skill's reference files or scripts."
         )
         parts.append(
-            "Use `load_skill_examples(skill_name, filenames)` to load code "
+            "Use `load_skill_examples(skill_slug, filenames)` to load code "
             "examples for a skill. Available examples are listed when instructions are loaded."
         )
         return "\n".join(parts)
 
     # --- Deduplication ---
 
-    def _is_loaded(self, session_id: str, skill_name: str, resource_key: str) -> bool:
-        return (skill_name, resource_key) in self._loaded.get(session_id, set())
+    def _is_loaded(self, session_id: str, skill_slug: str, resource_key: str) -> bool:
+        return (skill_slug, resource_key) in self._loaded.get(session_id, set())
 
-    def _mark_loaded(self, session_id: str, skill_name: str, resource_key: str):
+    def _mark_loaded(self, session_id: str, skill_slug: str, resource_key: str):
         if session_id not in self._loaded:
             self._loaded[session_id] = set()
-        self._loaded[session_id].add((skill_name, resource_key))
+        self._loaded[session_id].add((skill_slug, resource_key))
 
     def clear_session(self, session_id: str):
         """Clear deduplication state for a session (called on session reset)."""
@@ -531,11 +552,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
     # --- Helpers ---
 
-    def _find_skill_by_name(self, skill_name: str) -> SkillIntegration:
+    def _find_skill_by_slug(self, skill_slug: str) -> SkillIntegration:
         for skill in self._skills:
-            if skill.name == skill_name or skill.slug == skill_name:
+            if skill.slug == skill_slug:
                 return skill
-        raise ValueError(f"Skill not found: {skill_name}")
+        raise ValueError(f"Skill not found: {skill_slug}")
 
     def _get_session_id(self, agent: "BeakerAgent") -> str:
         # TODO: Make sure this is valid
@@ -553,34 +574,36 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             response = requests.get(file_url, timeout=30)
             response.raise_for_status()
             return response.text
-        raise ValueError(f"Cannot fetch file for skill '{skill.name}': no base path or URL")
+        raise ValueError(f"Cannot fetch file for skill '{skill.slug}': no base path or URL")
 
     # --- Tools (Tier 2 and 3) ---
 
     @tool
-    async def load_skill_instructions(self, skill_name: str, agent: AgentRef) -> str:
+    async def load_skill_instructions(self, skill_slug: str, agent: AgentRef) -> str:
         """Load the full instructions for a skill. Call this before using a skill.
 
+        The instructions will be added to the context and will be retained for the remainder of the session.
+
         Args:
-            skill_name: The name or slug of the skill to load instructions for.
+            skill_slug: The slug of the skill to load instructions for.
 
         Returns:
             str: The skill's full markdown instructions, or a status message if already loaded.
         """
         session_id = self._get_session_id(agent)
 
-        if self._is_loaded(session_id, skill_name, "instructions"):
-            return f"Skill instructions for '{skill_name}' have already been loaded in this session."
+        if self._is_loaded(session_id, skill_slug, "instructions"):
+            return f"Skill instructions for '{skill_slug}' have already been loaded in this session."
 
-        skill = self._find_skill_by_name(skill_name)
+        skill = self._find_skill_by_slug(skill_slug)
         instructions = next(
             (r for r in skill.resources.values() if isinstance(r, SkillInstructionsResource)),
             None,
         )
         if not instructions:
-            return f"No instructions found for skill '{skill_name}'."
+            return f"No instructions found for skill '{skill_slug}'."
 
-        self._mark_loaded(session_id, skill.name, "instructions")
+        self._mark_loaded(session_id, skill.slug, "instructions")
 
         result = instructions.content
 
@@ -595,18 +618,23 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 if ex.description:
                     result += f"\n  {ex.description}"
             result += (
-                "\n\nUse `load_skill_examples(skill_name, filenames)` to load "
+                "\n\nUse `load_skill_examples(skill_slug, filenames)` to load "
                 "one or more code examples before writing code."
             )
 
         return result
 
     @tool(summarizer=_summarize_skill_resource)
-    async def load_skill_resource(self, skill_name: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
+    async def load_skill_resource(self, skill_slug: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
         """Load a resource file (script, reference doc, or asset) from a skill.
 
+        Unless persisted, the full contents of the resource will be included in the context until the end of the current ReAct loop.
+        However, the contents are cached and can be reloaded by calling this tool again if you need it in the future.
+        If you need to cite or provide a reference to this file, you can simply refer to it via skill name and relative path.
+        Users can access the resource via the user interface if needed.
+
         Args:
-            skill_name: The name or slug of the skill.
+            skill_slug: The name or slug of the skill.
             relative_path: The relative path of the resource file (e.g. "references/use_cases.md").
             persist: Set to true if the resource should be persisted in the message history or false to summarize to prevent context bloat (default: False)
 
@@ -615,20 +643,20 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         """
         session_id = self._get_session_id(agent)
 
-        if self._is_loaded(session_id, skill_name, relative_path):
+        if self._is_loaded(session_id, skill_slug, relative_path):
             return (
-                f"Resource '{relative_path}' for skill '{skill_name}' "
+                f"Resource '{relative_path}' for skill '{skill_slug}' "
                 "has already been loaded in this session."
             )
 
-        skill = self._find_skill_by_name(skill_name)
+        skill = self._find_skill_by_slug(skill_slug)
         file_resource = next(
             (r for r in skill.resources.values()
              if isinstance(r, SkillFileResource) and r.relative_path == relative_path),
             None,
         )
         if not file_resource:
-            return f"Resource '{relative_path}' not found for skill '{skill_name}'."
+            return f"Resource '{relative_path}' not found for skill '{skill_slug}'."
 
         # Load content on demand
         if file_resource.content is None:
@@ -638,19 +666,23 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return file_resource.content
 
     @tool(summarizer=_summarize_skill_examples)
-    async def load_skill_examples(self, skill_name: str, filenames: list[str], agent: AgentRef) -> str:
-        """Load one or more code examples for a skill. Call this after loading
-        instructions and before writing code, to see working usage patterns.
+    async def load_skill_examples(self, skill_slug: str, filenames: list[str], agent: AgentRef) -> str:
+        """Load one or more code examples for a skill. Call this after loading instructions and before writing code, to see working usage patterns.
+
+        The full contents of the example files will be included in the context until the end of the current ReAct loop.
+        The examples are cached and can be reloaded by calling this tool again if you need it in the future.
+        If you need to cite or provide a reference to these examples, you can simply refer to it by skill name and filenames.
+        Users can access the examples via the user interface if needed.
 
         Args:
-            skill_name: The name or slug of the skill.
+            skill_slug: The name or slug of the skill.
             filenames: List of example filenames to load (e.g. ["airport_intelligence.md", "flight_tracking.md"]).
 
         Returns:
             str: The concatenated example contents, separated by headers.
         """
         session_id = self._get_session_id(agent)
-        skill = self._find_skill_by_name(skill_name)
+        skill = self._find_skill_by_slug(skill_slug)
 
         all_examples = {
             r.filename: r
@@ -691,4 +723,4 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 f"Available examples: {available}"
             )
 
-        return "\n\n".join(result_parts) if result_parts else f"No examples found for skill '{skill_name}'."
+        return "\n\n".join(result_parts) if result_parts else f"No examples found for skill '{skill_slug}'."
