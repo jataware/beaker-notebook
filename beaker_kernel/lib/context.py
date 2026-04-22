@@ -799,7 +799,10 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         if workflow_dir is None:
             class_dir = os.path.dirname(inspect.getfile(cls))
             workflow_dir = os.path.join(class_dir, "workflows")
-        if os.path.exists(workflow_dir):
+        if workflow_dir and not os.path.isabs(workflow_dir):
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            workflow_dir = os.path.normpath(os.path.join(class_dir, workflow_dir))
+        if os.path.isdir(workflow_dir):
             for workflow_yaml in Path(workflow_dir).glob("*.yaml"):
                 workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
                 # lives as long as the session does
