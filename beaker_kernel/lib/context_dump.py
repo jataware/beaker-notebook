@@ -4,7 +4,6 @@ Context dump module for extracting context metadata into the interchange format.
 Produces JSON output suitable for ingestion into BeakerHub's database.
 """
 import hashlib
-import importlib
 import inspect
 import json
 import logging
@@ -228,50 +227,27 @@ def _build_package_dump(pkg_name: str, pkg_info: dict) -> dict[str, Any]:
 
 def _find_integration_providers(
     context_cls: type[BeakerContext],
-) -> list[type[BaseIntegrationProvider]]:
+) -> list[BaseIntegrationProvider]:
     """
-    Find integration provider classes for a context.
+    Instantiate integration providers for a context without running full context init.
 
-    Supports two patterns:
-    1. Class-level `integration_providers` attribute (e.g. biome)
-    2. Provider subclasses imported in the context's module or a sibling
-       `integrations` module (e.g. beaker-weather, where providers are
-       instantiated in __init__ rather than declared as a class attribute)
+    Mirrors BeakerContext.__init__: combines the default providers (currently
+    a SkillIntegrationProvider) with any declared via the class-level
+    INTEGRATION_PROVIDERS attribute.
     """
-    # Pattern 1: class-level attribute
-    providers = getattr(context_cls, "integration_providers", None)
-    if providers:
-        return list(providers)
+    from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
 
-    # Pattern 2: scan the context's module and sibling integrations module
-    # for BaseIntegrationProvider subclasses
-    found: dict[str, type[BaseIntegrationProvider]] = {}
-    context_module = inspect.getmodule(context_cls)
+    providers: list[BaseIntegrationProvider] = [SkillIntegrationProvider("Default Skills")]
 
-    modules_to_scan = [context_module] if context_module else []
+    try:
+        providers.extend(context_cls.extra_integration_providers())
+    except Exception as e:
+        logger.warning(
+            f"Failed to instantiate INTEGRATION_PROVIDERS for context "
+            f"'{getattr(context_cls, 'SLUG', '?')}': {e}"
+        )
 
-    # Try to import a sibling 'integrations' module
-    if context_module and context_module.__package__:
-        integrations_module_name = f"{context_module.__package__}.integrations"
-        try:
-            integrations_module = importlib.import_module(integrations_module_name)
-            modules_to_scan.append(integrations_module)
-        except ImportError:
-            pass
-
-    for module in modules_to_scan:
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name, None)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BaseIntegrationProvider)
-                and attr is not BaseIntegrationProvider
-                and hasattr(attr, "slug")
-                and attr.slug  # must have a non-empty slug
-            ):
-                found[attr.slug] = attr
-
-    return list(found.values())
+    return providers
 
 
 def _extract_integrations(
@@ -288,16 +264,16 @@ def _extract_integrations(
 
     for provider in providers:
         try:
-            integrations = provider.discover_integrations()
+            integrations = provider.list_integrations()
         except Exception as e:
             logger.warning(
-                f"Failed to discover integrations for provider "
+                f"Failed to list integrations for provider "
                 f"'{getattr(provider, 'slug', '?')}' on context "
                 f"'{getattr(context_cls, 'SLUG', '?')}': {e}"
             )
             continue
 
-        for integration_key, integration in integrations.items():
+        for integration in integrations:
             uuid = integration.uuid
             context_uuids.append(uuid)
 
@@ -347,18 +323,22 @@ def _extract_workflows(
     """
     workflow_refs: list[dict[str, Any]] = []
 
-    # Locate workflows directory
+    # Locate workflows directory, mirroring BeakerContext.discover_workflows:
+    # unset -> {class_dir}/workflows; relative -> resolved against class_dir.
+    try:
+        class_dir = os.path.dirname(inspect.getfile(context_cls))
+    except (TypeError, OSError):
+        return workflow_refs
+
     workflow_dir = getattr(context_cls, "workflow_location", None)
     if workflow_dir is None:
-        try:
-            class_dir = os.path.dirname(inspect.getfile(context_cls))
-        except (TypeError, OSError):
-            return workflow_refs
         workflows_dir = os.path.join(class_dir, "workflows")
+    elif not os.path.isabs(workflow_dir):
+        workflows_dir = os.path.normpath(os.path.join(class_dir, workflow_dir))
     else:
         workflows_dir = str(workflow_dir)
 
-    if not os.path.exists(workflows_dir):
+    if not os.path.isdir(workflows_dir):
         return workflow_refs
 
     sort_order = 0

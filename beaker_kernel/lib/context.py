@@ -171,7 +171,13 @@ class BeakerContext:
                 cls.SLUG = cls.__name__.upper()
         if not hasattr(cls, "SHORT_NAME"):
             cls.SHORT_NAME = cls.SLUG.title()
-        if not hasattr(cls, "FULL_NAME"):
+        full_name = getattr(cls, "FULL_NAME", None)
+        if full_name is not None:
+            # Check if full name is inherited from parent. If so, it should be recreated based on this class.
+            parents = cls.mro()
+            if full_name == getattr(parents[0], "FULL_NAME", None) == getattr(parents[1], "FULL_NAME", None):
+                full_name = None
+        if full_name is None:
             full_name = cls.__name__
             full_name = re.sub(r'Context$', '', full_name)
             full_name = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', full_name)
