@@ -37,3 +37,16 @@ class IntegrationProviderRegistry:
         if not isinstance(provider, BaseIntegrationProvider):
             return False
         return self._by_class.get(type(provider)) is provider
+
+    async def system_preamble(self) -> str | None:
+        if not self._by_class:
+            return None
+        from beaker_kernel.lib.utils import ensure_async
+        parts: list[str] = []
+        for provider in self._by_class.values():
+            result = await ensure_async(provider.system_preamble())
+            if result:
+                parts.append(result)
+        if not parts:
+            return None
+        return "Here are integrations that you have access to:\n" + "---".join(parts)

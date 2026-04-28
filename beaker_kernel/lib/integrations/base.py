@@ -29,6 +29,15 @@ class BaseIntegrationProvider(ABC):
     def get_cls_data(cls) -> dict[str, os.PathLike]:
         return {}
 
+    async def system_preamble(self) -> Optional[str]:
+        """Contribution to the cacheable system_preamble layer.
+
+        Default delegates to the deprecated ``prompt`` property so existing
+        providers keep working unchanged. New providers should override this
+        method directly.
+        """
+        return self.prompt
+
     @property
     def prompt(self):
         integration_doc = self.__doc__ or ""

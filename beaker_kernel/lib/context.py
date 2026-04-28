@@ -25,7 +25,7 @@ from beaker_kernel.lib.config import config as beaker_config
 from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
 from beaker_kernel.lib.integrations.registry import IntegrationProviderRegistry
 from beaker_kernel.lib.integrations.types import Integration
-from beaker_kernel.lib.workflow import Workflow, WorkflowState, WorkflowStageProgress, create_available_workflows_prompt
+from beaker_kernel.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
 
 
 from .jupyter_kernel_proxy import InterceptionFilter, JupyterMessage
@@ -74,7 +74,7 @@ class BeakerContext:
     jinja_env: Optional[Environment]
     templates: Dict[str, Template]
 
-    workflows: Dict[str, Workflow]
+    workflows: WorkflowRegistry
     current_workflow_state: Optional[WorkflowState]
 
     preview_function_name: str = "generate_preview"
@@ -92,25 +92,31 @@ class BeakerContext:
         config: Optional[Dict[str, Any]] = None,
         integrations: Optional[list[BaseIntegrationProvider]] = None
     ):
+        tools = []
         if integrations is None:
             integrations = []
         if agent_cls is None:
             agent_cls = self.AGENT_CLS
         integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
 
+
         self.intercepts = []
         self.integrations = IntegrationProviderRegistry(integrations)
         self.jinja_env = None
         self.templates = {}
-        self.workflows = self.discover_workflows()
+        self.workflows = WorkflowRegistry(self.discover_workflows())
+        if self.workflows:
+            tools.append(self.workflows)
         self.current_workflow_state = None
         self.beaker_kernel = beaker_kernel
         self.config = config or {}
         self.subkernel = self.get_subkernel()
+        if self.subkernel.tools:
+            tools.extend(self.subkernel.tools)
 
         self.agent = agent_cls(
             context=self,
-            tools=self.subkernel.tools,
+            tools=tools,
         )
 
         self.current_llm_query = None
@@ -210,6 +216,21 @@ class BeakerContext:
             cls._auto_context = subclass_autocontext
             cls.auto_context = BeakerContext.auto_context
 
+        # Backwards-compat: if a subclass overrode the deprecated `default_preamble`
+        # but not `default_user_preamble`, route the legacy override to the new name
+        # so its content still lands in the user_preamble slot.
+        own_default_preamble = cls.__dict__.get("default_preamble")
+        own_default_user_preamble = cls.__dict__.get("default_user_preamble")
+        if own_default_preamble is not None and own_default_user_preamble is None:
+            import warnings
+            warnings.warn(
+                f"{cls.__name__} overrides BeakerContext.default_preamble(); "
+                f"this is deprecated. Rename to default_user_preamble().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            cls.default_user_preamble = own_default_preamble
+
     @property
     def preview(self) -> Callable[[], Awaitable[Any]] | None:
         preview_func = getattr(self, self.preview_function_name, None)
@@ -238,6 +259,84 @@ class BeakerContext:
             integrations.add(integration_cls(*args, **kwargs))
         return integrations
 
+    async def system_preamble(self) -> Optional[str]:
+        """Context's own contribution to the cacheable system_preamble layer.
+
+        Default returns ``None``. Subclasses override to add domain framing
+        (e.g. "you are working with X dataset / API / domain") that should be
+        cached for the lifetime of the session.
+        """
+        return None
+
+    async def default_user_preamble(self) -> Optional[str]:
+        """Context's own contribution to the user_preamble slot.
+
+        Default returns ``None``. Subclasses override to inject a user-side
+        preamble at session start.
+        """
+        return None
+
+    async def default_preamble(self) -> Optional[str]:
+        """Deprecated. Use ``default_user_preamble`` instead."""
+        import warnings
+        warnings.warn(
+            "BeakerContext.default_preamble() is deprecated; "
+            "override default_user_preamble() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.default_user_preamble()
+
+    def extra_system_preamble_contributors(self) -> list:
+        """Override to return additional contributor objects (any duck-type
+        with an async ``system_preamble()`` method) to be included in the
+        assembled system_preamble. Default returns an empty list.
+        """
+        return []
+
+    async def assemble_system_preamble(self) -> Optional[str]:
+        """Iterate all contributors and compose their ``system_preamble()``
+        outputs into a single block for the cacheable system_preamble slot.
+
+        Overridable but rarely should be — the iteration is the iteration.
+        Subclasses wanting to add their own framing should override
+        ``system_preamble()`` (their own contribution) or
+        ``extra_system_preamble_contributors()`` (additional contributors).
+        """
+        contributors = [
+            self,
+            self.subkernel,
+            self.integrations,
+            self.workflows,
+            self.agent,
+            *self.extra_system_preamble_contributors(),
+        ]
+        parts: list[str] = []
+        for contributor in contributors:
+            sp = getattr(contributor, "system_preamble", None)
+            if sp is None:
+                continue
+            result = await ensure_async(sp())
+            if result:
+                parts.append(result)
+        if not parts:
+            return None
+        return "\n\n".join(parts)
+
+    async def refresh_system_preamble(self) -> None:
+        """Re-assemble the system_preamble and push it to the agent's chat
+        history. Call after any mutation known to change a contributor's
+        output (e.g. an integration is added mid-session).
+
+        The call itself is the cache-invalidation signal — there is no
+        per-turn re-render or hash check.
+        """
+        text = await self.assemble_system_preamble()
+        chat_history = getattr(self.agent, "chat_history", None)
+        setter = getattr(chat_history, "set_system_preamble_text", None) if chat_history else None
+        if setter is not None:
+            setter(text or "")
+
     def disable_tools(self):
         # TODO: Identical toolnames don't work
         toggles = beaker_config.tools_enabled
@@ -262,9 +361,11 @@ class BeakerContext:
         if callable(getattr(self.agent, 'setup', None)):
             await self.agent.setup(self.config["context_info"], parent_header=parent_header)
 
-        preamble = await self.default_preamble()
-        if preamble:
-            self.agent.chat_history.set_user_preamble_text(preamble)
+        await self.refresh_system_preamble()
+
+        user_preamble = await self.default_user_preamble()
+        if user_preamble:
+            self.agent.chat_history.set_user_preamble_text(user_preamble)
 
     def cleanup(self):
         self.subkernel.cleanup()
@@ -285,47 +386,30 @@ class BeakerContext:
         parts = []
         if hasattr(self, "_auto_context"):
             result = await ensure_async(self._auto_context())
-            parts.append(
-                result
-            )
-        if beaker_config.send_kernel_state:
-            kernel_state = await self.get_subkernel_state()
-            if kernel_state:
-                parts.append(f"""\
-## Kernel state
-```application/json
-{json.dumps(kernel_state)}
-```\
-""")
-        if beaker_config.send_notebook_state:
-            if self.notebook_state:
-                parts.append(f"""\
-## Current notebook
-```application/x-ipynb+json
-{json.dumps(self.notebook_state)}
-```
-Note: In the notebook representation above, communication with the agent is encoded as Markdown cells with metadata
-field "beaker_cell_type" = "query". If a cell has metadata field "parent_cell", then the agent generated this cell as
-part of the ReAct loop associated with that query. As such, cells that follow a query may have occured while the ReAact
-loop was running and chronologically fit "inside" the query cell, as opposed to having been run afterwards.\
-""")
-
-        if self.workflows:
-            parts.append(
-                create_available_workflows_prompt(
-                    list(self.workflows.values()),
-                    self.attached_workflow
+            if result not in (None, ""):
+                parts.append(
+                    result
                 )
-            )
+#         if beaker_config.send_notebook_state:
+#             if self.notebook_state:
+#                 parts.append(f"""\
+# ## Current notebook
+# ```application/x-ipynb+json
+# {json.dumps(self.notebook_state)}
+# ```
+# Note: In the notebook representation above, communication with the agent is encoded as Markdown cells with metadata
+# field "beaker_cell_type" = "query". If a cell has metadata field "parent_cell", then the agent generated this cell as
+# part of the ReAct loop associated with that query. As such, cells that follow a query may have occured while the ReAact
+# loop was running and chronologically fit "inside" the query cell, as opposed to having been run afterwards.\
+# """)
 
-        if self.integrations:
-            parts.append("Here are integrations that you have access to:")
-            integration_prompts = [
-                integration.prompt for integration in self.integrations
-            ]
-            parts.append("---".join(integration_prompts))
-        content = "\n\n".join(parts)
-        return content
+        # Workflows and integrations blocks have moved to system_preamble
+        # (WorkflowRegistry.system_preamble and IntegrationProviderRegistry.system_preamble).
+
+        if parts:
+            return "\n\n".join(parts)
+        else:
+            return None
 
     def get_subkernel(self):
         subkernel_slug = self.config.get("subkernel", None)
@@ -664,6 +748,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             # ensure hashes don't align and content updates
             self.agent.chat_history.auto_context_message.content = ""
             await self.agent.chat_history.auto_context_message.update_content()
+        await self.refresh_system_preamble()
         await self.agent.chat_history.token_estimate(model=self.agent.model)
         await self.beaker_kernel.send_chat_history(parent_header=message.header)
 

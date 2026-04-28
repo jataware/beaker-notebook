@@ -17,6 +17,8 @@ class BeakerAgent(ReActAgent):
 
     context: "BeakerContext"
 
+    custom_prompt = None
+
     def __init__(
         self,
         context: "BeakerContext" = None,
@@ -43,6 +45,9 @@ class BeakerAgent(ReActAgent):
                 # if integration.tools:
                     # tools.extend(integration.tools)
 
+        if self.custom_prompt:
+            kwargs["custom_prompt"] = self.custom_prompt
+
         super().__init__(
             model=model,
             api_key=config.llm_service_token,
@@ -57,6 +62,14 @@ class BeakerAgent(ReActAgent):
         # Update tools so that the execution contexts are properly tracked
         for tool in self.tools.values():
             set_tool_execution_context(tool)
+
+    async def system_preamble(self) -> str | None:
+        """Contribution to the cacheable system_preamble layer.
+
+        Default returns ``None``. Override in subclasses to add agent-specific
+        cacheable framing without re-purposing the class docstring.
+        """
+        return None
 
     async def react_async(self, query: str, react_context: dict = None) -> str:
         return await super().react_async(query, react_context)

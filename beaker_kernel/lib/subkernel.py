@@ -9,7 +9,7 @@ import os
 import os.path
 import requests
 
-from archytas.tool_utils import AgentRef, tool, LoopControllerRef, ReactContextRef
+from archytas.tool_utils import AgentRef, tool, statetool, LoopControllerRef, ReactContextRef
 
 from .autodiscovery import autodiscover
 from .utils import env_enabled, action, ExecutionTask, slugify
@@ -90,267 +90,16 @@ async def run_code_summarizer(message: "ToolMessage", chat_history: "ChatHistory
                         content["input"]["code"] = shortened_code
     message.artifact["summarized"] = True
 
-@tool()
-async def attach_workflow(workflow_title: str, agent: AgentRef):
-    """
-    Chooses a relevant workflow to the user's request and attaches it to the context.
 
-    If the user wants to detach a workflow or remove it, that is equivalent to attaching "none."
+# def render_kernel_state_json(obj: dict):
+#     output = {}
+#     for k, v in obj:
+#         output[k] = {
+#             "type": type(obj),
+#             "value": str(v)[:40],
+#         }
+#     return output
 
-    Use this tool when the user asks to activate, enable, switch to, or attach a workflow.
-
-    If they describe what they want to do, choose the most relevant workflow based on their query.
-
-    Args:
-        workflow_title (str): The title of the workflow that you have access to, most relevant to their query.
-                        This is "none" if the user wants to detach, remove, or unset the workflow.
-
-    Returns:
-        str: A summary of what was done
-    """
-    try:
-        if len(agent.context.workflows) == 0:
-            return "No workflows attached to context."
-    except Exception as e:
-        return f"Failed to get workflows on context. {e}"
-    desired = slugify(workflow_title)
-    titles = {
-        slugify(workflow.title): uuid
-        for uuid, workflow in agent.context.workflows.items()
-    }
-    if desired not in titles:
-        return f"Failed to find `{desired}` in `{titles}`: invalid tool input."
-    agent.context.attach_workflow(titles[desired])
-    agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
-    return f"Successfully set the attached workflow to {workflow_title}."
-
-@tool()
-async def update_workflow_stage(stage_name: str, state: str, results: str, agent: AgentRef):
-    """
-    Updates the information about a workflow stage.
-
-    This must be used directly after finishing each stage of a workflow,
-    and at the start of a new stage.
-
-    You may additionally use this if the user requests redoing a stage after providing additional information,
-    such as: "Try that again, but with..." or "That didn't quite work, please fix it"
-    that would impact the result of a stage of the workflow that has already completed.
-    After following the user's request, ensure to provide the new results when updating the stage to be
-    "finished" again.
-
-    Args:
-        stage_name (str): The name of the stage to mark as completed to the user.
-                          IMPORTANT: This must be the exact name of the stage.
-        state (str): State will always either one of 'in_progress' or 'finished'.
-                     If finished, results must not be blank.
-                     If the stage is now in progress, results should be blank.
-        results (str): The final response of the operation, formatted in markdown.
-                       Format this in markdown if it is not already.
-                       This argument must be an empty string if state is 'in_progress'.
-
-    Returns:
-        str: Information about the operation.
-    """
-    if state != 'in_progress' and state != 'finished':
-        return "State must be one of `in_progress` or `finished`."
-    if stage_name not in agent.context.current_workflow_state["progress"]:
-        return f"Stage name not found. Must be one of: {agent.context.current_workflow_state['progress'].keys()}"
-    agent.context.current_workflow_state["progress"][stage_name] = WorkflowStageProgress(
-            code_cell_id='',
-            state=state,
-            results_markdown=results,
-        )
-
-    agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
-    return "Successfully marked stage."
-
-@tool()
-async def update_workflow_output(results: str, agent: AgentRef):
-    """
-    Updates the overall output of the workflow.
-
-    This tool must be called whenever a workflow stage completes, or whenever
-    redoing a task would impact the "final output" of a workflow.
-
-    The final output of the workflow must be formatted according to the
-    `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>`
-    block of the active workflow.
-
-    Args:
-        results (str): The results of the entire workflow, all stages included, given
-                       the state of the notebook and user operations as well -
-                       which should be formatted according to the
-                       `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>` block of the active workflow.
-
-    Returns:
-        str: Information about the operation.
-    """
-    agent.context.current_workflow_state["final_response"] = results
-    agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
-    return "Successfully set workflow output."
-
-@tool(autosummarize=True, summarizer=run_code_summarizer)
-async def run_code(code: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
-    """
-    Executes code in the user's notebook on behalf of the user, but collects the outputs of the run for use by the Agent
-    in the ReAct loop, if needed.
-
-    The code runs in a new codecell and the user can watch the execution and will see all of the normal output in the
-    Jupyter interface.
-
-    This tool can be used to probe the user's environment or collect information to answer questions, or can be used to
-    run code completely on behalf of the user. If a user asks the agent to do something that reasonably should be done
-    via code, you should probably default to using this tool.
-
-    This tool can be run more than once in a react loop. All actions and variables created in earlier uses of the tool
-    in a particular loop should be assumed to exist for future uses of the tool in the same loop.
-
-    Args:
-        code (str): Code to run directly in Jupyter. This should be a string exactly as it would appear in a notebook
-                    codecell. No extra escaping of newlines or similar characters is required.
-    Returns:
-        str: A summary of the run, along with the collected stdout, stderr, returned result, display_data items, and any
-             errors that may have occurred.
-    """
-    def format_execution_context(context) -> str:
-        """
-        Formats the execution context into a format that is easy for the agent to parse and understand.
-        """
-        stdout_list = context.get("stdout_list")
-        stderr_list = context.get("stderr_list")
-        display_data_list = context.get("display_data_list")
-        error = context.get("error")
-        return_value = context.get("return")
-
-        output = [
-             """Execution report:""",
-            f"""Execution id: {context['id']}""",
-            f"""Successful?: {context['done'] and not context['error']}""",
-            f"""Code executed:
-```
-{context['command']}
-```\n""",
-        ]
-
-        if error:
-            output.extend([
-                 "The following error was thrown when executing the code",
-                 "  Error:",
-                f"    {error['ename']} {error['evalue']}",
-                 "  TraceBack:",
-                 "\n".join(error['traceback']),
-                 "",
-            ])
-
-
-        if stdout_list:
-            output.extend([
-                "The execution produced the following stdout output:",
-                "\n".join(["```", *stdout_list, "```\n"]),
-            ])
-        if stderr_list:
-            output.extend([
-                "The execution produced the following stderr output:",
-                "\n".join(["```", *stderr_list, "```\n"]),
-            ])
-        if display_data_list:
-            output.append(
-                "The execution produced the following `display_data` objects to display in the notebook:",
-            )
-            for idx, display_data in enumerate(display_data_list):
-                output.append(
-                    f"display_data item {idx}:"
-                )
-                for mimetype, value in display_data.items():
-                    if len(value) > 800:
-                        value = f"{value[:400]} ... truncated ... {value[-400:]}"
-                    output.append(
-                        f"{mimetype}:"
-                    )
-                    output.append(
-                        f"```\n{value}\n```\n"
-                    )
-        if return_value:
-            output.append(
-                "The execution returned the following:",
-            )
-            if isinstance(return_value, str):
-                output.extend([
-                    '```', return_value, '```\n'
-                ])
-        output.append("Execution Report Complete")
-        return "\n".join(output)
-
-    # TODO: In future, this may become a parameter and we allow the agent to decide if code should be automatically run
-    # or just be added.
-    autoexecute = True
-    message = react_context.get("message", None)
-    identities = getattr(message, 'identities', [])
-
-    try:
-        execution_task: ExecutionTask
-        if isinstance(agent.context.subkernel, CheckpointableBeakerSubkernel) and is_checkpointing_enabled():
-            checkpoint_index, execution_task = await agent.context.subkernel.checkpoint_and_execute(
-                code, not autoexecute, parent_header=message.header, identities=identities
-            )
-        else:
-            execution_task = agent.context.execute(
-                code, store_history=True, surpress_messages=(not autoexecute), parent_header=message.header, identities=identities
-            )
-            checkpoint_index = None
-        execute_request_msg = {
-            name: getattr(execution_task.execute_request_msg, name)
-            for name in execution_task.execute_request_msg.json_field_names
-        }
-        payload = {
-            "action": "code_cell",
-            "language": agent.context.subkernel.SLUG,
-            "code": code.strip(),
-            "autoexecute": autoexecute,
-            "execute_request_msg": execute_request_msg,
-        }
-        if checkpoint_index is not None:
-            payload["checkpoint_index"] = checkpoint_index
-        agent.context.send_response(
-            "iopub",
-            "add_child_codecell",
-            payload,
-            parent_header=message.header,
-            parent_identities=getattr(message, "identities", None),
-        )
-
-        execution_context = await execution_task
-
-        try:
-            preview_payload = await agent.context.preview()
-            agent.context.send_response(
-                "iopub",
-                "preview",
-                preview_payload,
-                parent_header=message.header,
-            )
-        except Exception as e:
-            logger.error(f"Successfully ran code, but failed to fetch preview: {e}")
-
-        try:
-            kernel_state_payload = await agent.context.kernel_state()
-            agent.context.send_response(
-                "iopub",
-                "kernel_state_info",
-                kernel_state_payload,
-                parent_header=message.header,
-            )
-        except Exception as e:
-            logger.error(f"Successfully ran code, but failed to fetch kernel state: {e}")
-
-    except asyncio.CancelledError as err:
-        logger.error("Code execution was interrupted by the user.")
-        raise
-    except Exception as err:
-        logger.error(err, exc_info=err)
-        raise
-
-    return format_execution_context(execution_context)
 
 class BeakerSubkernel(abc.ABC):
     DISPLAY_NAME: str
@@ -382,19 +131,23 @@ class BeakerSubkernel(abc.ABC):
             return matches[0]
         return None
 
-    TOOLS: list[tuple[Callable, Callable]]  = [
-        (run_code, lambda: True),
-        # disabled in context.py if no workflows on context.
-        # if the lambda below contains self -- self.context.workflows won't be
-        # populated at the check time in tools(self)... so checking in context makes more sense.
-        (attach_workflow, lambda: True),
-        (update_workflow_stage, lambda: True),
-        (update_workflow_output, lambda: True)
-    ]
-
     FETCH_STATE_CODE: str = ""
 
     tasks: ClassVar[set[asyncio.Task]] = set()
+
+    async def system_preamble(self) -> str | None:
+        """Contribution to the cacheable system_preamble layer.
+
+        Default produces a short block describing the runtime. Subclasses may
+        override to provide richer descriptions.
+        """
+        doc = (self.__class__.__doc__ or "").strip()
+        parts = [
+            f"Subkernel: {self.DISPLAY_NAME} (language: {self.JUPYTER_LANGUAGE})"
+        ]
+        if doc:
+            parts.append(doc)
+        return "\n".join(parts)
 
     @classmethod
     @abc.abstractmethod
@@ -403,13 +156,440 @@ class BeakerSubkernel(abc.ABC):
 
     @property
     def tools(self):
-        return [tool for tool, condition in self.TOOLS if condition()]
+        return [self]
 
     def __init__(self, jupyter_id: str, subkernel_configuration: dict, context: BeakerContext):
         self.kernel_id = jupyter_id
         self.connected_kernel = ProxyKernelClient(subkernel_configuration, session_id=context.beaker_kernel.session_id)
         self.context = context
 
+    def _is_kernelstate_enabled(self):
+        # TODO: Make this actually conditional (remove "or True")
+        return bool(config.send_kernel_state) or True
+
+    def _has_kernelstate(self):
+        # Default based on whether FETCH_STATE_CODE is defined.
+        # Can be overwritten for each subkernel if needed.
+        return bool(self.FETCH_STATE_CODE)
+
+    def _state_condition(self):
+        return self._is_kernelstate_enabled() and self._has_kernelstate()
+
+    async def _get_state(self):
+        if not (self._is_kernelstate_enabled() or self._has_kernelstate()):
+            return None
+        fetch_state_code = self.FETCH_STATE_CODE
+        result = await self.context.evaluate(fetch_state_code)
+        state = result.get("return", {})
+        return state
+
+    @statetool(condition=_state_condition)
+    async def kernel_state(self):
+        """
+        Returns the state of the running kernel.
+
+        TODO: Fill this section in more.
+        """
+        state: dict[str, dict[str, dict]] = await self._get_state()
+        for var_name, var_info in state.get("variables", {}).items():
+            if len(str(var_info["value"])) > 60:
+                state["variables"][var_name]["value"] = str(var_info)[:59] + "…"
+        state_json = json.dumps(state, cls=JsonStateEncoder, indent=2)
+        return f"""\
+## Kernel state
+```application/json
+{state_json}
+```
+"""
+
+    @tool(autosummarize=True, summarizer=run_code_summarizer)
+    async def run_code(self, code: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
+        """
+        Executes code in the user's notebook on behalf of the user, but collects the outputs of the run for use by the Agent
+        in the ReAct loop, if needed.
+
+        The code runs in a new codecell and the user can watch the execution and will see all of the normal output in the
+        Jupyter interface.
+
+        This tool can be used to probe the user's environment or collect information to answer questions, or can be used to
+        run code completely on behalf of the user. If a user asks the agent to do something that reasonably should be done
+        via code, you should probably default to using this tool.
+
+        This tool can be run more than once in a react loop. All actions and variables created in earlier uses of the tool
+        in a particular loop should be assumed to exist for future uses of the tool in the same loop.
+
+        Args:
+            code (str): Code to run directly in Jupyter. This should be a string exactly as it would appear in a notebook
+                        codecell. No extra escaping of newlines or similar characters is required.
+        Returns:
+            str: A summary of the run, along with the collected stdout, stderr, returned result, display_data items, and any
+                errors that may have occurred.
+        """
+        def format_execution_context(context) -> str:
+            """
+            Formats the execution context into a format that is easy for the agent to parse and understand.
+            """
+            stdout_list = context.get("stdout_list")
+            stderr_list = context.get("stderr_list")
+            display_data_list = context.get("display_data_list")
+            error = context.get("error")
+            return_value = context.get("return")
+
+            output = [
+                """Execution report:""",
+                f"""Execution id: {context['id']}""",
+                f"""Successful?: {context['done'] and not context['error']}""",
+                f"""Code executed:
+    ```
+    {context['command']}
+    ```\n""",
+            ]
+
+            if error:
+                output.extend([
+                    "The following error was thrown when executing the code",
+                    "  Error:",
+                    f"    {error['ename']} {error['evalue']}",
+                    "  TraceBack:",
+                    "\n".join(error['traceback']),
+                    "",
+                ])
+
+            if stdout_list:
+                output.extend([
+                    "The execution produced the following stdout output:",
+                    "\n".join(["```", *stdout_list, "```\n"]),
+                ])
+            if stderr_list:
+                output.extend([
+                    "The execution produced the following stderr output:",
+                    "\n".join(["```", *stderr_list, "```\n"]),
+                ])
+            if display_data_list:
+                output.append(
+                    "The execution produced the following `display_data` objects to display in the notebook:",
+                )
+                for idx, display_data in enumerate(display_data_list):
+                    output.append(
+                        f"display_data item {idx}:"
+                    )
+                    for mimetype, value in display_data.items():
+                        if len(value) > 800:
+                            value = f"{value[:400]} ... truncated ... {value[-400:]}"
+                        output.append(
+                            f"{mimetype}:"
+                        )
+                        output.append(
+                            f"```\n{value}\n```\n"
+                        )
+            if return_value:
+                output.append(
+                    "The execution returned the following:",
+                )
+                if isinstance(return_value, str):
+                    output.extend([
+                        '```', return_value, '```\n'
+                    ])
+            output.append("Execution Report Complete")
+            return "\n".join(output)
+
+        # TODO: In future, this may become a parameter and we allow the agent to decide if code should be automatically run
+        # or just be added.
+        autoexecute = True
+        message = react_context.get("message", None)
+        identities = getattr(message, 'identities', [])
+
+        try:
+            execution_task: ExecutionTask
+            if isinstance(agent.context.subkernel, CheckpointableBeakerSubkernel) and is_checkpointing_enabled():
+                checkpoint_index, execution_task = await agent.context.subkernel.checkpoint_and_execute(
+                    code, not autoexecute, parent_header=message.header, identities=identities
+                )
+            else:
+                execution_task = agent.context.execute(
+                    code, store_history=True, surpress_messages=(not autoexecute), parent_header=message.header, identities=identities
+                )
+                checkpoint_index = None
+            execute_request_msg = {
+                name: getattr(execution_task.execute_request_msg, name)
+                for name in execution_task.execute_request_msg.json_field_names
+            }
+            payload = {
+                "action": "code_cell",
+                "language": agent.context.subkernel.SLUG,
+                "code": code.strip(),
+                "autoexecute": autoexecute,
+                "execute_request_msg": execute_request_msg,
+            }
+            if checkpoint_index is not None:
+                payload["checkpoint_index"] = checkpoint_index
+            agent.context.send_response(
+                "iopub",
+                "add_child_codecell",
+                payload,
+                parent_header=message.header,
+                parent_identities=getattr(message, "identities", None),
+            )
+
+            execution_context = await execution_task
+
+            try:
+                preview_payload = await agent.context.preview()
+                agent.context.send_response(
+                    "iopub",
+                    "preview",
+                    preview_payload,
+                    parent_header=message.header,
+                )
+            except Exception as e:
+                logger.error(f"Successfully ran code, but failed to fetch preview: {e}")
+
+            try:
+                kernel_state_payload = await agent.context.kernel_state()
+                agent.context.send_response(
+                    "iopub",
+                    "kernel_state_info",
+                    kernel_state_payload,
+                    parent_header=message.header,
+                )
+            except Exception as e:
+                logger.error(f"Successfully ran code, but failed to fetch kernel state: {e}")
+
+        except asyncio.CancelledError as err:
+            logger.error("Code execution was interrupted by the user.")
+            raise
+        except Exception as err:
+            logger.error(err, exc_info=err)
+            raise
+
+        return format_execution_context(execution_context)
+
+
+#     def execute(self,
+#         command,
+#         response_handler=None,
+#         parent_header={},
+#         store_history=False,
+#         surpress_messages=True,
+#         identities=None,
+#         cc_messages=True,
+#         raise_on_error=True,
+#     ) -> ExecutionTask:
+
+#         self.beaker_kernel.debug("execution_start", {"command": command}, parent_header=parent_header)
+#         stream = self.subkernel.connected_kernel.streams.shell
+
+#         execution_context = get_execution_context() or {}
+#         outer_parent_context = get_parent_message() or {}
+
+#         if identities is None:
+#             identities = []
+
+#         execute_request_multipart = self.subkernel.connected_kernel.make_multipart_message(
+#             msg_type="execute_request",
+#             content={
+#                 "silent": False,
+#                 "store_history": store_history,
+#                 "user_expressions": {},
+#                 "allow_stdin": True,
+#                 "stop_on_error": False,
+#                 "code": command,
+#             },
+#             parent_header=parent_header,
+#             metadata={
+#                 "trusted": True,
+#             },
+#             identities=identities,
+#         )
+#         execute_request_msg = JupyterMessage.parse(execute_request_multipart)
+#         async def execution_coro():
+#             stream.send_multipart(execute_request_multipart)
+#             message_id = execute_request_msg.header.get("msg_id")
+#             self.beaker_kernel.internal_executions.add(message_id)
+
+#             message_context = {
+#                 "id": message_id,
+#                 "command": command,
+#                 "stdout_list": [],
+#                 "stderr_list": [],
+#                 "display_data_list": [],
+#                 "return": None,
+#                 "error": None,
+#                 "done": False,
+#                 "result": None,
+#                 "parent": execute_request_msg,
+#             }
+#             message_metadata = {}
+
+#             filter_list = self.beaker_kernel.server.filters
+
+#             shell_socket = get_socket("shell")
+#             iopub_socket = get_socket("iopub")
+
+#             # Internal decorator to send relabeled copies of certain messages to the front-end
+#             def carbon_copy(fn):
+#                 @wraps(fn)
+#                 def inner_relabel(server, target_stream, data):
+#                     if cc_messages:
+#                         message = JupyterMessage.parse(data)
+#                         msg_type = message.header.get('msg_type')
+
+#                         destination_server = server.manager.server
+#                         destination_stream = destination_server.streams.iopub
+
+#                         relabeled_message = JupyterMessage(*message)
+#                         context_type = execution_context.get("type", "unknown")
+#                         context_name = execution_context.get("name", None)
+
+#                         original_parent_message: JupyterMessage = outer_parent_context.get("parent_message")
+#                         if original_parent_message:
+#                             # As this is a tuple, we can't update the reference pointed to by
+#                             # `relabled_message.parent_header` but we can  change the values of the referenced dict
+#                             parent_header: dict = relabeled_message.parent_header
+#                             parent_header.clear()
+#                             parent_header.update(original_parent_message.header)
+
+#                         relabeled_message.header["msg_type"] = f"beaker__{msg_type}"
+#                         relabeled_message.content["execution_type"] = context_type
+#                         if context_name:
+#                             relabeled_message.content["execution_item_name"] = context_name
+#                         relabeled_data = relabeled_message.sign_using(destination_server.config.get("key")).parts
+#                         destination_stream.send_multipart(relabeled_data)
+#                         destination_stream.flush()
+
+#                     return fn(server, target_stream, data)
+#                 return inner_relabel
+
+
+#             # Generate a handler to catch and silence the output
+#             @carbon_copy
+#             async def silence_message(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+
+#                 if not surpress_messages or message.parent_header.get("msg_id", None) != message_id:
+#                     return data
+#                 return None
+
+#             async def collect_result(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+#                 # Ensure we are only working on handlers for this message response
+#                 if message.parent_header.get("msg_id", None) != message_id:
+#                     return data
+
+#                 content_data = message.content["data"].get("text/plain", None)
+#                 message_context["return"] = content_data
+#                 if not surpress_messages:
+#                     return data
+
+#             async def collect_display_data(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+#                 # Ensure we are only working on handlers for this message response
+#                 if message.parent_header.get("msg_id", None) != message_id:
+#                     return data
+#                 display_data = message.content["data"]
+#                 message_context["display_data_list"].append(display_data)
+#                 if not surpress_messages:
+#                     return data
+
+#             async def collect_stream(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+#                 # Ensure we are only working on handlers for this message response
+#                 if message.parent_header.get("msg_id", None) != message_id:
+#                     return data
+#                 stream = message.content["name"]
+#                 message_context[f"{stream}_list"].append(message.content["text"])
+#                 if not surpress_messages:
+#                     return data
+
+#             @carbon_copy
+#             async def handle_error(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+#                 content = message.content
+#                 message_context["error"] = content
+#                 logger.error(
+#                     "Error: %s %s\nTraceback:\n%s",
+#                     content["ename"],
+#                     content["evalue"],
+#                     "\n".join(content["traceback"]),
+#                 )
+#                 if raise_on_error:
+#                     raise ExecutionError(content["ename"], content["evalue"], content["traceback"])
+#                 if not surpress_messages:
+#                     return data
+
+#             @carbon_copy
+#             async def cleanup(server, target_stream, data):
+#                 message = JupyterMessage.parse(data)
+#                 # Ensure we are only working on handlers for this message response
+#                 if message.parent_header.get("msg_id", None) != message_id:
+#                     return data
+#                 if response_handler:
+#                     filter_list.remove(
+#                         InterceptionFilter(iopub_socket, "stream", response_handler)
+#                     )
+#                 filter_list.remove(
+#                     InterceptionFilter(iopub_socket, "stream", collect_stream)
+#                 )
+#                 filter_list.remove(
+#                     InterceptionFilter(iopub_socket, "display_data", collect_display_data)
+#                 )
+#                 filter_list.remove(
+#                     InterceptionFilter(iopub_socket, "execute_input", silence_message)
+#                 )
+#                 filter_list.remove(
+#                     InterceptionFilter(iopub_socket, "execute_request", silence_message)
+#                 )
+#                 filter_list.remove(
+#                     InterceptionFilter(iopub_socket, "execute_result", collect_result)
+#                 )
+#                 filter_list.remove(InterceptionFilter(iopub_socket, "error", handle_error))
+#                 filter_list.remove(
+#                     InterceptionFilter(shell_socket, "execute_reply", cleanup)
+#                 )
+#                 message_context["result"] = message.content
+#                 message_context["done"] = True
+#                 if not surpress_messages:
+#                     return data
+
+#             filter_list.append(
+#                 InterceptionFilter(iopub_socket, "execute_input", silence_message)
+#             )
+#             filter_list.append(
+#                 InterceptionFilter(iopub_socket, "execute_request", silence_message)
+#             )
+#             filter_list.append(
+#                 InterceptionFilter(iopub_socket, "execute_result", collect_result)
+#             )
+#             filter_list.append(InterceptionFilter(shell_socket, "execute_reply", cleanup))
+#             filter_list.append(InterceptionFilter(iopub_socket, "stream", collect_stream))
+#             filter_list.append(InterceptionFilter(iopub_socket, "display_data", collect_display_data))
+#             filter_list.append(InterceptionFilter(iopub_socket, "error", handle_error))
+
+#             if response_handler:
+#                 filter_list.append(
+#                     InterceptionFilter(iopub_socket, "stream", response_handler)
+#                 )
+
+#             await asyncio.sleep(0.1)
+#             while not message_context["done"]:
+#                 await asyncio.sleep(0.2)
+#             # Wait for any straggling messages
+#             await asyncio.sleep(0.2)
+#             self.beaker_kernel.internal_executions.remove(message_id)
+#             self.beaker_kernel.debug("execution_end", message_context, parent_header=parent_header)
+#             return message_context
+#         task = ExecutionTask(coro=execution_coro(), execute_request_msg=execute_request_msg)
+#         return task
+
+#     async def evaluate(self, expression, parent_header={}):
+#         result = await self.execute(expression, parent_header=parent_header)
+#         try:
+#             parsed_result = self.subkernel.parse_subkernel_return(result)
+#             result["return"] = parsed_result
+#         except Exception:
+#             logger.error("Unable to parse result.")
+#             logger.debug("Subkernel: %s\nResult:\n%s", self.subkernel.connected_kernel, result)
+#         return result
 
     def get_treesitter_language(self) -> "TreeSitterLanguage":
         raise NotImplementedError()

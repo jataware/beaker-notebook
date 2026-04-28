@@ -1,5 +1,10 @@
+from archytas.tool_utils import tool, statetool, AgentRef
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Any, TypedDict
+from typing import TYPE_CHECKING, Iterator, Literal, Optional, Any, TypedDict
+
+if TYPE_CHECKING:
+    from .context import BeakerContext
 
 WORKFLOW_PREAMBLE_PROMPT="""
 
@@ -49,15 +54,6 @@ The workflows you have to offer are as follows:
 <workflows-list>
 {workflow_synopsis}
 </workflows-list>
-
-
-The current ACTIVE workflow is
-
-<active-workflow>
-{attached_workflow}
-</active-workflow>
-
-</workflows>
 """
 
 @dataclass(kw_only=True)
@@ -196,9 +192,151 @@ def create_available_workflows_prompt(
 
     return WORKFLOW_PREAMBLE_PROMPT.format(
         workflow_synopsis=workflow_synopsis,
-        attached_workflow=(
-            attached_workflow.to_prompt()
-            if attached_workflow
-            else "No active workflow selected."
-        )
     )
+
+
+def workflow_condition(agent: AgentRef) -> bool:
+    context: BeakerContext = agent.context
+    return bool(context.attached_workflow)
+
+class WorkflowRegistry(Mapping):
+    """Mapping container of workflows keyed by UUID, with a system_preamble
+    contribution that lists the available workflows for the agent.
+
+    Mirrors the role of IntegrationProviderRegistry: holds a collection and
+    contributes a single composed prompt block summarizing it.
+    """
+
+    def __init__(self, workflows: Optional[dict[str, Workflow]] = None):
+        self._workflows: dict[str, Workflow] = dict(workflows) if workflows else {}
+
+    def __getitem__(self, workflow_id: str) -> Workflow:
+        return self._workflows[workflow_id]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._workflows)
+
+    def __len__(self) -> int:
+        return len(self._workflows)
+
+    def __bool__(self) -> bool:
+        return bool(self._workflows)
+
+    async def system_preamble(self) -> Optional[str]:
+        if not self._workflows:
+            return None
+        return create_available_workflows_prompt(list(self._workflows.values()))
+
+    @tool()
+    async def attach_workflow(self, workflow_title: str, agent: AgentRef):
+        """
+        Chooses a relevant workflow to the user's request and attaches it to the context.
+
+        If the user wants to detach a workflow or remove it, that is equivalent to attaching "none."
+
+        Use this tool when the user asks to activate, enable, switch to, or attach a workflow.
+
+        If they describe what they want to do, choose the most relevant workflow based on their query.
+
+        Args:
+            workflow_title (str): The title of the workflow that you have access to, most relevant to their query.
+                            This is "none" if the user wants to detach, remove, or unset the workflow.
+
+        Returns:
+            str: A summary of what was done
+        """
+        try:
+            if len(agent.context.workflows) == 0:
+                return "No workflows attached to context."
+        except Exception as e:
+            return f"Failed to get workflows on context. {e}"
+        desired = slugify(workflow_title)
+        titles = {
+            slugify(workflow.title): uuid
+            for uuid, workflow in agent.context.workflows.items()
+        }
+        if desired not in titles:
+            return f"Failed to find `{desired}` in `{titles}`: invalid tool input."
+        agent.context.attach_workflow(titles[desired])
+        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        return f"Successfully set the attached workflow to {workflow_title}."
+
+    @tool()
+    async def update_workflow_stage(self, stage_name: str, state: str, results: str, agent: AgentRef):
+        """
+        Updates the information about a workflow stage.
+
+        This must be used directly after finishing each stage of a workflow,
+        and at the start of a new stage.
+
+        You may additionally use this if the user requests redoing a stage after providing additional information,
+        such as: "Try that again, but with..." or "That didn't quite work, please fix it"
+        that would impact the result of a stage of the workflow that has already completed.
+        After following the user's request, ensure to provide the new results when updating the stage to be
+        "finished" again.
+
+        Args:
+            stage_name (str): The name of the stage to mark as completed to the user.
+                            IMPORTANT: This must be the exact name of the stage.
+            state (str): State will always either one of 'in_progress' or 'finished'.
+                        If finished, results must not be blank.
+                        If the stage is now in progress, results should be blank.
+            results (str): The final response of the operation, formatted in markdown.
+                        Format this in markdown if it is not already.
+                        This argument must be an empty string if state is 'in_progress'.
+
+        Returns:
+            str: Information about the operation.
+        """
+        if state != 'in_progress' and state != 'finished':
+            return "State must be one of `in_progress` or `finished`."
+        if stage_name not in agent.context.current_workflow_state["progress"]:
+            return f"Stage name not found. Must be one of: {agent.context.current_workflow_state['progress'].keys()}"
+        agent.context.current_workflow_state["progress"][stage_name] = WorkflowStageProgress(
+                code_cell_id='',
+                state=state,
+                results_markdown=results,
+            )
+
+        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        return "Successfully marked stage."
+
+    @tool()
+    async def update_workflow_output(self, results: str, agent: AgentRef):
+        """
+        Updates the overall output of the workflow.
+
+        This tool must be called whenever a workflow stage completes, or whenever
+        redoing a task would impact the "final output" of a workflow.
+
+        The final output of the workflow must be formatted according to the
+        `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>`
+        block of the active workflow.
+
+        Args:
+            results (str): The results of the entire workflow, all stages included, given
+                        the state of the notebook and user operations as well -
+                        which should be formatted according to the
+                        `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>` block of the active workflow.
+
+        Returns:
+            str: Information about the operation.
+        """
+        agent.context.current_workflow_state["final_response"] = results
+        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        return "Successfully set workflow output."
+
+
+    @statetool(condition=workflow_condition)
+    def attached_workflow_state(self, agent: AgentRef) -> str:
+        """
+        Provides the full state of the currently attached workflow.
+
+        Returns:
+            str: The state as xml
+        """
+        context: BeakerContext = agent.context
+        if context.attached_workflow:
+            return context.attached_workflow.to_prompt()
+        else:
+            return "No context currently attached."
