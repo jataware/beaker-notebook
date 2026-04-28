@@ -254,6 +254,20 @@ class ConfigClass:
         normalize_function=normalize_bool,
         label="Send kernel state on query?"
     )
+    kernel_state_sample_budget: int = configfield(
+        description="Maximum total characters of variable-sample content included in kernel_state payloads. 0 disables samples.",
+        env_var="KERNEL_STATE_SAMPLE_BUDGET",
+        default=0,
+        sensitive=False,
+        label="Kernel state sample budget (0 = use subkernel default)"
+    )
+    describe_variables_sample_budget: int = configfield(
+        description="Maximum total characters of variable-sample content included in describe_variables payloads. 0 = use subkernel default.",
+        env_var="DESCRIBE_VARIABLES_SAMPLE_BUDGET",
+        default=0,
+        sensitive=False,
+        label="describe_variables sample budget (0 = use subkernel default)"
+    )
 
     @property
     def checkpoint_storage_path(self):

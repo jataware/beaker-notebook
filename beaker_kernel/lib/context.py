@@ -132,17 +132,37 @@ class BeakerContext:
         if getattr(self, "auto_context", None) is not None:
             self.agent.set_auto_context("Default context", self.auto_context)
 
+        # Merge procedure directories from the context (highest precedence) and
+        # the subkernel (default). FileSystemLoader resolves in list order, so
+        # context-level files override subkernel-level files of the same name.
         class_dir = inspect.getfile(self.__class__)
-        code_dir = os.path.join(os.path.dirname(class_dir), "procedures", self.subkernel.SLUG)
-        if os.path.exists(code_dir):
+        loader_dirs: list[str] = []
+        context_proc_dir = os.path.join(
+            os.path.dirname(class_dir), "procedures", self.subkernel.SLUG
+        )
+        if os.path.isdir(context_proc_dir):
+            loader_dirs.append(context_proc_dir)
+        loader_dirs.extend(self.subkernel._resolve_procedure_dirs())
+
+        if loader_dirs:
             self.jinja_env = Environment(
-                loader=FileSystemLoader(code_dir),
+                loader=FileSystemLoader(loader_dirs),
                 autoescape=select_autoescape()
             )
 
+            seen: set[str] = set()
             for template_file in self.jinja_env.list_templates():
-                if template_file.startswith('__'):
+                basename = os.path.basename(template_file)
+                if basename.startswith('__') or basename.startswith('.'):
                     continue
+                # Reflector templates are registered into the subkernel's
+                # ReflectorRegistry rather than the flat templates dict, so
+                # they are not addressable via get_code(name).
+                if template_file.startswith("reflectors/"):
+                    continue
+                if template_file in seen:
+                    continue
+                seen.add(template_file)
                 try:
                     template_name, _ = os.path.splitext(template_file)
                     template = self.jinja_env.get_template(template_file)
@@ -150,6 +170,13 @@ class BeakerContext:
                 except UnicodeDecodeError:
                     # For templates, this indicates a binary file which can't be a template, so throw a warning and skip.
                     logger.warning(f"File '{template_name}' in context '{self.__class__.__name__}' is not a valid template file as it cannot be decoded to a unicode string.")
+
+            # Build the subkernel's reflector registry from the merged Jinja
+            # environment. Context-level reflectors are registered first (so
+            # they win on duplicate names) by virtue of FileSystemLoader's
+            # in-order resolution.
+            from beaker_kernel.lib.reflector import ReflectorRegistry
+            self.subkernel.reflectors = ReflectorRegistry.from_jinja_env(self.jinja_env)
 
         for workflow_id, workflow in self.workflows.items():
             if workflow.is_context_default:
@@ -668,7 +695,12 @@ class BeakerContext:
         return result
 
     async def get_subkernel_state(self):
-        fetch_state_code = self.subkernel.FETCH_STATE_CODE
+        # Prefer the procedure-backed fetch_state path; fall back to the
+        # deprecated FETCH_STATE_CODE class attribute via the subkernel's
+        # own resolver so legacy subkernels keep working.
+        fetch_state_code = self.subkernel._render_fetch_state_code()
+        if not fetch_state_code:
+            return {}
         state = await self.evaluate(fetch_state_code)
         for warning in state["stderr_list"]:
             logger.warning(warning)

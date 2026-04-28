@@ -1,7 +1,8 @@
 import abc
 import asyncio
+import inspect
 import json
-from typing import Any, Callable, TYPE_CHECKING, ClassVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, ClassVar
 import hashlib
 import shutil
 from tempfile import mkdtemp
@@ -17,6 +18,7 @@ from .jupyter_kernel_proxy import ProxyKernelClient
 from .config import config
 from .context import BeakerContext, WorkflowStageProgress
 from .code_analysis.analysis_types import AnalysisCodeCells
+from .reflector import ReflectorRegistry
 
 if TYPE_CHECKING:
     from langchain_core.messages import ToolMessage, AIMessage, BaseMessage, ToolCall
@@ -91,16 +93,6 @@ async def run_code_summarizer(message: "ToolMessage", chat_history: "ChatHistory
     message.artifact["summarized"] = True
 
 
-# def render_kernel_state_json(obj: dict):
-#     output = {}
-#     for k, v in obj:
-#         output[k] = {
-#             "type": type(obj),
-#             "value": str(v)[:40],
-#         }
-#     return output
-
-
 class BeakerSubkernel(abc.ABC):
     DISPLAY_NAME: str
     SLUG: str
@@ -108,6 +100,41 @@ class BeakerSubkernel(abc.ABC):
     JUPYTER_LANGUAGE: str
 
     WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+
+    procedure_location: ClassVar[Optional[os.PathLike | str]] = None
+    """
+    Override to point at a non-default procedures directory. By default,
+    procedures are expected at ``<dir of subkernel module>/procedures/``.
+    """
+
+    KERNEL_STATE_SAMPLE_BUDGET: ClassVar[int] = 300
+    """
+    Per-call sample-byte budget applied to ``kernel_state`` payloads. Subkernels
+    may override per-language; ``config.kernel_state_sample_budget`` overrides
+    further at the deployment level if set.
+    """
+
+    DESCRIBE_VARIABLES_SAMPLE_BUDGET: ClassVar[int] = 1500
+    """
+    Per-call sample-byte budget applied to ``describe_variables`` payloads.
+    Subkernels may override per-language; ``config.describe_variables_sample_budget``
+    overrides at the deployment level if set.
+    """
+
+    EXCLUDED_LOCAL_NAMES: ClassVar[frozenset[str]] = frozenset()
+    """
+    Names that should not appear in the ``local_names`` payload. Per-language
+    subkernels extend this with their own framework-noise sets (e.g. Python
+    adds ``In``, ``Out``, ``get_ipython``, etc.). Underscore-prefixed names are
+    filtered separately by the fetch_state template convention.
+    """
+
+    reflectors: ReflectorRegistry
+    """
+    Registry of reflectors discovered for this subkernel. Populated during
+    context setup once the merged Jinja environment is built; before that it
+    is an empty registry.
+    """
 
     @classmethod
     def resolve_kernelspec(cls, kernelspecs: dict[str, dict]) -> str | None:
@@ -162,45 +189,180 @@ class BeakerSubkernel(abc.ABC):
         self.kernel_id = jupyter_id
         self.connected_kernel = ProxyKernelClient(subkernel_configuration, session_id=context.beaker_kernel.session_id)
         self.context = context
+        self.reflectors = ReflectorRegistry()
+
+    @classmethod
+    def _resolve_procedure_dirs(cls) -> list[str]:
+        """Return the list of directories to discover procedures from for this
+        subkernel, in resolution order.
+
+        Today this is just one directory — either ``cls.procedure_location`` if
+        explicitly set, or ``<dir of subkernel module>/procedures/`` derived
+        from the class's source location. Returned as a list to leave room for
+        future multi-dir resolution without changing the caller contract.
+
+        Non-existent directories are filtered out so the caller can blindly
+        feed the result into a ``FileSystemLoader``.
+        """
+        candidate: str
+        if cls.procedure_location is not None:
+            candidate = os.fspath(cls.procedure_location)
+            if not os.path.isabs(candidate):
+                module_file = inspect.getfile(cls)
+                candidate = os.path.normpath(
+                    os.path.join(os.path.dirname(module_file), candidate)
+                )
+        else:
+            module_file = inspect.getfile(cls)
+            candidate = os.path.join(os.path.dirname(module_file), "procedures")
+        return [candidate] if os.path.isdir(candidate) else []
 
     def _is_kernelstate_enabled(self):
         # TODO: Make this actually conditional (remove "or True")
         return bool(config.send_kernel_state) or True
 
     def _has_kernelstate(self):
-        # Default based on whether FETCH_STATE_CODE is defined.
-        # Can be overwritten for each subkernel if needed.
+        """True when this subkernel has a fetch_state procedure registered, or
+        a legacy FETCH_STATE_CODE class attribute (deprecated)."""
+        if "fetch_state" in (self.context.templates or {}):
+            return True
         return bool(self.FETCH_STATE_CODE)
 
     def _state_condition(self):
         return self._is_kernelstate_enabled() and self._has_kernelstate()
 
+    def _render_fetch_state_code(self) -> str:
+        """Render the fetch_state procedure for the current subkernel.
+
+        Prefers the ``fetch_state`` Jinja procedure (procedure-backed path).
+        Falls back to the legacy ``FETCH_STATE_CODE`` class attribute with a
+        DeprecationWarning if no procedure is registered.
+        """
+        if "fetch_state" in (self.context.templates or {}):
+            return self.context.get_code(
+                "fetch_state",
+                {
+                    "reflectors": list(self.reflectors.values()),
+                    "excluded_local_names": sorted(self.EXCLUDED_LOCAL_NAMES),
+                },
+            )
+        legacy = self.FETCH_STATE_CODE
+        if legacy:
+            import warnings
+            warnings.warn(
+                f"{type(self).__name__} relies on the deprecated "
+                f"FETCH_STATE_CODE class attribute. Migrate to a "
+                f"procedure-backed fetch_state.<ext> template; see "
+                f"beaker_kernel.lib.kernel_state for the canonical schema.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return legacy
+        return ""
+
     async def _get_state(self):
         if not (self._is_kernelstate_enabled() or self._has_kernelstate()):
             return None
-        fetch_state_code = self.FETCH_STATE_CODE
+        fetch_state_code = self._render_fetch_state_code()
+        if not fetch_state_code:
+            return None
         result = await self.context.evaluate(fetch_state_code)
         state = result.get("return", {})
         return state
+
+    def _kernel_state_budget(self) -> int:
+        cfg_budget = getattr(config, "kernel_state_sample_budget", 0) or 0
+        if cfg_budget > 0:
+            return cfg_budget
+        return self.KERNEL_STATE_SAMPLE_BUDGET
+
+    def _describe_variables_budget(self) -> int:
+        cfg_budget = getattr(config, "describe_variables_sample_budget", 0) or 0
+        if cfg_budget > 0:
+            return cfg_budget
+        return self.DESCRIBE_VARIABLES_SAMPLE_BUDGET
 
     @statetool(condition=_state_condition)
     async def kernel_state(self):
         """
         Returns the state of the running kernel.
 
-        TODO: Fill this section in more.
+        Produces a canonical KernelStatePayload (local_names + variables),
+        applies the configured sample-byte budget, and renders the agent-
+        facing markdown block.
         """
-        state: dict[str, dict[str, dict]] = await self._get_state()
-        for var_name, var_info in state.get("variables", {}).items():
-            if len(str(var_info["value"])) > 60:
-                state["variables"][var_name]["value"] = str(var_info)[:59] + "…"
-        state_json = json.dumps(state, cls=JsonStateEncoder, indent=2)
-        return f"""\
-## Kernel state
-```application/json
-{state_json}
-```
-"""
+        from beaker_kernel.lib.kernel_state import (
+            apply_sample_budget,
+            render_agent_payload,
+        )
+        state = await self._get_state()
+        if not state:
+            return ""
+        if not isinstance(state, dict):
+            # Legacy fetch returned something other than a dict; surface raw.
+            return f"## Kernel state\n```application/json\n{json.dumps(state, cls=JsonStateEncoder, indent=2)}\n```\n"
+        state.setdefault("local_names", {})
+        state.setdefault("variables", {})
+        apply_sample_budget(state, self._kernel_state_budget())
+        return render_agent_payload(state)
+
+    @tool()
+    async def describe_variables(self, names: list[str], agent: AgentRef) -> str:
+        """
+        Return a richer description of one or more variables in the running kernel.
+
+        Use this when the inline kernel_state summary is too thin (e.g., you need
+        a sample of a DataFrame's contents, the dtype of an array, or the keys
+        of a dict). Pass the names you want as a list; missing names are
+        reported back so you can adjust.
+
+        Args:
+            names (list[str]): Names of the variables in the running kernel to
+                               describe. Pass one or more names per call.
+
+        Returns:
+            str: A markdown block containing the structured descriptions and a
+                 list of any names that weren't found in the kernel.
+        """
+        from beaker_kernel.lib.kernel_state import apply_sample_budget
+        if not names:
+            return "describe_variables called with no names; pass at least one."
+        if "describe_variables" not in (self.context.templates or {}):
+            return (
+                "This subkernel does not provide a describe_variables procedure. "
+                "Use run_code to inspect variables directly."
+            )
+        code = self.context.get_code(
+            "describe_variables",
+            {
+                "reflectors": list(self.reflectors.values()),
+                "target_names": list(names),
+            },
+        )
+        result = await self.context.evaluate(code)
+        payload = result.get("return") or {}
+        variables = payload.get("variables") or {}
+        missing = payload.get("missing") or []
+
+        # Apply describe-level budget (different ceiling than kernel_state).
+        apply_sample_budget(
+            {"variables": variables},
+            self._describe_variables_budget(),
+        )
+
+        sections = ["## Variable descriptions"]
+        if variables:
+            sections.append(
+                "```application/json\n"
+                + json.dumps(variables, indent=2, default=str)
+                + "\n```"
+            )
+        if missing:
+            sections.append(
+                "Names not found in the kernel: "
+                + ", ".join(f"`{n}`" for n in missing)
+            )
+        return "\n\n".join(sections)
 
     @tool(autosummarize=True, summarizer=run_code_summarizer)
     async def run_code(self, code: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:

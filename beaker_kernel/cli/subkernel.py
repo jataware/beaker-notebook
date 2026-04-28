@@ -300,6 +300,188 @@ def list_subkernels(all):
     else:
         click.echo("No subkernels were found. Please check that you are running in the correct environment.")
 
+
+@subkernel.command(name="verify")
+@click.argument("slug", required=False)
+def verify_subkernel(slug):
+    """
+    Verify procedure files (fetch_state, describe_variables, reflectors) for
+    one or all installed subkernels.
+
+    Without a SLUG argument, every installed subkernel is checked. With a
+    SLUG, only that subkernel is checked. The command exits non-zero if any
+    check fails so it can be wired into CI.
+    """
+    from beaker_kernel.lib.subkernel import autodiscover_subkernels
+    from beaker_kernel.lib.reflector import (
+        REFLECTOR_SUBDIR,
+        REQUIRED_HEADER_KEYS,
+        parse_reflector_header,
+    )
+    from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError, select_autoescape
+
+    subkernels = {
+        name: cls
+        for name, cls in autodiscover_subkernels().items()
+        if cls is not None
+    }
+    if slug:
+        if slug not in subkernels:
+            raise click.ClickException(f"No subkernel registered for slug '{slug}'.")
+        subkernels = {slug: subkernels[slug]}
+    if not subkernels:
+        click.echo("No subkernels found.")
+        sys.exit(0)
+
+    overall_ok = True
+
+    for sk_slug, sk_cls in subkernels.items():
+        click.echo(f"\n=== {sk_slug} ({sk_cls.__module__}.{sk_cls.__name__}) ===")
+
+        proc_dirs = sk_cls._resolve_procedure_dirs()
+        if not proc_dirs:
+            click.echo(f"  [skip] No procedures directory resolved.")
+            # Not a hard failure: a subkernel without procedures is still valid
+            # (it can ship a legacy FETCH_STATE_CODE), just not verifiable here.
+            continue
+        proc_dir = proc_dirs[0]
+        click.echo(f"  procedure_location: {proc_dir}")
+
+        env = Environment(
+            loader=FileSystemLoader(proc_dir),
+            autoescape=select_autoescape(),
+        )
+
+        sk_ok = True
+
+        # 1. fetch_state procedure exists and parses.
+        fetch_state_files = [
+            t for t in env.list_templates()
+            if os.path.splitext(t)[0] == "fetch_state"
+        ]
+        if not fetch_state_files:
+            click.echo("  [fail] No fetch_state.<ext> procedure found.")
+            sk_ok = False
+        else:
+            for f in fetch_state_files:
+                try:
+                    env.get_template(f)
+                    click.echo(f"  [ok]   fetch_state procedure: {f} parses.")
+                except TemplateSyntaxError as err:
+                    click.echo(f"  [fail] fetch_state {f} parse error: {err}")
+                    sk_ok = False
+
+        # 2. describe_variables procedure exists and parses.
+        describe_files = [
+            t for t in env.list_templates()
+            if os.path.splitext(t)[0] == "describe_variables"
+        ]
+        if not describe_files:
+            click.echo("  [warn] No describe_variables.<ext> procedure found.")
+        else:
+            for f in describe_files:
+                try:
+                    env.get_template(f)
+                    click.echo(f"  [ok]   describe_variables procedure: {f} parses.")
+                except TemplateSyntaxError as err:
+                    click.echo(f"  [fail] describe_variables {f} parse error: {err}")
+                    sk_ok = False
+
+        # 3. Reflectors: header parse, required keys, function-name match,
+        #    target_type collision check, template parse.
+        reflector_prefix = f"{REFLECTOR_SUBDIR}/"
+        reflector_files = [
+            t for t in env.list_templates()
+            if t.startswith(reflector_prefix) and not os.path.basename(t).startswith(("__", "."))
+        ]
+        seen_targets: dict[str, str] = {}
+        for path in reflector_files:
+            loader = env.loader
+            try:
+                source, _, _ = loader.get_source(env, path)
+            except Exception as err:
+                click.echo(f"  [fail] reflector {path}: cannot read source ({err}).")
+                sk_ok = False
+                continue
+
+            header = parse_reflector_header(source)
+            missing = [k for k in REQUIRED_HEADER_KEYS if k not in header]
+            if missing:
+                click.echo(f"  [fail] reflector {path}: missing required header keys {missing}.")
+                sk_ok = False
+                continue
+
+            try:
+                env.get_template(path)
+            except TemplateSyntaxError as err:
+                click.echo(f"  [fail] reflector {path}: template parse error: {err}.")
+                sk_ok = False
+                continue
+
+            # Function-name presence check. Strip the leading Jinja comment
+            # block(s) first so we don't match the header that declared the
+            # name. Best-effort textual; language-agnostic since reflectors
+            # live in Python/Julia/R/etc.
+            function_name = header["function_name"]
+            import re as _re
+            body = _re.sub(
+                r"\A(?:\s*\{#.*?#\}\s*)+", "", source, count=1, flags=_re.DOTALL
+            )
+            if function_name not in body:
+                click.echo(
+                    f"  [fail] reflector {path}: declared function_name '{function_name}' "
+                    f"not present anywhere in template body."
+                )
+                sk_ok = False
+                continue
+
+            # target_type collision check.
+            targets = [t.strip() for t in header["target_type"].split(",") if t.strip()]
+            if not targets:
+                click.echo(f"  [fail] reflector {path}: empty target_type after parsing.")
+                sk_ok = False
+                continue
+            collided = False
+            for target in targets:
+                if target in seen_targets and seen_targets[target] != path:
+                    click.echo(
+                        f"  [fail] reflector {path}: target_type '{target}' "
+                        f"already declared by {seen_targets[target]}."
+                    )
+                    collided = True
+                    sk_ok = False
+                else:
+                    seen_targets[target] = path
+            if collided:
+                continue
+
+            click.echo(f"  [ok]   reflector {path}: targets={targets}, fn={function_name}")
+
+        # 4. Render fetch_state with the populated registry to ensure it
+        #    composes without Jinja errors.
+        if fetch_state_files:
+            from beaker_kernel.lib.reflector import ReflectorRegistry
+            registry = ReflectorRegistry.from_jinja_env(env)
+            try:
+                env.get_template(fetch_state_files[0]).render(
+                    reflectors=list(registry.values()),
+                    excluded_local_names=sorted(sk_cls.EXCLUDED_LOCAL_NAMES),
+                )
+                click.echo(f"  [ok]   fetch_state renders against registry ({len(registry)} reflectors).")
+            except Exception as err:
+                click.echo(f"  [fail] fetch_state render error: {err}")
+                sk_ok = False
+
+        if sk_ok:
+            click.echo(f"  RESULT: {sk_slug} OK")
+        else:
+            click.echo(f"  RESULT: {sk_slug} FAILED")
+            overall_ok = False
+
+    if not overall_ok:
+        sys.exit(1)
+
+
 def prompt_for_missing_new_subkernel_options(options: dict[str, any], defaults: dict[str, any] | None = None) -> dict[str, any]:
     if not defaults:
         defaults = {}

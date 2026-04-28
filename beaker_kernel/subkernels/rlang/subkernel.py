@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any
 
-from ..lib.subkernel import BeakerSubkernel
+from ...lib.subkernel import BeakerSubkernel
 
 logger = logging.getLogger(__name__)
 
