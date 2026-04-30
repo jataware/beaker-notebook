@@ -93,6 +93,7 @@ class BeakerSessionManager(SessionManager):
             **os.environ,
             "JPY_SESSION_NAME": path,
             "BEAKER_SESSION": str(name),
+            "LANGSMITH_BEAKER_SESSION": str(name),
         }
         if beaker_user:
             env.update({
