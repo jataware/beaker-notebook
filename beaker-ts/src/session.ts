@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Slot, Signal } from '@lumino/signaling';
 import { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
 
-import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo, truncateNotebookForAgent } from './util';
+import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo } from './util';
 import { BeakerNotebook, IBeakerShellMessage, IBeakerAnyMessage, BeakerRawCell, BeakerCodeCell, BeakerMarkdownCell, BeakerQueryCell, IBeakerIOPubMessage } from './notebook';
 import { BeakerHistory } from './history';
 import { BeakerRenderer, IBeakerRendererOptions } from './render';
@@ -187,7 +187,7 @@ export class BeakerSession {
                 session: kernel.clientId,
                 channel: "shell",
                 msgType: "notebook_state_response",
-                content: truncateNotebookForAgent(this.notebook),
+                content: this.notebook.toIPynb(),
                 msgId: msg.header.msg_id + "_reply",
                 metadata: {},
             });

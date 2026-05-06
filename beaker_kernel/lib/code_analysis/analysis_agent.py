@@ -63,7 +63,7 @@ class AnalysisAgent(ReActAgent):
 
     def __init__(
         self, *, model = None, api_key = None, tools = None, max_errors = 3, max_react_steps = None,
-        thought_handler = ..., messages = None, custom_prelude = None,
+        thought_handler = ..., messages = None, framework_prompt = None,
         code: str = None,
         issues: list[AnalysisIssue] = None,
         beaker_kernel = None,
@@ -77,7 +77,7 @@ class AnalysisAgent(ReActAgent):
             max_errors=max_errors,
             max_react_steps=max_react_steps,
             messages=messages,
-            custom_prelude=custom_prelude,
+            framework_prompt=framework_prompt,
             spinner=None,
             rich_print=False,
             thought_handler=self.thought_callback,

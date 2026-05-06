@@ -89,6 +89,15 @@ class FileNotebookManager(BaseNotebookManager):
         else:
             return AsyncFileContentsManager(parent=self.parent)
 
+    @property
+    def _notebook_path(self) -> str:
+        try:
+            path = self.notebook_path.format(notebook_id="")
+        except KeyError:
+            path = self.notebook_path
+        return path
+
+
     @with_hidden_files
     async def _find_notebook(self, notebook_id: str) -> str:
         """Find the file path for a given notebook session ID.
@@ -146,12 +155,9 @@ class FileNotebookManager(BaseNotebookManager):
             A list of metadata for all notebooks.
         """
 
-        try:
-            path = self.notebook_path.format(notebook_id="")
-        except KeyError:
-            path = self.notebook_path
+        path = self._notebook_path
         if await ensure_async(self.contents_manager.dir_exists(path)):
-            files = await ensure_async(self.contents_manager.get(path, content=True))
+            files = await ensure_async(self.contents_manager.get(path, type="directory", content=True))
         else:
             files = {
                 "content": []

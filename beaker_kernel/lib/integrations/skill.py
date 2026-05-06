@@ -578,7 +578,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
     # --- Tools (Tier 2 and 3) ---
 
-    @tool
+    @tool(internal=True)
     async def load_skill_instructions(self, skill_slug: str, agent: AgentRef) -> str:
         """Load the full instructions for a skill. Call this before using a skill.
 
@@ -624,7 +624,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
 
         return result
 
-    @tool(summarizer=_summarize_skill_resource)
+    @tool(summarizer=_summarize_skill_resource, internal=True)
     async def load_skill_resource(self, skill_slug: str, relative_path: str, agent: AgentRef, persist: bool = False) -> str:
         """Load a resource file (script, reference doc, or asset) from a skill.
 
@@ -665,7 +665,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         self._mark_loaded(session_id, skill.name, relative_path)
         return file_resource.content
 
-    @tool(summarizer=_summarize_skill_examples)
+    @tool(summarizer=_summarize_skill_examples, internal=True)
     async def load_skill_examples(self, skill_slug: str, filenames: list[str], agent: AgentRef) -> str:
         """Load one or more code examples for a skill. Call this after loading instructions and before writing code, to see working usage patterns.
 

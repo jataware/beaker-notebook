@@ -143,7 +143,7 @@ import { read } from "fs";
 const searchText = ref(undefined);
 
 interface PropTypes {
-    readOnly: boolean;
+    readOnly?: boolean;
 }
 
 const props = withDefaults(defineProps<PropTypes>(), {

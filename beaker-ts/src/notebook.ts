@@ -5,7 +5,7 @@ import { IShellFuture } from '@jupyterlab/services/lib/kernel/kernel';
 import { v4 as uuidv4 } from 'uuid';
 
 import { BeakerSession } from './session';
-import { IBeakerFuture, BeakerCellFuture, BeakerCellFutures, truncateNotebookForAgent } from './util';
+import { IBeakerFuture, BeakerCellFuture, BeakerCellFutures } from './util';
 
 
 export interface IBeakerHeader extends messages.IHeader<messages.MessageType> {
@@ -72,9 +72,6 @@ export class BeakerBaseCell implements nbformat.IBaseCell {
         Object.assign(this, content)
         if (content.id === undefined) {
             this.id = BeakerBaseCell.generateId();
-        }
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
         }
     }
 
@@ -192,9 +189,6 @@ export class BeakerRawCell extends BeakerBaseCell implements nbformat.IRawCell {
     constructor(content: nbformat.ICell) {
         super(content);
         Object.assign(this, content)
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
-        }
     }
 
     public execute(session: BeakerSession): IBeakerFuture | null {
@@ -213,9 +207,6 @@ export class BeakerCodeCell extends BeakerBaseCell implements nbformat.ICodeCell
     constructor(content: Partial<nbformat.ICell>) {
         super({ ...content});
         Object.assign(this, content)
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
-        }
     }
 
     public execute(session: BeakerSession, syntheticFuture?: BeakerCellFuture): IBeakerFuture | null {
@@ -305,9 +296,6 @@ export class BeakerMarkdownCell extends BeakerBaseCell implements nbformat.IMark
     constructor(content: Partial<nbformat.ICell>) {
         super({ ...content});
         Object.assign(this, content)
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
-        }
     }
 
 
@@ -335,9 +323,6 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     constructor(content: Partial<nbformat.ICell>) {
         super({cell_type: 'query', ...content});
         Object.assign(this, content)
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
-        }
     }
 
     public execute(session: BeakerSession, includeNotebookState: boolean = true): IBeakerFuture | null {
@@ -535,7 +520,7 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
         var metadata: PartialJSONObject = {};
 
         if (includeNotebookState) {
-            const notebookState = truncateNotebookForAgent(session.notebook);
+            const notebookState = session.notebook.toIPynb();
             notebookState.cells = notebookState.cells.filter(
                 // Skip this cell and any children of this cell
                 cell => cell.id !== this.id && cell.metadata?.parent_cell !== this.id

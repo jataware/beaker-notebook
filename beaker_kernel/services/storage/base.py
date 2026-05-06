@@ -1,3 +1,4 @@
+import json
 import os
 import os.path
 from dataclasses import dataclass
@@ -73,13 +74,18 @@ class BeakerLocalContentsManager(AsyncLargeFileManager, BaseBeakerContentsManage
     async def _notebook_model(self, path, content=True, require_hash=False):
         """
         Override to include session_id in notebook model.
+        Schema only needs to be validated if content is True.
+        If the content is already loaded, grab the metadata from the loaded content.
+        If not, read the file as plaintext and parse to json to avoid unnecesary expensive schema validation.
         """
-        model = await super()._notebook_model(path, True, require_hash)
-        metadata = model.get("content", {}).get("metadata", {})
+        model = await super()._notebook_model(path, content=content, require_hash=require_hash)
+        if content:
+            metadata = model.get("content", {}).get("metadata", {})
+        else:
+            raw_file = await self._file_model(path=path, format="text", content=True, require_hash=require_hash)
+            raw_json = json.loads(raw_file.get("content"))
+            metadata = raw_json.get("metadata", {})
         model["session_id"] = metadata.get("beaker", {}).get("session_id", None)
-        if not content:
-            del model["content"]
-            del model["format"]
         return model
 
 

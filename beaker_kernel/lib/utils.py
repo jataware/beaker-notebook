@@ -23,6 +23,10 @@ from archytas.exceptions import AuthenticationError
 from .jupyter_kernel_proxy import ( KERNEL_SOCKETS, KERNEL_SOCKETS_NAMES,
                                    JupyterMessage, JupyterMessageTuple)
 
+if TYPE_CHECKING:
+    from beaker_kernel.lib.agent import BeakerAgent
+    from archytas.chat_history import ToolMessage, ChatHistory
+
 
 BeakerEntryPoint = namedtuple("BeakerEntryPoint", ("type", "import_string"))
 
@@ -352,3 +356,34 @@ async def ensure_async(fn: Coroutine|Callable):
 def slugify(name: str):
     slug = "_".join(re.split(r"\W", name.lower().strip()))
     return slug
+
+
+def succinct_tool_summarizer(
+    max_length: int=300
+):
+    async def succinct_tool_summarizer(
+        message: "ToolMessage",
+        chat_history: "ChatHistory",
+        agent: "BeakerAgent",
+        model: "BaseArchytasModel" = None
+    ):
+        message_length = len(message.content)
+        if message_length < max_length:
+            # Message is already short enough
+            return
+
+        all_messages = await chat_history.messages(auto_update_context=False)
+        last_message = all_messages[-1]
+        last_message_id = last_message.id
+
+        _, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+
+        message.content = f"""\
+## Auto-summarized tool call output (summarized after processing message `{last_message_id}`)
+Tool `{tool_call.get("name")}` called with {len(tool_call.get("args", []))} arguments.
+Status: {message.status}
+Output:
+    `{message.content[:max_length]}<... {message_length - max_length} characters truncated ...>`
+"""
+        message.artifact["summarized"] = True
+    return succinct_tool_summarizer

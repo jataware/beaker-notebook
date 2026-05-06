@@ -306,7 +306,7 @@ class BeakerSubkernel(abc.ABC):
         apply_sample_budget(state, self._kernel_state_budget())
         return render_agent_payload(state)
 
-    @tool()
+    @tool(internal=True)
     async def describe_variables(self, names: list[str], agent: AgentRef) -> str:
         """
         Return a richer description of one or more variables in the running kernel.
@@ -364,7 +364,7 @@ class BeakerSubkernel(abc.ABC):
             )
         return "\n\n".join(sections)
 
-    @tool(autosummarize=True, summarizer=run_code_summarizer)
+    @tool(autosummarize=True, summarizer=run_code_summarizer, internal=True)
     async def run_code(self, code: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
         """
         Executes code in the user's notebook on behalf of the user, but collects the outputs of the run for use by the Agent
@@ -379,6 +379,9 @@ class BeakerSubkernel(abc.ABC):
 
         This tool can be run more than once in a react loop. All actions and variables created in earlier uses of the tool
         in a particular loop should be assumed to exist for future uses of the tool in the same loop.
+        However, calls of this tool must always be made serially, with no more than one call per ReAct loop iteration.
+        All code executes in a shared, stateful kernel — variables and side effects from one call persist into the next,
+        so execution order matters.
 
         Args:
             code (str): Code to run directly in Jupyter. This should be a string exactly as it would appear in a notebook

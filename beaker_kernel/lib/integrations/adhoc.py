@@ -569,7 +569,7 @@ class AdhocIntegrationProvider(MutableBaseIntegrationProvider):
             return "Add resource tool failed."
         return f"Example has been added to {integration}."
 
-    @tool
+    @tool(internal=True)
     async def draft_integration_code(self, integration: str, goal: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
         """
 Drafts python code for an integration request given a specified goal, such as a query for a specific study. You can use this tool to
@@ -615,7 +615,7 @@ Returns:
             logger.error(str(e))
             return f"An error occurred while using the API. The error was: {str(e)}. Please try again with a different goal."
 
-    @tool
+    @tool(internal=True)
     async def consult_integration_docs(self, integration: str, query: str, agent: AgentRef, loop: LoopControllerRef, react_context: ReactContextRef) -> str:
         """
 This tool is used to ask a question of an an external integration. It allows you to ask a question of an integration's documentation and get results in

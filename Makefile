@@ -21,7 +21,7 @@ build:
 
 .PHONY:clean
 clean:
-	rm -r beaker-ts/dist/* beaker-vue/dist/* beaker-vue/html/* build/* dist/* beaker_kernel/app/ui/* || true
+	rm -r beaker-ts/dist beaker-vue/dist beaker-vue/html build dist beaker_kernel/app/ui || true
 
 
 .PHONY:docs-up
@@ -46,7 +46,7 @@ dev:beaker_kernel/app/ui/index.html
 	fi
 
 beaker-ts/node_modules:beaker-ts/package*.json
-	(cd beaker-ts/ && npm install --include=dev) && \
+	(cd beaker-ts/ && npm install --include=dev && npm link) && \
 	touch beaker-ts/node_modules
 
 beaker-ts/dist:$(call npm_build_deps,beaker-ts)
@@ -54,8 +54,11 @@ beaker-ts/dist:$(call npm_build_deps,beaker-ts)
 	touch beaker-ts/dist
 
 beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/dist
-	(cd beaker-vue && npm install --include=dev) && \
+	(cd beaker-vue && npm install --include=dev && npm link beaker-kernel) && \
 	touch beaker-vue/node_modules
+
+beaker-vue/node_modules/beaker-kernel:beaker-ts/dist
+	(cd beaker-vue && npm link beaker-kernel)
 
 beaker-vue/dist:$(call npm_build_deps,beaker-vue)
 	(cd beaker-vue && npm run build-lib) && \

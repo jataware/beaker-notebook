@@ -30,12 +30,6 @@ class DefaultContext(BeakerContext):
         subkernel_list = sorted(subkernels.values(), key=lambda subkernel: (subkernel.WEIGHT, subkernel.SLUG))
         return {subkernel.SLUG: subkernel for subkernel in subkernel_list}
 
-    async def auto_context(self):
-        return f"""
-        If you need to generate code, you should write it in the '{self.subkernel.DISPLAY_NAME}' language for execution
-        in a Jupyter notebook using the '{self.subkernel.KERNEL_NAME}' kernel.
-        """.strip()
-
     async def generate_preview(self):
         """
         Preview what exists in the subkernel.
