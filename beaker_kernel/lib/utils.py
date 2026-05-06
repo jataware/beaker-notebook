@@ -26,6 +26,7 @@ from .jupyter_kernel_proxy import ( KERNEL_SOCKETS, KERNEL_SOCKETS_NAMES,
 if TYPE_CHECKING:
     from beaker_kernel.lib.agent import BeakerAgent
     from archytas.chat_history import ToolMessage, ChatHistory
+    from nbformat import NotebookNode
 
 
 BeakerEntryPoint = namedtuple("BeakerEntryPoint", ("type", "import_string"))
@@ -387,3 +388,13 @@ Output:
 """
         message.artifact["summarized"] = True
     return succinct_tool_summarizer
+
+
+def normalize_notebook(nb: "dict|NotebookNode") -> "NotebookNode":
+    from nbformat import versions
+    from nbformat.reader import get_version
+
+    # Convert and validate notebook dictionary
+    (nbmajor, nbminor) = get_version(nb)
+    nbnode: NotebookNode = versions[nbmajor].to_notebook_json(nb, minor=nbminor)
+    return nbnode

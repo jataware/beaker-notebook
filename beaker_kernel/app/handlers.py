@@ -14,7 +14,6 @@ from types import UnionType
 
 from jupyter_server.auth.decorator import authorized, allow_unauthenticated
 from jupyter_server.base.handlers import JupyterHandler
-# from jupyter_server.extension.handler import ExtensionHandlerMixin
 from jupyterlab_server import LabServerApp
 from tornado import web, httputil
 from tornado.web import StaticFileHandler, RequestHandler, HTTPError
@@ -23,6 +22,7 @@ from beaker_kernel.lib.autodiscovery import autodiscover
 from beaker_kernel.lib.app import BeakerApp
 from beaker_kernel.lib.context import BeakerContext
 from beaker_kernel.lib.subkernel import BeakerSubkernel
+from beaker_kernel.lib.utils import normalize_notebook
 from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
 from beaker_kernel.lib import admin
 from beaker_kernel.services.auth import BeakerUser
@@ -395,22 +395,12 @@ class ExportAsHandler(JupyterHandler):
     async def post(self, format):
         from jupyter_server.nbconvert.handlers import get_exporter, respond_zip
         from nbconvert.exporters.base import Exporter
-        from nbformat import from_dict
 
         exporter: Exporter = get_exporter(format, config=self.config)
         model = self.get_json_body()
         assert model is not None
         name = model.get("name", "notebook.ipynb")
-        nbnode = from_dict(model["content"])
-
-        # Normalize cell sources and output text fields to strings.
-        # Jupyter notebooks sometimes represent these as lists of strings.
-        for cell in nbnode.cells:
-            if isinstance(cell.source, list):
-                cell.source = "".join(cell.source)
-            for output in cell.get("outputs", []):
-                if "text" in output and isinstance(output["text"], list):
-                    output["text"] = "".join(output["text"])
+        nbnode = normalize_notebook(model["content"])
 
         try:
             # attach additional options for export from json body to streamlined notebook exporter

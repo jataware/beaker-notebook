@@ -5,6 +5,8 @@ from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_quoteattr
 import nbformat
 from nbformat import NotebookNode
 
+from beaker_kernel.lib.utils import normalize_notebook
+
 DEFAULT_TRUNCATION_LIMIT = 200
 DEFAULT_TRUNCATION_RATIO = (4/5)
 
@@ -142,14 +144,7 @@ def _execute_result_output(output: NotebookNode, ref: str, truncate: bool=True, 
     )
 
 def _error_output(output: NotebookNode, ref: str, truncate: bool=True, exclude_media: bool=False) -> str:
-    traceback = ""
-    if "traceback" in output:
-        match output.traceback:
-            case list():
-                traceback = "\n".join(output.traceback)
-            case str():
-                traceback = output.traceback
-        traceback = _maybe_truncate(traceback, truncate)
+    traceback = _maybe_truncate((output.traceback or ""), truncate)
     return _block(
         "output",
         {"type": output.output_type, "ename": output.get("ename"), "evalue": output.get("evalue")},
@@ -199,9 +194,7 @@ def _collect_cells(
     return "\n".join(cell_info)
 
 
-def format_cell(cell: dict|NotebookNode, truncate_content: bool=True, truncate_outputs: bool=True, exclude_media: bool=False) -> str:
-    if not isinstance(cell, NotebookNode):
-        cell = nbformat.from_dict(cell)
+def format_cell(cell: NotebookNode, truncate_content: bool=True, truncate_outputs: bool=True, exclude_media: bool=False) -> str:
     cell_id = cell.get("id", "null")
     cell_metadata = cell.get("metadata", {})
     cell_type = cell_metadata.get("beaker_cell_type", None) or cell.get("cell_type", "unknown")
@@ -221,11 +214,7 @@ def notebook_state_to_xml(
         truncate_outputs: bool=True,
         exclude_media: bool=False,
 ) -> str:
-    nb: NotebookNode
-    if isinstance(notebook_state, NotebookNode):
-        nb = notebook_state
-    else:
-        nb = nbformat.from_dict(notebook_state)
+    nb: NotebookNode = normalize_notebook(notebook_state)
     metadata = nb.metadata
     if not kernelspec:
         kernelspec = metadata.get("kernelspec", {})

@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Cl
 from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
+from nbformat import NotebookNode
 import yaml
 
 from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async
+from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook
 from beaker_kernel.lib.config import config as beaker_config
 from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
 from beaker_kernel.lib.integrations.registry import IntegrationProviderRegistry
@@ -80,7 +81,6 @@ class BeakerContext:
     preview_function_name: str = "generate_preview"
     kernel_state_function_name: str = "send_kernel_state"
 
-    notebook_state: Optional[dict]
     integrations: IntegrationProviderRegistry
 
     procedure_location: ClassVar[Optional[os.PathLike|str]]
@@ -120,7 +120,7 @@ class BeakerContext:
         )
 
         self.current_llm_query = None
-        self.notebook_state = None
+        self._notebook_state = None
 
         self.disable_tools()
 
@@ -273,6 +273,17 @@ class BeakerContext:
             raise ValueError(f"Kernel state fetching function '{self.kernel_state_function_name}' must be a coroutine (awaitable) if defined.")
         if state_func and inspect.iscoroutinefunction(state_func):
             return state_func
+
+    @property
+    def notebook_state(self) -> NotebookNode|None:
+        return self._notebook_state
+
+    @notebook_state.setter
+    def notebook_state(self, value: dict|NotebookNode|None):
+        if value is not None:
+            self._notebook_state =  normalize_notebook(value)
+        else:
+            self._notebook_state = None
 
     @property
     def default_integration_providers(self) -> set[BaseIntegrationProvider]:

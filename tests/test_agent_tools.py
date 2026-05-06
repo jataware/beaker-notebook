@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from beaker_kernel.lib.agent import BeakerAgent
+from beaker_kernel.lib.utils import normalize_notebook
 
 
 def _agent_instance() -> BeakerAgent:
@@ -14,7 +15,7 @@ def _agent_instance() -> BeakerAgent:
 
 def _nbstate_with_outputs() -> dict:
     """Notebook state fixture with mixed multimedia and text outputs."""
-    return {
+    return normalize_notebook({
         "cells": [
             {
                 "cell_type": "code",
@@ -55,7 +56,7 @@ def _nbstate_with_outputs() -> dict:
         "metadata": {"kernelspec": {"name": "python3"}},
         "nbformat": 4,
         "nbformat_minor": 5,
-    }
+    })
 
 
 # --- ask_user --------------------------------------------------------------
