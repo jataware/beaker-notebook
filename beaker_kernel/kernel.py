@@ -244,17 +244,60 @@ class BeakerKernel(KernelProxyManager):
             self.stderr(f"Unable to find an action with name `{action_name}`.")
         return result_data
 
-    def handle_thoughts(
-        self, thought: str, tool_name: str, tool_input: str, parent_header: dict = {}
+    def handle_react_step(
+        self,
+        thought: str,
+        thought_id: str,
+        tool_calls: list[dict],
+        parent_header: dict = {},
     ):
+        """Publish a single ``llm_thought`` IOPub message for a ReAct step.
+
+        Each ``tool_calls`` entry is augmented with ``state="pending"`` so the
+        UI can render the row before the corresponding ``running`` /
+        ``done`` updates arrive.
+        """
         content = {
             "thought": thought,
-            "tool_name": tool_name,
-            "tool_input": tool_input,
+            "thought_id": thought_id,
+            "tool_calls": [
+                {
+                    "tool_call_id": tc["tool_call_id"],
+                    "tool_name": tc["tool_name"],
+                    "tool_input": tc["tool_input"],
+                    "state": "pending",
+                }
+                for tc in tool_calls
+            ],
         }
         self.send_response(
             stream="iopub",
             msg_or_type="llm_thought",
+            content=content,
+            parent_header=parent_header,
+        )
+
+    def handle_tool_call_update(
+        self,
+        tool_call_id: str,
+        state: str,
+        parent_header: dict = {},
+        **fields,
+    ):
+        """Publish a ``tool_call_update`` IOPub message for a single tool's
+        lifecycle transition.
+
+        ``fields`` may include ``started_at``, ``ended_at``, ``output_preview``,
+        ``output_truncated``, ``error``.
+        """
+        content = {
+            "tool_call_id": tool_call_id,
+            "state": state,
+            **fields,
+        }
+        self.send_response(
+            stream="iopub",
+            msg_or_type="tool_call_update",
             content=content,
             parent_header=parent_header,
         )
@@ -586,10 +629,15 @@ class BeakerKernel(KernelProxyManager):
         request_key = f"llm_query:{message.header['msg_id']}"
         try:
             try:
-                # Before starting ReAct loop, replace thought handler with partial func with parent_header so we can track
-                # thoughts
+                # Before starting ReAct loop, install ReAct/tool-call handlers bound to the
+                # incoming request's parent header so IOPub traffic is correlated correctly.
                 if self.context.agent:
-                    self.context.agent.thought_handler = partial(self.handle_thoughts, parent_header=message.header)
+                    self.context.agent.on_react_step = partial(
+                        self.handle_react_step, parent_header=message.header
+                    )
+                    self.context.agent.on_tool_call_update = partial(
+                        self.handle_tool_call_update, parent_header=message.header
+                    )
                 self.debug("llm_query", request, parent_header=message.header)
                 task = asyncio.create_task(self.context.agent.react_async(request, react_context={"message": message}))
                 self.running_actions[request_key] = task
@@ -654,8 +702,10 @@ class BeakerKernel(KernelProxyManager):
                     "iopub", "llm_response", stream_content, parent_header=message.header
                 )
             finally:
-                # When done, put thought handler back to default to not potentially cause confused thoughts.
-                self.context.agent.thought_handler = self.handle_thoughts
+                # When done, restore the unbound handlers (no parent_header) so any
+                # background activity isn't attributed to this request's parent.
+                self.context.agent.on_react_step = self.handle_react_step
+                self.context.agent.on_tool_call_update = self.handle_tool_call_update
                 setattr(self.context, "current_llm_query", None)
         finally:
             if request_key in self.running_actions:

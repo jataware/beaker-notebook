@@ -63,7 +63,7 @@ class AnalysisAgent(ReActAgent):
 
     def __init__(
         self, *, model = None, api_key = None, tools = None, max_errors = 3, max_react_steps = None,
-        thought_handler = ..., messages = None, framework_prompt = None,
+        messages = None, framework_prompt = None,
         code: str = None,
         issues: list[AnalysisIssue] = None,
         beaker_kernel = None,
@@ -80,7 +80,7 @@ class AnalysisAgent(ReActAgent):
             framework_prompt=framework_prompt,
             spinner=None,
             rich_print=False,
-            thought_handler=self.thought_callback,
+            on_react_step=self.react_step_callback,
             **kwargs
         )
         self.beaker_kernel = beaker_kernel
@@ -94,14 +94,14 @@ Code to run rules against:
         issues = issues if isinstance(issues, list) else []
         self.issues = [issue for issue in issues if hasattr(issue, 'prompt_description')]
 
-    def thought_callback(self, thought, tool_name, tool_input):
+    def react_step_callback(self, thought, thought_id, tool_calls):
         if self.beaker_kernel:
             self.beaker_kernel.log(
                 event_type="code_analysis_thought",
                 content={
                     "thought": thought,
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
+                    "thought_id": thought_id,
+                    "tool_calls": tool_calls,
                 }
             )
 

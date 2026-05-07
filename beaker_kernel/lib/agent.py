@@ -145,7 +145,8 @@ class BeakerAgent(ReActAgent):
             spinner=None,
             rich_print=False,
             allow_ask_user=False,
-            thought_handler=context.beaker_kernel.handle_thoughts,
+            on_react_step=context.beaker_kernel.handle_react_step,
+            on_tool_call_update=context.beaker_kernel.handle_tool_call_update,
             **kwargs
         )
         # Update tools so that the execution contexts are properly tracked
