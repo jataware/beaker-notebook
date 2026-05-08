@@ -138,7 +138,6 @@ import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType } from "@/util/integration";
 import { RouterLink } from "vue-router";
-import { read } from "fs";
 
 const searchText = ref(undefined);
 

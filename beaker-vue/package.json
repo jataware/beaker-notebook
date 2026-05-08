@@ -32,7 +32,8 @@
   "files": [
     "./dist",
     "./src",
-    "./tsconfig.renderers.json"
+    "./tsconfig.renderers.json",
+    "./vendor"
   ],
   "exports": {
     "./build/build": {
