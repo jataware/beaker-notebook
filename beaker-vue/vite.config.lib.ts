@@ -27,7 +27,7 @@ export const libConfig: UserConfig = {
             return [
                 importPath,
                 {
-                  import: `${prefix}${key}.js`,
+                  import: `${prefix}${key}.mjs`,
                   types: `${prefix}${key}.d.ts`
                 }
               ]
