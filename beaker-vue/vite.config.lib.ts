@@ -1,7 +1,7 @@
 import { defineConfig, type UserConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import cssInjectedByJsPlugin from "vite-plugin-css-injected-by-js";
-import { entryPoints, baseConfig } from './vite.config';
+import { baseConfig } from './vite.config';
 
 export const libConfig: UserConfig = {
   ...baseConfig,
@@ -17,30 +17,6 @@ export const libConfig: UserConfig = {
       outDir: "./dist",
       logLevel: "error",
     }),
-    {
-      name: "export-exports",
-      buildStart(options) {
-        const prefix = './dist/';
-        const exportObject = Object.fromEntries(
-          Object.keys(entryPoints).map((key) => {
-            const importPath = ('./' + key.replace(/(^|\/)index/, '')).replace(/\/$/, '');
-            return [
-                importPath,
-                {
-                  import: `${prefix}${key}.mjs`,
-                  types: `${prefix}${key}.d.ts`
-                }
-              ]
-            ;
-          })
-        );
-        this.emitFile({
-          type: "asset",
-          fileName: "exports.json",
-          source: JSON.stringify(exportObject, null, 2),
-        });
-      }
-    }
   ],
   build: {
     ...baseConfig.build,
@@ -49,8 +25,17 @@ export const libConfig: UserConfig = {
     outDir: 'dist',
     cssCodeSplit: true,
     lib: {
-      entry: entryPoints,
+      // Curated entries:
+      //   - `index` is the root barrel (everything runtime-side).
+      //   - `builder/build` is the build-time helpers subpath.
+      // No per-file glob; consumers import from these entries via the
+      // package.json exports map.
+      entry: {
+        index: './src/index.ts',
+        'builder/build': './src/builder/build.ts',
+      },
       formats: ["es"],
+      fileName: (_format, entryName) => `${entryName}.mjs`,
     },
     rollupOptions: {
       onwarn(warning, warn) {
@@ -62,36 +47,14 @@ export const libConfig: UserConfig = {
         }
         warn(warning);
       },
-      external: [
-        /^@?codemirror/,
-        /^@?jupyterlab/,
-        /^@?plutojl/,
-        /^@?primevue/,
-        /^@?primeuix/,
-        /^@?vitejs/,
-        "vite",
-        "vite-plugin-css-injected-by-js",
-        "ansi-html-community",
-        "beaker-kernel",
-        "buffer",
-        "content-disposition",
-        "cookie",
-        "cytoscape",
-        "escape-html",
-        "filesize",
-        "hash-sum",
-        "isomorphic-fetch",
-        "json5",
-        "katex",
-        "marked",
-        "panel",
-        "path-browserify",
-        "pinia",
-        "primeicons",
-        "scroll-into-view-if-needed",
-        "uuid",
-        /^vue/,
-      ],
+      // Externalize every npm dep — consumers bring their own. The lib only
+      // bundles its own source files (relative/absolute/virtual imports).
+      external: (id) => {
+        if (id.startsWith('.') || id.startsWith('/') || id.startsWith('\0')) {
+          return false;
+        }
+        return true;
+      },
       preserveEntrySignatures: "allow-extension",
     },
   }

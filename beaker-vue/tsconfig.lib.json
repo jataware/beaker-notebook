@@ -34,7 +34,7 @@
     "src/**/*.vue"
   ],
   "exclude": [
-    "src/build/",
+    "src/builder/",
     "node_modules/**"
   ]
 }

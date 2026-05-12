@@ -35,6 +35,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Host's Extension API contract version. Mirror of beaker-vue/src/EXTENSION_API_VERSION.ts;
+# the two must agree on the host build. Extensions stamp their target version into their
+# routes.json envelope at build time; the host refuses to register routes from an extension
+# whose major version doesn't match.
+EXTENSION_API_VERSION = "1.0"
+
+
+def _extension_api_compatible(extension_version: Optional[str]) -> bool:
+    """Major-version compatibility check between the host's EXTENSION_API_VERSION
+    and the version declared in an extension's routes.json envelope.
+
+    A missing version is treated as incompatible: extensions built against the
+    legacy flat schema predate the contract and shouldn't load against a versioned
+    host without an explicit rebuild.
+    """
+    if not extension_version:
+        return False
+    try:
+        ext_major = extension_version.split(".", 1)[0]
+        host_major = EXTENSION_API_VERSION.split(".", 1)[0]
+    except AttributeError:
+        return False
+    return ext_major == host_major
+
+
 def sanitize_env(env: dict[str, str]) -> dict[str, str]:
     # Whitelist must match the env variable name exactly and is checked first.
     # Blacklist can match any part of the variable name.
@@ -124,9 +149,38 @@ class PageHandler(JupyterHandler, ):
         if env_vars:
             config["env"] = env_vars
 
+        # Build the importmap from static-modules.json (emitted by beaker-ui's
+        # vite build). Maps shared module names → chunk URLs so extension
+        # bundles can resolve bare-specifier imports like `from 'vue'` at
+        # runtime. Must be injected BEFORE the entry <script type="module">.
+        importmap_script = ""
+        static_modules_path = Path(beakerapp.ui_path).absolute() / "static-modules.json"
+        if static_modules_path.exists():
+            try:
+                static_modules = json.loads(static_modules_path.read_text())
+                if isinstance(static_modules, dict) and static_modules:
+                    importmap = {"imports": {}}
+                    for module_name, chunk_path in static_modules.items():
+                        # chunk_path is like "static/vue-HASH.js"; turn into
+                        # absolute URL with the base prefix.
+                        clean = chunk_path.lstrip("./").lstrip("/")
+                        importmap["imports"][module_name] = f"{base_url}/{clean}"
+                    importmap_script = (
+                        f'<script type="importmap">'
+                        f'{json.dumps(importmap)}'
+                        f'</script>\n'
+                    )
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load static-modules.json: %s", e)
+
         # Replace the Jinja2 placeholder with actual JSON
         # The index.html has: <script id="site-config" type="application/json">{{ siteConfig }}</script>
         config_json = json.dumps(config)
+        # Inject the importmap immediately after <head> so the browser sees
+        # it before the entry module script. site-config is JSON data and
+        # order-flexible, so it stays at end-of-head.
+        if importmap_script:
+            html = html.replace("<head>", f"<head>\n{importmap_script}", 1)
         # html = html.replace('{{ siteConfig }}', config_json)
         html = html.replace("</head>", f'<script id="site-config" type="application/json">{config_json}</script>\n</head>')
         html = html.replace(r'href="/', rf'href="{base_url}/')
@@ -538,6 +592,33 @@ class StatsHandler(JupyterHandler):
         return self.write(json.dumps(output))
 
 
+def _load_routes_envelope(path) -> tuple[dict, Optional[str]]:
+    """Load a routes.json file, supporting both the legacy flat schema and
+    the new envelope schema emitted by outputJsonRoutesPlugin.
+
+    Legacy schema:
+        {slug: {path, name, import, ...}, ...}
+
+    Envelope schema (EXTENSION_API_VERSION >= "1.0"):
+        {"extensionApiVersion": "1.0", "routes": {slug: {...}, ...}}
+
+    Returns (routes_dict, extension_api_version). The version is None for the
+    legacy flat schema; callers compare it against EXTENSION_API_VERSION before
+    trusting the routes.
+    """
+    with open(path) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {}, None
+    if (
+        "routes" in data
+        and isinstance(data.get("routes"), dict)
+        and "extensionApiVersion" in data
+    ):
+        return dict(data["routes"]), data.get("extensionApiVersion")
+    return dict(data), None
+
+
 def register_handlers(app: "BaseBeakerApp"):
     pages = []
     app_pages = []  # list(beaker_app.pages or []) + [route["name"] for route in app_routes_data.values() if "name" in route]
@@ -556,12 +637,18 @@ def register_handlers(app: "BaseBeakerApp"):
     # 1. Start with default routes
     route_file = Path(app.ui_path) / "routes.json"
     if route_file.exists():
-        routes = json.loads(route_file.read_text())
+        # Host's own routes.json — version is by construction the host's
+        # EXTENSION_API_VERSION; no compat check needed here.
+        routes, _ = _load_routes_envelope(route_file)
+        for route_data in routes.values():
+            if isinstance(route_data, dict):
+                route_data["default"] = True
     else:
         routes = {
             "/": {
                 "path": "/",
                 "name": "home",
+                "default": True,
             },
         }
 
@@ -585,9 +672,15 @@ def register_handlers(app: "BaseBeakerApp"):
             app.handlers.append((f"/assets/{beaker_app.slug}/(.*)", StaticFileHandler, {"path": beaker_app.asset_dir}))
             app_routes_path = os.path.join(beaker_app.asset_dir, "routes.json")
             if os.path.isfile(app_routes_path):
-                with open(app_routes_path) as app_routes_file:
-                    app_routes_data = json.load(app_routes_file)
-                    if isinstance(app_routes_data, dict):
+                app_routes_data, app_ext_version = _load_routes_envelope(app_routes_path)
+                if not _extension_api_compatible(app_ext_version):
+                    logger.error(
+                        "Refusing to register routes from extension %r: extensionApiVersion=%r "
+                        "is incompatible with host EXTENSION_API_VERSION=%r. Rebuild the extension "
+                        "against a matching host version.",
+                        beaker_app.slug, app_ext_version, EXTENSION_API_VERSION,
+                    )
+                elif isinstance(app_routes_data, dict):
                         # Resolve relative import paths to absolute asset URLs
                         # and normalize keys to use the path field
                         asset_base_url = f"/assets/{beaker_app.slug}"
@@ -606,6 +699,14 @@ def register_handlers(app: "BaseBeakerApp"):
                             if path_key != route_key:
                                 app_routes_data[path_key] = route_data
                                 del app_routes_data[route_key]
+                        # Warn when an extension route shadows an existing one — almost always
+                        # a slug-naming collision or a deliberate replacement worth tracing.
+                        for path_key in app_routes_data:
+                            if path_key in routes:
+                                logger.warning(
+                                    "Extension %r is shadowing route %r (previously defined as %r)",
+                                    beaker_app.slug, path_key, routes[path_key].get("name", path_key),
+                                )
                         routes.update(app_routes_data)
 
     if "/" not in routes:

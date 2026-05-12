@@ -35,9 +35,10 @@ import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import ConfigEntryComponent from '../misc/ConfigEntryComponent.vue'
 import { useConfirm } from "primevue/useconfirm";
 import ProgressSpinner from "primevue/progressspinner";
-import { fetch } from '@/util/fetch';
+import { BeakerFetchClientKey } from '../../plugins/keys';
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
+const fetchClient = inject(BeakerFetchClientKey)!;
 
 
 const config = ref<IConfig>();
@@ -57,7 +58,7 @@ const save = async () => {
         message: confirmationText,
         header: "Apply Changes",
         accept: async () => {
-            const result = await saveConfig(beakerSession, schema.value, inputModel.value, config.value.config);
+            const result = await saveConfig(beakerSession, fetchClient, schema.value, inputModel.value, config.value.config);
             const updatedConfig = await result.json();
             config.value = updatedConfig;
             inputModel.value = Object.assign({}, tablifyObjects(schema.value, updatedConfig.config));
@@ -77,7 +78,7 @@ but chat history will be lost and cells will need to be rerun.",
 }
 
 const reset = async () => {
-    const {schema: schemaJson, config: configJson} = await getConfigAndSchema(beakerSession);
+    const {schema: schemaJson, config: configJson} = await getConfigAndSchema(beakerSession, fetchClient);
     schema.value = schemaJson;
     config.value = configJson;
     inputModel.value = Object.assign({}, tablifyObjects(schemaJson, configJson.config));
@@ -185,12 +186,12 @@ export function dropUnchangedValues(schema: ISchema, currentConfig: IConfig, ori
 
 }
 
-export async function getConfigAndSchema(beakerSession) {
+export async function getConfigAndSchema(beakerSession, fetchClient) {
     const serverSettings = beakerSession.session.services.serverSettings;
     const configUrl = `${serverSettings.baseUrl}config/control`;
     const schemaUrl = configUrl + '?schema';
-    const configFuture = fetch(configUrl);
-    const schemaFuture = fetch(schemaUrl);
+    const configFuture = fetchClient.fetch(configUrl);
+    const schemaFuture = fetchClient.fetch(schemaUrl);
     const configResponse = await configFuture
     const schemaResponse = await schemaFuture
     const config = await configResponse.json();
@@ -198,7 +199,7 @@ export async function getConfigAndSchema(beakerSession) {
     return {config, schema}
 }
 
-export async function saveConfig(beakerSession, schema: ISchema, inputModel, config) {
+export async function saveConfig(beakerSession, fetchClient, schema: ISchema, inputModel, config) {
     const serverSettings = beakerSession.session.services.serverSettings;
     const configUrl = `${serverSettings.baseUrl}config/control`;
     const updatedConfig = dropUnchangedValues(
@@ -209,7 +210,7 @@ export async function saveConfig(beakerSession, schema: ISchema, inputModel, con
     if (updatedConfig === null) {
         return;
     }
-    const configPostFuture = fetch(configUrl, {
+    const configPostFuture = fetchClient.fetch(configUrl, {
         method: "POST",
         body: JSON.stringify(updatedConfig),
     })

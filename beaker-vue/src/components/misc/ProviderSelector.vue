@@ -75,8 +75,10 @@ import {
 import InputGroup from "primevue/inputgroup";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
+import { BeakerFetchClientKey } from '../../plugins/keys';
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
+const fetchClient = inject(BeakerFetchClientKey)!;
 
 const saveAsHoverMenuRef = ref()
 const config = ref<IConfig>();
@@ -159,7 +161,7 @@ const save = async (override = false) => {
         if (config.value.config_type === "file") {
             confirmationText = `You are about to update file '${config.value.config_id}'.\nProceed?`;
             callback = async () => {
-                const result = await saveConfig(beakerSession, schema.value, inputModel.value, config.value.config);
+                const result = await saveConfig(beakerSession, fetchClient, schema.value, inputModel.value, config.value.config);
                 if (result.ok) {
                     emit("setAgentModel", selectedProviderValue.value, true);
                     emit("closeDialog");
@@ -185,7 +187,7 @@ const save = async (override = false) => {
 }
 
 const reset = async () => {
-    const {schema: schemaJson, config: configJson} = await getConfigAndSchema(beakerSession);
+    const {schema: schemaJson, config: configJson} = await getConfigAndSchema(beakerSession, fetchClient);
     schema.value = schemaJson;
     config.value = configJson;
     inputModel.value = Object.assign({}, tablifyObjects(schemaJson, configJson.config));

@@ -75,14 +75,16 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, watch, computed, reactive } from "vue";
+import { ref, watch, computed, reactive, inject } from "vue";
 
 import PDFRenderer from "../render/pdf/PDFRenderer.vue";
 import Toolbar from "primevue/toolbar";
 import Button from "primevue/button";
 import CodeEditor from "../misc/CodeEditor.vue";
 import BeakerMimeBundle from "../render/BeakerMimeBundle.vue";
-import { fetch } from '@/util/fetch';
+import { BeakerFetchClientKey } from '../../plugins/keys';
+
+const fetchClient = inject(BeakerFetchClientKey)!;
 
 const codeEditorRef = ref();
 const pdfPreviewRef = ref();

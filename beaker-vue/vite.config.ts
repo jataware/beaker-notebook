@@ -7,10 +7,10 @@ import vueJsx from '@vitejs/plugin-vue-jsx';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { globSync } from 'glob';
 
-import { sanitizeJupyterEval } from "./src/build/build";
+import { sanitizeJupyterEval } from "./src/builder/build";
 
 export const entryPoints: {[key: string]: string} = Object.fromEntries(
-  globSync("src/**/*.{vue,ts}", {ignore: "src/build/**"}).flatMap(file => {
+  globSync("src/**/*.{vue,ts}", {ignore: "src/builder/**"}).flatMap(file => {
     const importPath = path.relative(
       'src',
       file.slice(0, file.length - path.extname(file).length)
@@ -43,7 +43,6 @@ export const baseConfig: UserConfig = {
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      'node-fetch': path.resolve(require.resolve('isomorphic-fetch'), '..'),
       'path': path.resolve(require.resolve('path-browserify'), '..'),
     },
   }

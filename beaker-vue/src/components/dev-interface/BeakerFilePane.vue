@@ -70,7 +70,7 @@ import Panel from 'primevue/panel';
 import Column from 'primevue/column';
 import DataTable from 'primevue/datatable';
 import cookie from 'cookie';
-import { fetch } from '@/util/fetch';
+import { BeakerFetchClientKey } from '../../plugins/keys';
 
 import { ContentsManager } from '@jupyterlab/services';
 
@@ -86,6 +86,7 @@ const cookies = cookie.parse(document.cookie);
 const xsrfCookie = cookies._xsrf;
 
 const showToast = inject<any>('show_toast');
+const fetchClient = inject(BeakerFetchClientKey)!;
 
 const fileInput = ref<HTMLInputElement|undefined>(undefined);
 const uploadForm = ref<HTMLFormElement|undefined>(undefined);
@@ -98,7 +99,7 @@ const openFileSelection = () => {
 const onSelectFile = () => {
   const url = "/upload";
   const formData = new FormData(uploadForm.value);
-  const uploadFuture = fetch(url, {
+  const uploadFuture = fetchClient.fetch(url, {
     method: "post",
     body: formData,
   }).then(async (response) => {

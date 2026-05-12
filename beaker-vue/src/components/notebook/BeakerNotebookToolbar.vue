@@ -153,9 +153,10 @@ import OpenNotebookButton from "../misc/OpenNotebookButton.vue";
 import { downloadFileDOM, getDateTimeString } from '../../util';
 import StreamlineExportDialog from "../misc/StreamlineExportDialog.vue"
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
-import { fetch } from '@/util/fetch';
+import { BeakerFetchClientKey } from '../../plugins/keys';
 
 const session = inject<BeakerSession>('session');
+const fetchClient = inject(BeakerFetchClientKey)!;
 const notebook = inject<BeakerNotebookComponentType>('notebook');
 const cellMapping = inject<{[key: string]: {icon: string, modelClass: typeof BeakerBaseCell}} | ((cell: any) => {[key: string]: {icon: string, modelClass: typeof BeakerBaseCell}})>('cell-component-mapping');
 const showOverlay = inject<(contents: string, header?: string) => void>('show_overlay');
@@ -375,7 +376,7 @@ const refreshExportTypes = async () => {
         }
         return true
     }).map(([format, formatInfo]) => {
-        const mimetype = formatInfo.output_mimetype;
+        const mimetype = (formatInfo as any).output_mimetype;
         const labelMap: Record<string, string> = {
             asciidoc: "📄 AsciiDoc (.asciidoc)",
             chat: "🤖 Chat (.html)",

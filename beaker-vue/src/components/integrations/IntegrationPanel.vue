@@ -25,8 +25,10 @@
                     gap: 0.5rem;
                     width: 100%;
             ">
-                <RouterLink
+                <component
+                    :is="linkComponent"
                     :to="`/integrations?selected=new${sessionIdParam}`"
+                    :href="`/integrations?selected=new${sessionIdParam}`"
                     aria-label="Edit {{ integration?.name }} "
                 >
                     <Button
@@ -34,7 +36,7 @@
                         icon="pi pi-plus"
                         label="New Integration"
                     />
-                </RouterLink>
+                </component>
             </div>
             <div
                 style="
@@ -83,8 +85,10 @@
                                 </span>
 
                                 <span v-if="expandedIntegration === integration.uuid">
-                                    <RouterLink
+                                    <component
+                                        :is="linkComponent"
                                         :to="`/integrations?selected=${integration?.uuid}${sessionIdParam}`"
+                                        :href="`/integrations?selected=${integration?.uuid}${sessionIdParam}`"
                                         :aria-label="(getIntegrationProviderType(integration) === 'adhoc' ? 'Edit' : 'View') + ' ' + integration?.name"
                                     >
                                         <Button
@@ -108,7 +112,7 @@
                                             label="View"
                                             severity="secondary"
                                         />
-                                    </RouterLink>
+                                    </component>
                                 </span>
                             </div>
                         </template>
@@ -128,7 +132,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, watch, inject } from "vue";
+import { ref, computed, watch, inject, type Component } from "vue";
 import Button from "primevue/button";
 import InputGroup from "primevue/inputgroup";
 import InputGroupAddon from "primevue/inputgroupaddon";
@@ -136,17 +140,20 @@ import InputText from "primevue/inputtext";
 import Card from "primevue/card";
 import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
-import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType } from "@/util/integration";
-import { RouterLink } from "vue-router";
+import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType } from "../../util/integration";
 
 const searchText = ref(undefined);
 
 interface PropTypes {
     readOnly?: boolean;
+    /** Component used to render navigation links. Defaults to 'a'. Pages
+     *  using vue-router should pass RouterLink to enable SPA navigation. */
+    linkComponent?: string | Component;
 }
 
 const props = withDefaults(defineProps<PropTypes>(), {
     readOnly: false,
+    linkComponent: 'a',
 });
 
 const integrations = defineModel<IntegrationMap>()
