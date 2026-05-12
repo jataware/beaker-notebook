@@ -243,8 +243,6 @@ import * as cookie from 'cookie';
 
 import CodeEditor from '../misc/CodeEditor.vue';
 
-import { useRoute } from 'vue-router';
-
 const showToast = inject<any>('show_toast');
 
 // these are props rather than events due to awaiting async finishes;
@@ -254,6 +252,10 @@ const props = defineProps<{
     deleteResource: (resourceId: string) => Promise<void>,
     modifyResource: (body: object, resourceId?: string) => Promise<void>,
     modifyIntegration: (body: object, integrationId?: string) => Promise<void>,
+    /** Current value of the URL's "selected" query parameter; the page
+     *  is responsible for sourcing this (typically via useRoute()) and
+     *  passing it down. */
+    selectedQuery?: string | null,
 }>();
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
@@ -329,10 +331,9 @@ const delayUntil = (condition, retryInterval) => {
     return new Promise(poll);
 }
 
-const route = useRoute();
 // in the case of non-remounting, where ?selected= is changed via other means, go with that
-watch(() => route, (newRoute) => {
-    if (newRoute.query?.selected === "new") {
+watch(() => props.selectedQuery, (newSelected) => {
+    if (newSelected === "new") {
         // newIntegration sets model.value to a temp uuid - this handles non-pageload cases
         if (model.value.finishedInitialLoad) {
             newIntegration();
@@ -343,7 +344,7 @@ watch(() => route, (newRoute) => {
                 .then(() => newIntegration());
         }
     } else {
-        model.value.selected = newRoute.query?.selected as string|undefined ?? model.value.selected;
+        model.value.selected = (newSelected as string|undefined) ?? model.value.selected;
     }
 }, {immediate: true, deep: true})
 

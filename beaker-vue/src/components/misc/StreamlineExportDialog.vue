@@ -60,12 +60,13 @@
 <script lang="ts" setup>
 import { onMounted, inject, ref, watch, type ComputedRef } from "vue";
 import { ProgressSpinner, Button, Divider, ToggleSwitch, InputGroup, InputGroupAddon, InputText } from "primevue";
-import { getDateTimeString, downloadFileDOM } from "@/util";
+import { getDateTimeString, downloadFileDOM } from "../../util";
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
 import contentDisposition from "content-disposition";
-import { fetch } from '@/util/fetch';
+import { BeakerFetchClientKey } from '../../plugins/keys';
 
 const showOverlay = inject<(contents: string, header?: string) => void>('show_overlay');
+const fetchClient = inject(BeakerFetchClientKey)!;
 
 const dialogRef: ComputedRef = inject('dialogRef');
 

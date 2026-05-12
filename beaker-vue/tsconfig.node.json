@@ -29,7 +29,7 @@
     },
   },
   "include": [
-    "src/build/**/*"
+    "src/builder/**/*"
   ],
   "exclude": [
     // "node_modules/**",

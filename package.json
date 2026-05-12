@@ -1,0 +1,20 @@
+{
+  "name": "beaker-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "npm workspace root for beaker-ts, beaker-vue, and beaker-ui",
+  "workspaces": [
+    "beaker-ts",
+    "beaker-vue",
+    "beaker-ui"
+  ],
+  "scripts": {
+    "build": "npm run build -w beaker-kernel && npm run build -w beaker-vue && npm run build -w beaker-ui",
+    "build:ts": "npm run build -w beaker-kernel",
+    "build:vue": "npm run build -w beaker-vue",
+    "build:ui": "npm run build -w beaker-ui",
+    "dev": "npm run dev -w beaker-ui",
+    "type-check": "npm run type-check -w beaker-kernel && npm run type-check -w beaker-vue && npm run type-check -w beaker-ui",
+    "clean": "rimraf beaker-ts/dist beaker-vue/dist beaker-ui/html"
+  }
+}

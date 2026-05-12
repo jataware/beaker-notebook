@@ -60,9 +60,11 @@
         <template #end>
             <nav class="flex">
                 <template v-for="navItem in navItems" :key="navItem">
-                    <RouterLink
+                    <component
+                        :is="linkComponent"
                         v-if="navItem.type === 'link'"
                         :to="navItem.href"
+                        :href="navItem.href"
                         :aria-label="navItem.label"
                         :rel="navItem.rel"
                         :target="navItem.target"
@@ -80,7 +82,7 @@
                                 :style="navItem.componentStyle"
                             />
                         </Button>
-                    </RouterLink>
+                    </component>
                     <Button v-else-if="navItem.type === 'button'"
                         :icon="`pi pi-${navItem.icon}`"
                         text
@@ -96,7 +98,6 @@
 
 <script setup lang="ts">
 import { computed, inject } from "vue";
-import { RouterLink } from "vue-router";
 import Toolbar from 'primevue/toolbar';
 import Button from 'primevue/button';
 import { type BeakerSessionComponentType } from '../session/BeakerSession.vue';
@@ -109,10 +110,14 @@ export interface BeakerHeaderProps {
     title: string;
     titleExtra?: string;
     nav?: any[];
+    /** Component used to render navigation links. Defaults to 'a'. Pages
+     *  using vue-router should pass RouterLink to enable SPA navigation. */
+    linkComponent?: string | Component;
 }
 
 const props = withDefaults(defineProps<BeakerHeaderProps>(), {
     title: "Beaker",
+    linkComponent: 'a',
 });
 
 const emit = defineEmits(["selectKernel"]);

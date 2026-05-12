@@ -66,7 +66,8 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import type { BeakerSessionComponentType } from './BeakerSession.vue';
 import CodeEditor from '../misc/CodeEditor.vue';
-import { contextService, type ISubkernelInfo, type IContextInfo } from '@/services/context';
+import { type ISubkernelInfo, type IContextInfo } from '../../types/context';
+import { BeakerContextServiceKey } from '../../plugins/keys';
 
 const props = defineProps([
     "isOpen",
@@ -75,6 +76,7 @@ const props = defineProps([
 const logDebug = ref(false);
 const logVerbose = ref(false);
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
+const contextService = inject(BeakerContextServiceKey)!;
 
 const contextInfo = contextService.contextList;
 const contextMap = contextService.contextMap;

@@ -1,6 +1,8 @@
 import { type Component, defineComponent, h } from 'vue';
 
+import { JupyterMimeRenderer } from 'beaker-kernel';
 import type { IMimeRenderer, MimetypeString } from 'beaker-kernel';
+import { standardRendererFactories } from '@jupyterlab/rendermime';
 import type { PartialJSONObject } from '@lumino/coreutils';
 import VueJsonPretty from 'vue-json-pretty';
 import { marked } from 'marked';
@@ -159,3 +161,22 @@ export function wrapJupyterRenderer(jupyterRenderer: IMimeRenderer<HTMLElement>)
         }
     }
 }
+
+/**
+ * The default set of mime renderers shipped with beaker-vue. Combines the
+ * standard JupyterLab renderers (wrapped for our Vue-compatible interface)
+ * with the Beaker-specific renderers defined in this module.
+ *
+ * Pass this to BeakerSession (or, after Phase 2a, to the workspaces store)
+ * unless you have a reason to substitute or extend.
+ */
+export const defaultRenderers: BeakerMimeRenderer[] = [
+    ...standardRendererFactories
+        .map((factory: any) => new JupyterMimeRenderer(factory))
+        .map(wrapJupyterRenderer),
+    JavascriptRenderer,
+    JSONRenderer,
+    LatexRenderer,
+    MarkdownRenderer,
+    TableRenderer,
+];

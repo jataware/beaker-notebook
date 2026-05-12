@@ -19,21 +19,19 @@
     "src/"
   ],
   "dependencies": {
-    "@jupyterlab/apputils": "^4.5.1",
-    "@jupyterlab/nbformat": "^4.4.1",
-    "@jupyterlab/rendermime": "^4.4.1",
-    "@jupyterlab/services": "^7.4.1",
+    "@jupyterlab/apputils": "^4.6.7",
+    "@jupyterlab/nbformat": "^4.5.7",
+    "@jupyterlab/rendermime": "^4.5.7",
+    "@jupyterlab/services": "^7.5.7",
     "json-schema": "^0.4.0",
-    "node-fetch": "^2.6.6",
-    "uuid": "^11.1.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
-    "@types/node-fetch": "^2.6.6",
-    "@types/uuid": "^9.0.7",
-    "npm-run-all2": "^7.0.2",
-    "typescript": "^5.8.0",
-    "vite": "^7.1.5",
-    "vite-plugin-dts": "^4.5.4"
+    "@types/uuid": "^11.0.0",
+    "npm-run-all2": "^8.0.4",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.3",
+    "vite-plugin-dts": "^5.0.0"
   }
 }

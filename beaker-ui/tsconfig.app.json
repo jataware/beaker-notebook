@@ -1,0 +1,48 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "lib": [
+      "ES2020",
+      "ESNext",
+      "ESNext.AsyncIterable",
+      "DOM",
+      "DOM.Iterable",
+      "DOM.AsyncIterable"
+    ],
+    "jsx": "preserve",
+    "jsxImportSource": "vue",
+    "declaration": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "strict": false,
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@/components/*": ["../beaker-vue/src/components/*"],
+      "@/composables/*": ["../beaker-vue/src/composables/*"],
+      "@/renderers": ["../beaker-vue/src/renderers"],
+      "@/plugins/*": ["../beaker-vue/src/plugins/*"],
+      "@/directives/*": ["../beaker-vue/src/directives/*"],
+      "@/themes/*": ["../beaker-vue/src/themes/*"],
+      "@/util": ["../beaker-vue/src/util/index.ts"],
+      "@/util/integration": ["../beaker-vue/src/util/integration"],
+      "@/*": ["./src/*"],
+      "path": ["./node_modules/path-browserify"],
+      "vue": ["./node_modules/vue"],
+      "vue-router": ["./node_modules/vue-router"],
+      "vite": ["./node_modules/vite"],
+      "pinia": ["./node_modules/pinia"],
+      "primevue": ["./node_modules/primevue"],
+      "primevue/*": ["./node_modules/primevue/*"]
+    }
+  },
+  "include": [
+    "env.d.ts",
+    "src/**/*",
+    "src/**/*.vue"
+  ],
+  "exclude": [
+    "node_modules/**"
+  ]
+}

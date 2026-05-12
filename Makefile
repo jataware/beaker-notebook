@@ -11,7 +11,7 @@ endef
 
 .PHONY:init
 init:
-	make .env beaker-vue/node_modules
+	make .env beaker-ui/node_modules
 
 .PHONY:build
 build:
@@ -21,7 +21,7 @@ build:
 
 .PHONY:clean
 clean:
-	rm -r beaker-ts/dist beaker-vue/dist beaker-vue/html build dist beaker_kernel/app/ui || true
+	rm -r beaker-ts/dist beaker-vue/dist beaker-ui/html build dist beaker_kernel/app/ui || true
 
 
 .PHONY:docs-up
@@ -54,20 +54,21 @@ beaker-ts/dist:$(call npm_build_deps,beaker-ts)
 	touch beaker-ts/dist
 
 beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/dist
-	(cd beaker-vue && npm install --include=dev && npm link beaker-kernel) && \
+	(cd beaker-vue && npm install --include=dev) && \
 	touch beaker-vue/node_modules
 
-beaker-vue/node_modules/beaker-kernel:beaker-ts/dist
-	(cd beaker-vue && npm link beaker-kernel)
-
 beaker-vue/dist:$(call npm_build_deps,beaker-vue)
-	(cd beaker-vue && npm run build-lib) && \
+	(cd beaker-vue && npm run build) && \
 	touch beaker-vue/dist
 
-beaker-vue/html:$(call npm_build_deps,beaker-vue)
-	(cd beaker-vue && npm run build-ui) && \
-	touch beaker-vue/html
+beaker-ui/node_modules:beaker-ui/package*.json beaker-ts/dist beaker-vue/dist
+	(cd beaker-ui && npm install --include=dev) && \
+	touch beaker-ui/node_modules
 
-beaker_kernel/app/ui/index.html:beaker-vue/node_modules beaker-vue/html
-	rsync -r --exclude="*.map" beaker-vue/html/* beaker_kernel/app/ui/
+beaker-ui/html:$(call npm_build_deps,beaker-ui) beaker-vue/dist
+	(cd beaker-ui && npm run build) && \
+	touch beaker-ui/html
+
+beaker_kernel/app/ui/index.html:beaker-ui/node_modules beaker-ui/html
+	rsync -r --exclude="*.map" beaker-ui/html/* beaker_kernel/app/ui/
 

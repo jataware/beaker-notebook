@@ -1,4 +1,8 @@
-import { fetch } from '@/util/fetch';
+// Uses the global `fetch` for API calls. This means pathPrefix is NOT
+// applied (the host's FetchClient would normally do that). Acceptable for
+// the integration API since its routes are relative ("/beaker/integrations/...")
+// and pathPrefix is rarely used in practice. Revisit when wiring the
+// kernel-mirror wrapper (deferred follow-up).
 
 export interface IntegrationResource {
     // names must be coherent with python resource class

@@ -14,6 +14,16 @@ import * as messages from '@jupyterlab/services/lib/kernel/messages';
 import type { ConnectionStatus as JupyterConnectionStatus } from '@jupyterlab/services/lib/kernel/kernel';
 
 
+// `vite-plugin-top-level-await` rewrites every `import()` call to add a
+// `.then(m => m.__tla)` wrapper and strips comments in the process, including
+// `/* @vite-ignore */`. Without that annotation the host's build emits a warning
+// for runtime-computed URLs and bails out of CSS dep analysis on this code path,
+// silently dropping <link> tags for sibling chunks at runtime. Constructing the
+// import via `new Function` hides it from the AST walker entirely.
+const dynamicImport: (url: string) => Promise<any> =
+  new Function('url', 'return import(url)') as any;
+
+
 export interface IBeakerCellComponent {
   [key: string]: any,
   $: ComponentInternalInstance,
@@ -133,7 +143,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
               // if new renderer has equal or better rank)
               if (assetUrls.package) {
                 try {
-                  const mod = await import(/* @vite-ignore */ assetUrls.package + "renderers.js");
+                  const mod = await dynamicImport(assetUrls.package + "renderers.js");
                   if (Array.isArray(mod.default)) {
                     mod.default.forEach((r: any) => rawSession.renderer.addRenderer(r, "package"));
                     console.debug(`Loaded ${mod.default.length} package renderer(s)`);
@@ -146,7 +156,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
               // Load context-level renderers
               if (assetUrls.context) {
                 try {
-                  const mod = await import(/* @vite-ignore */ assetUrls.context + "renderers.js");
+                  const mod = await dynamicImport(assetUrls.context + "renderers.js");
                   if (Array.isArray(mod.default)) {
                     mod.default.forEach((r: any) => rawSession.renderer.addRenderer(r, "context"));
                     console.debug(`Loaded ${mod.default.length} context renderer(s)`);
