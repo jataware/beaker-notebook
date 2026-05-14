@@ -1,6 +1,10 @@
 import json
 import logging
+import mimetypes
 import typing
+import urllib.parse
+
+import requests
 
 from archytas.prompt import PromptSection
 from archytas.react import ReActAgent
@@ -390,7 +394,77 @@ class BeakerAgent(ReActAgent):
                 "Copy ref values verbatim from the notebook state — they must include the mimetype suffix."
             )
 
-        return blocks
+        return MultiModalResponse(blocks)
+
+
+    @tool(autosummarize=True, summarizer=succinct_tool_summarizer(), internal=True)
+    async def get_multimedia_file_from_storage(self, path: str) -> MultiModalResponse:
+        """
+        Fetches a multimedia file (image, audio, or video) from the user's storage and returns it as MultiModal input able to be processed by the agent.
+
+        Use this tool when you need to visually or aurally inspect a media file the user has saved in their workspace — for example, a plot the user generated and saved to disk, a screenshot they shared, or an audio/video clip they want analyzed. For multimedia outputs that are already attached to a notebook cell, prefer `get_notebook_multimedia_output` instead.
+
+        The file contents are fetched via the file manager API rather than read directly from disk, so the path is interpreted relative to the user's storage root (the same paths the user sees in the file browser).
+
+        Note: The contents of the tool response will be truncated at the completion of the current ReAct loop so as to not pollute the context history.
+
+        Args:
+            path: (str) The path to the file within the user's storage, as it appears in the file browser (e.g. `plots/scatter.png` or `audio/clip.wav`).
+
+        Returns:
+            MultiModalResponse: The file's contents, properly encoded for MultiModal analysis.
+
+        Raises:
+            ValueError: If `path` is empty, the file's mimetype is not multimedia (image/*, audio/*, video/*), or the file cannot be retrieved.
+        """
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("`path` must be a non-empty string identifying a file in the user's storage.")
+
+        normalized_path = path.strip().lstrip("/")
+        beaker_kernel = self.context.beaker_kernel
+        urlbase = beaker_kernel.jupyter_server
+        url = urllib.parse.urljoin(
+            urlbase,
+            f"/api/contents/{urllib.parse.quote(normalized_path)}",
+        )
+
+        response = requests.get(
+            url,
+            params={"content": "1", "format": "base64"},
+            headers={"X-AUTH-BEAKER": beaker_kernel.api_auth()},
+        )
+        if response.status_code == 404:
+            raise ValueError(f"File not found in user storage: {path!r}.")
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Failed to fetch {path!r} from user storage (status {response.status_code}): {response.text}"
+            )
+
+        model = response.json()
+        if model.get("type") != "file":
+            raise ValueError(
+                f"Path {path!r} is not a file (type={model.get('type')!r}). Only files can be analyzed."
+            )
+
+        mimetype = model.get("mimetype") or mimetypes.guess_type(normalized_path)[0]
+        if not mimetype or not is_multimedia_mimetype(mimetype):
+            raise ValueError(
+                f"File {path!r} has mimetype {mimetype!r}, which is not a supported multimedia type "
+                "(must be image/*, audio/*, or video/*)."
+            )
+
+        content = model.get("content")
+        if not isinstance(content, str):
+            raise ValueError(f"File {path!r} did not return base64 content as expected.")
+        # Remove any newlines in generated base64 as not all models handle newlines
+        content = content.replace("\n", "")
+
+        media_type = mimetype.split("/")[0]
+        return MultiModalResponse([{
+            "type": media_type,
+            "mime_type": mimetype,
+            "base64": content,
+        }])
 
 
 # Provided for backwards compatibility

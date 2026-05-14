@@ -1,7 +1,7 @@
 """Tests for tools defined on BeakerAgent (lib/agent.py)."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -197,6 +197,7 @@ async def test_get_notebook_cell_rejects_non_string_id():
 
 
 async def test_get_notebook_multimedia_output_returns_blocks_for_resolved_refs():
+    from archytas.multimodal import MultiModalResponse
     agent = _agent_instance()
     agent.context = SimpleNamespace(notebook_state=_nbstate_with_outputs())
 
@@ -204,11 +205,12 @@ async def test_get_notebook_multimedia_output_returns_blocks_for_resolved_refs()
         agent, refs=["cell-a:output:0:image/png"],
     )
 
-    assert blocks == [{
+    assert isinstance(blocks, MultiModalResponse)
+    assert blocks == MultiModalResponse([{
         "type": "image",
         "mime_type": "image/png",
         "base64": "PNG_BASE64",
-    }]
+    }])
 
 
 async def test_get_notebook_multimedia_output_rejects_empty_refs():
@@ -263,3 +265,184 @@ async def test_get_notebook_multimedia_output_partial_failure_raises():
             refs=["cell-a:output:0:image/png", "bogus-ref"],
         )
     assert "bogus-ref" in str(exc_info.value)
+
+
+# --- get_multimedia_file_from_storage -------------------------------------
+
+
+def _agent_with_kernel(jupyter_server: str = "http://jupyter.local/") -> BeakerAgent:
+    agent = _agent_instance()
+    agent.context = SimpleNamespace(
+        beaker_kernel=SimpleNamespace(
+            jupyter_server=jupyter_server,
+            api_auth=MagicMock(return_value="auth-token"),
+        ),
+    )
+    return agent
+
+
+def _mock_response(status_code: int = 200, json_data: dict | None = None, text: str = "") -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    response.json = MagicMock(return_value=json_data or {})
+    response.text = text
+    return response
+
+
+async def test_get_multimedia_file_from_storage_returns_image_block():
+    from archytas.multimodal import MultiModalResponse
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": "image/png",
+        "content": "PNG_BASE64_DATA",
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response) as mock_get:
+        result = await BeakerAgent.get_multimedia_file_from_storage(agent, "plots/scatter.png")
+
+    assert isinstance(result, MultiModalResponse)
+    assert result == MultiModalResponse([{
+        "type": "image",
+        "mime_type": "image/png",
+        "base64": "PNG_BASE64_DATA",
+    }])
+    # path is fetched via the file manager contents API on the jupyter server
+    url = mock_get.call_args.args[0]
+    assert url == "http://jupyter.local/api/contents/plots/scatter.png"
+    kwargs = mock_get.call_args.kwargs
+    assert kwargs["params"] == {"content": "1", "format": "base64"}
+    assert kwargs["headers"] == {"X-AUTH-BEAKER": "auth-token"}
+
+
+async def test_get_multimedia_file_from_storage_strips_leading_slash_and_url_encodes():
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": "image/png",
+        "content": "X",
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response) as mock_get:
+        await BeakerAgent.get_multimedia_file_from_storage(agent, "/folder with space/a.png")
+
+    url = mock_get.call_args.args[0]
+    # leading slash stripped, spaces percent-encoded
+    assert url == "http://jupyter.local/api/contents/folder%20with%20space/a.png"
+
+
+async def test_get_multimedia_file_from_storage_strips_newlines_from_base64():
+    from archytas.multimodal import MultiModalResponse
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": "image/jpeg",
+        "content": "AAAA\nBBBB\nCCCC\n",
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        result = await BeakerAgent.get_multimedia_file_from_storage(agent, "p.jpg")
+
+    assert result == MultiModalResponse([{
+        "type": "image",
+        "mime_type": "image/jpeg",
+        "base64": "AAAABBBBCCCC",
+    }])
+
+
+async def test_get_multimedia_file_from_storage_infers_mimetype_when_missing():
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": None,
+        "content": "DATA",
+    })
+
+    from archytas.multimodal import MultiModalResponse
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        result = await BeakerAgent.get_multimedia_file_from_storage(agent, "clip.wav")
+
+    assert result == MultiModalResponse([{
+        "type": "audio",
+        "mime_type": "audio/x-wav",
+        "base64": "DATA",
+    }])
+
+
+async def test_get_multimedia_file_from_storage_rejects_empty_path():
+    agent = _agent_with_kernel()
+    with pytest.raises(ValueError, match="non-empty string"):
+        await BeakerAgent.get_multimedia_file_from_storage(agent, "   ")
+
+
+async def test_get_multimedia_file_from_storage_rejects_non_string_path():
+    agent = _agent_with_kernel()
+    with pytest.raises(ValueError, match="non-empty string"):
+        await BeakerAgent.get_multimedia_file_from_storage(agent, 123)  # type: ignore[arg-type]
+
+
+async def test_get_multimedia_file_from_storage_raises_on_404():
+    agent = _agent_with_kernel()
+    response = _mock_response(status_code=404, text="not found")
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="File not found in user storage"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "missing.png")
+
+
+async def test_get_multimedia_file_from_storage_raises_on_http_error():
+    agent = _agent_with_kernel()
+    response = _mock_response(status_code=500, text="boom")
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="status 500"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "p.png")
+
+
+async def test_get_multimedia_file_from_storage_rejects_directory():
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={"type": "directory", "content": None})
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="not a file"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "folder")
+
+
+async def test_get_multimedia_file_from_storage_rejects_non_multimedia_mimetype():
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": "text/plain",
+        "content": "aGVsbG8=",
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="not a supported multimedia type"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "notes.txt")
+
+
+async def test_get_multimedia_file_from_storage_rejects_unknown_mimetype():
+    """When the server returns no mimetype and mimetypes can't guess one, reject."""
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": None,
+        "content": "DATA",
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="not a supported multimedia type"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "file.unknown-ext-xyz")
+
+
+async def test_get_multimedia_file_from_storage_raises_when_content_missing():
+    agent = _agent_with_kernel()
+    response = _mock_response(json_data={
+        "type": "file",
+        "mimetype": "image/png",
+        "content": None,
+    })
+
+    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+        with pytest.raises(ValueError, match="did not return base64 content"):
+            await BeakerAgent.get_multimedia_file_from_storage(agent, "p.png")
