@@ -214,43 +214,58 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 
     @classmethod
-    def _get_skill_scan_dirs(cls) -> list[Path]:
-        """Return skill directories to scan, ordered from most specific (project)
-        to most general (user/system).
+    def _get_skill_search_roots(cls) -> list[Path]:
+        """Return base directories to search for skills, ordered from most
+        specific (highest precedence on conflicts) to most general.
 
-        Follows the Agent Skills convention:
-          - Project-level: ./.beaker/skills/, ./.agents/skills/
-          - User-level:    ~/.beaker/skills/, ~/.agents/skills/
-          - Data dirs:     {data_dir}/skills/ (from find_resource_dirs)
+        Each root is searched for both ``skills.json`` and a ``skills/``
+        subdirectory. The conventional locations are:
+          - Project-level: ./.agents/, ./.beaker/
+          - User-level:    ~/.agents/, ~/.beaker/
+          - Data dirs:     entries from find_resource_dirs("data")
+
+        ``.agents`` is listed before ``.beaker`` at each level so that a
+        notebook-root ``./.agents/skills.json`` overrides any conflicting
+        skills declared elsewhere.
         """
-        dirs: list[Path] = []
+        roots: list[Path] = []
+        seen: set[Path] = set()
+
+        def _add(p: Path):
+            try:
+                resolved = p.resolve()
+            except OSError:
+                resolved = p
+            if resolved in seen or not p.is_dir():
+                return
+            seen.add(resolved)
+            roots.append(p)
 
         # Project-level (most specific)
-        for name in (".beaker/skills", ".agents/skills"):
-            p = Path.cwd() / name
-            if p.is_dir():
-                dirs.append(p)
+        cwd = Path.cwd()
+        for name in (".agents", ".beaker"):
+            _add(cwd / name)
 
         # User-level
         home = Path.home()
-        for name in (".beaker/skills", ".agents/skills"):
-            p = home / name
-            if p.is_dir():
-                dirs.append(p)
+        for name in (".agents", ".beaker"):
+            _add(home / name)
 
-        # Data dirs from autodiscovery (general → specific, but we process
-        # them after the more specific project/user dirs above)
+        # Data dirs from autodiscovery
         for data_dir in find_resource_dirs("data"):
-            p = Path(data_dir) / "skills"
-            if p.is_dir():
-                dirs.append(p)
+            _add(Path(data_dir))
 
-        return dirs
+        return roots
 
     @classmethod
     def discover_integrations(cls, *, paths: Optional[list[str|os.PathLike]] = None, **kwargs) -> Mapping[str, SkillIntegration]:
-        """Discover and load skills from skills.json, standard skill directories,
-        and the cross-client .agents/skills/ convention."""
+        """Discover and load skills from ``skills.json`` files and ``skills/``
+        directories under each search root.
+
+        Each root is checked for both a ``skills.json`` manifest and a
+        ``skills/`` subdirectory; roots earlier in the list take precedence
+        on slug conflicts.
+        """
         skills: dict[str, SkillIntegration] = {}
         loaded_slugs: set[str] = set()
 
@@ -265,21 +280,23 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             except Exception:
                 logger.exception("Failed to load skill from source: %s", source)
 
+        # Normalize each input path to a (root_dir, explicit_config_path) pair.
+        # A path may point directly at a skills.json file, in which case its
+        # parent serves as the root and only that file is consulted (no
+        # implicit skills/ scan from the parent).
+        roots: list[tuple[Path, Optional[Path]]] = []
         if paths is None:
-            resource_dirs = [Path(resource_dir) for resource_dir in find_resource_dirs("data")]
-            skills_dirs = [Path(skill_dir) for skill_dir in cls._get_skill_scan_dirs()]
+            roots = [(root, None) for root in cls._get_skill_search_roots()]
         else:
-            resource_dirs = skills_dirs = [Path(path) for path in paths]
+            for raw in paths:
+                p = Path(raw)
+                if p.is_file() and p.name == "skills.json":
+                    roots.append((p.parent, p))
+                elif p.is_dir():
+                    roots.append((p, None))
 
-        # Load from skills.json in data dirs
-        for data_dir in resource_dirs:
-            if data_dir.is_file() and data_dir.name == "skills.json":
-                config_path = data_dir
-                data_dir = config_path.parent
-            elif data_dir.is_dir():
-                config_path = data_dir / "skills.json"
-            else:
-                continue
+        for root, explicit_config in roots:
+            config_path = explicit_config if explicit_config is not None else root / "skills.json"
             if config_path.is_file():
                 logger.debug("Found skills.json at %s", config_path)
                 try:
@@ -289,15 +306,18 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                         logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
                     else:
                         for source in data:
-                            _load_deduped(source, base_path=str(data_dir))
+                            _load_deduped(source, base_path=str(root))
                 except Exception:
                     logger.exception("Failed to read skills.json at %s", config_path)
 
-        # Scan all skill directories for SKILL.md files
-        for skills_dir in skills_dirs:
-            logger.debug("Scanning skills directory: %s", skills_dir)
-            for skill_md in skills_dir.glob("*/SKILL.md"):
-                _load_deduped(str(skill_md.parent), base_path=str(skills_dir))
+            # Only scan skills/ when the caller didn't pin us to a specific
+            # skills.json file.
+            if explicit_config is None:
+                skills_dir = root / "skills"
+                if skills_dir.is_dir():
+                    logger.debug("Scanning skills directory: %s", skills_dir)
+                    for skill_md in skills_dir.glob("*/SKILL.md"):
+                        _load_deduped(str(skill_md.parent), base_path=str(skills_dir))
 
         return skills
 

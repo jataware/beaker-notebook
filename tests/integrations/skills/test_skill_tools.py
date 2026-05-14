@@ -63,9 +63,9 @@ def provider(tmp_path: Path, skill_dir: Path) -> SkillIntegrationProvider:
     (data_dir / "skills.json").write_text(json.dumps([str(skill_dir)]))
     with patch(
         "beaker_kernel.lib.integrations.skill.find_resource_dirs",
-        return_value=[str(data_dir)],
+        return_value=[],
     ), patch.object(
-        SkillIntegrationProvider, "_get_skill_scan_dirs", return_value=[],
+        SkillIntegrationProvider, "_get_skill_search_roots", return_value=[data_dir],
     ):
         return SkillIntegrationProvider()
 

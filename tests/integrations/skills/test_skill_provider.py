@@ -122,22 +122,20 @@ def skills_data_dir(tmp_path: Path, skill_dir: Path) -> Path:
     return data_dir
 
 
-def _make_provider(data_dirs: list[str], extra_scan_dirs: list[Path] = None) -> SkillIntegrationProvider:
-    """Create a provider with patched resource dirs to avoid loading from the real filesystem."""
-    scan_dirs = list(extra_scan_dirs or [])
-    # Include {data_dir}/skills for each data_dir, matching the real _get_skill_scan_dirs behavior
-    for d in data_dirs:
-        p = Path(d) / "skills"
-        if p.is_dir():
-            scan_dirs.append(p)
+def _make_provider(search_roots: list[Path | str]) -> SkillIntegrationProvider:
+    """Create a provider with patched search roots to avoid loading from the real filesystem.
 
+    Each entry in ``search_roots`` is a base directory that may contain a
+    ``skills.json`` manifest and/or a ``skills/`` subdirectory.
+    """
+    roots = [Path(r) for r in search_roots]
     with patch(
         "beaker_kernel.lib.integrations.skill.find_resource_dirs",
-        return_value=data_dirs,
+        return_value=[],
     ), patch.object(
         SkillIntegrationProvider,
-        "_get_skill_scan_dirs",
-        return_value=scan_dirs,
+        "_get_skill_search_roots",
+        return_value=roots,
     ):
         return SkillIntegrationProvider()
 
@@ -226,21 +224,21 @@ class TestExtractFileReferences:
 
 class TestLocalSkillLoading:
     def test_load_from_skills_json(self, skills_data_dir: Path):
-        provider = _make_provider([str(skills_data_dir)])
+        provider = _make_provider([skills_data_dir])
         names = [s.name for s in provider.list_integrations()]
         assert "full-skill" in names
 
     def test_load_from_skills_directory(self, skills_data_dir: Path):
-        provider = _make_provider([str(skills_data_dir)])
+        provider = _make_provider([skills_data_dir])
         names = [s.name for s in provider.list_integrations()]
         assert "minimal-skill" in names
 
     def test_both_sources_loaded(self, skills_data_dir: Path):
-        provider = _make_provider([str(skills_data_dir)])
+        provider = _make_provider([skills_data_dir])
         assert len(provider.list_integrations()) == 2
 
     def test_skill_integration_fields(self, skills_data_dir: Path):
-        provider = _make_provider([str(skills_data_dir)])
+        provider = _make_provider([skills_data_dir])
         skill = provider._find_skill_by_slug("full-skill")
         assert isinstance(skill, SkillIntegration)
         assert skill.datatype == "skill"
@@ -265,24 +263,22 @@ class TestLocalSkillLoading:
 # ---------------------------------------------------------------------------
 
 class TestDiscoveryPaths:
-    def test_skills_from_extra_scan_dirs(self, tmp_path: Path):
-        """Skills discovered from extra scan dirs (e.g. ~/.agents/skills/)."""
-        agents_skills = tmp_path / "agents_skills"
-        agents_skills.mkdir()
-        skill = agents_skills / "agent-skill-one"
-        skill.mkdir()
+    def test_skills_from_scan_dir(self, tmp_path: Path):
+        """Skills discovered from a root's skills/ subdirectory."""
+        root = tmp_path / "agents"
+        skill = root / "skills" / "agent-skill-one"
+        skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(MINIMAL_SKILL_MD)
 
-        provider = _make_provider([], extra_scan_dirs=[agents_skills])
+        provider = _make_provider([root])
         names = [s.name for s in provider.list_integrations()]
         assert "minimal-skill" in names
 
     def test_project_level_overrides_user_level(self, tmp_path: Path):
-        """Project-level skills take precedence over user-level (scanned first)."""
-        project_skills = tmp_path / "project"
-        project_skills.mkdir()
-        skill_proj = project_skills / "my-skill"
-        skill_proj.mkdir()
+        """Roots listed earlier (more specific) take precedence on slug conflicts."""
+        project_root = tmp_path / "project"
+        skill_proj = project_root / "skills" / "my-skill"
+        skill_proj.mkdir(parents=True)
         (skill_proj / "SKILL.md").write_text(textwrap.dedent("""\
             ---
             name: my-skill
@@ -291,10 +287,9 @@ class TestDiscoveryPaths:
             # Project version
         """))
 
-        user_skills = tmp_path / "user"
-        user_skills.mkdir()
-        skill_user = user_skills / "my-skill"
-        skill_user.mkdir()
+        user_root = tmp_path / "user"
+        skill_user = user_root / "skills" / "my-skill"
+        skill_user.mkdir(parents=True)
         (skill_user / "SKILL.md").write_text(textwrap.dedent("""\
             ---
             name: my-skill
@@ -303,21 +298,23 @@ class TestDiscoveryPaths:
             # User version
         """))
 
-        # Project dir listed first = higher precedence
-        provider = _make_provider([], extra_scan_dirs=[project_skills, user_skills])
+        # Project root listed first = higher precedence
+        provider = _make_provider([project_root, user_root])
         skills = provider.list_integrations()
         assert len(skills) == 1
         assert skills[0].description == "Project version."
 
-    def test_skills_json_takes_precedence_over_scan_dirs(self, tmp_path: Path):
-        """Skills loaded from skills.json take precedence over directory scans."""
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
+    def test_skills_json_takes_precedence_over_scan_dir(self, tmp_path: Path):
+        """Within a single root, skills.json is processed before skills/ so it
+        wins on slug conflicts. Skills declared across roots follow root order."""
+        manifest_root = tmp_path / "manifest"
+        manifest_root.mkdir()
 
-        # Create skill via skills.json
-        json_skill_dir = tmp_path / "shared-name"
-        # json_skill_dir = tmp_path / "json-skill"
-        json_skill_dir.mkdir()
+        # skills.json reference points outside the root, but uses the same
+        # directory name so the derived slug matches the scan-dir entry.
+        manifest_skill_parent = tmp_path / "manifest-src"
+        json_skill_dir = manifest_skill_parent / "shared-name"
+        json_skill_dir.mkdir(parents=True)
         (json_skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
             ---
             name: shared-name
@@ -325,13 +322,12 @@ class TestDiscoveryPaths:
             ---
             # JSON version
         """))
-        (data_dir / "skills.json").write_text(json.dumps([str(json_skill_dir)]))
+        (manifest_root / "skills.json").write_text(json.dumps([str(json_skill_dir)]))
 
-        # Same skill name in a scan dir
-        scan_skills = tmp_path / "scan"
-        scan_skills.mkdir()
-        scan_skill = scan_skills / "shared-name"
-        scan_skill.mkdir()
+        # Same slug installed under another root's skills/ subdir (lower precedence)
+        scan_root = tmp_path / "scan"
+        scan_skill = scan_root / "skills" / "shared-name"
+        scan_skill.mkdir(parents=True)
         (scan_skill / "SKILL.md").write_text(textwrap.dedent("""\
             ---
             name: shared-name
@@ -340,30 +336,46 @@ class TestDiscoveryPaths:
             # Scan version
         """))
 
-        provider = _make_provider([str(data_dir)], extra_scan_dirs=[scan_skills])
+        provider = _make_provider([manifest_root, scan_root])
         skills = provider.list_integrations()
         assert len(skills) == 1
         assert skills[0].description == "From skills.json."
 
-    def test_get_skill_scan_dirs_returns_existing_only(self, tmp_path: Path, monkeypatch):
-        """_get_skill_scan_dirs only returns directories that actually exist."""
+    def test_get_skill_search_roots_returns_existing_only(self, tmp_path: Path, monkeypatch):
+        """_get_skill_search_roots only returns directories that actually exist."""
         monkeypatch.chdir(tmp_path)
 
-        # Create only .beaker/skills at project level
-        beaker_skills = tmp_path / ".beaker" / "skills"
-        beaker_skills.mkdir(parents=True)
-        # .agents/skills does NOT exist
+        # Create only .beaker at project level; .agents does NOT exist
+        beaker_root = tmp_path / ".beaker"
+        beaker_root.mkdir()
 
         with patch(
             "beaker_kernel.lib.integrations.skill.find_resource_dirs",
             return_value=[],
-        ):
-            provider = SkillIntegrationProvider.__new__(SkillIntegrationProvider)
-            dirs = provider._get_skill_scan_dirs()
+        ), patch.object(Path, "home", return_value=tmp_path / "_nohome"):
+            roots = SkillIntegrationProvider._get_skill_search_roots()
 
-        dir_strs = [str(d) for d in dirs]
-        assert str(beaker_skills) in dir_strs
-        assert str(tmp_path / ".agents" / "skills") not in dir_strs
+        root_strs = [str(r) for r in roots]
+        assert str(beaker_root) in root_strs
+        assert str(tmp_path / ".agents") not in root_strs
+
+    def test_agents_root_ordered_before_beaker(self, tmp_path: Path, monkeypatch):
+        """At each level, .agents is searched before .beaker so it wins on conflicts."""
+        monkeypatch.chdir(tmp_path)
+
+        agents_root = tmp_path / ".agents"
+        agents_root.mkdir()
+        beaker_root = tmp_path / ".beaker"
+        beaker_root.mkdir()
+
+        with patch(
+            "beaker_kernel.lib.integrations.skill.find_resource_dirs",
+            return_value=[],
+        ), patch.object(Path, "home", return_value=tmp_path / "_nohome"):
+            roots = SkillIntegrationProvider._get_skill_search_roots()
+
+        root_strs = [str(r) for r in roots]
+        assert root_strs.index(str(agents_root)) < root_strs.index(str(beaker_root))
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +396,7 @@ class TestDeduplication:
         skills_subdir.mkdir(parents=True)
         (skills_subdir / "SKILL.md").write_text(FULL_SKILL_MD)
 
-        provider = _make_provider([str(data_dir)])
+        provider = _make_provider([data_dir])
         names = [s.name for s in provider.list_integrations()]
         assert names.count("full-skill") == 1
 
@@ -701,7 +713,7 @@ class TestCodeExamples:
         skill = skills_dir / "no-examples-skill"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(MINIMAL_SKILL_MD)
-        provider = _make_provider([], extra_scan_dirs=[skills_dir])
+        provider = _make_provider([tmp_path])
         loaded_skill = provider._find_skill_by_slug("no-examples-skill")
         examples = [
             r for r in loaded_skill.resources.values()

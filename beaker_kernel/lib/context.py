@@ -288,7 +288,26 @@ class BeakerContext:
     @property
     def default_integration_providers(self) -> set[BaseIntegrationProvider]:
         from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
-        return { SkillIntegrationProvider("Default Skills"), }
+
+        # Load global default skills
+        default_providers = { SkillIntegrationProvider("Default Skills"), }
+
+        # Check for a skills.json file a the same level as the context.py and load it if it exists.
+        context_dir_path = Path(inspect.getabsfile(self.__class__)).parent
+        context_skills = []
+        skill_file = context_dir_path / "skills.json"
+        skill_dir = context_dir_path / "skills"
+        if skill_file.is_file():
+            context_skills.append(str(skill_file))
+        if skill_dir.is_dir() and any((child.is_dir() for child in skill_dir.iterdir())):
+            context_skills.append(str(skill_dir))
+
+        if context_skills:
+            context_skill_integration = SkillIntegrationProvider(f"{self.__class__.__name__} Skills", skill_paths=context_skills)
+            default_providers.add(context_skill_integration)
+
+        return default_providers
+
 
     @classmethod
     def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
