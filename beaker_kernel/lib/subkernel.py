@@ -439,8 +439,9 @@ class BeakerSubkernel(abc.ABC):
                         f"display_data item {idx}:"
                     )
                     for mimetype, value in display_data.items():
-                        if len(value) > 800:
-                            value = f"{value[:400]} ... truncated ... {value[-400:]}"
+                        value = str(value)
+                        if len(value) > 200:
+                            value = f"{value[:100]} ... truncated ... {value[-100:]}"
                         output.append(
                             f"{mimetype}:"
                         )
