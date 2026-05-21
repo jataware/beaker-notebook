@@ -467,15 +467,15 @@ class BeakerSubkernel(abc.ABC):
 
         try:
             execution_task: ExecutionTask
-            if isinstance(agent.context.subkernel, CheckpointableBeakerSubkernel) and is_checkpointing_enabled():
-                checkpoint_index, execution_task = await agent.context.subkernel.checkpoint_and_execute(
-                    code, not autoexecute, parent_header=message.header, identities=identities
-                )
-            else:
-                execution_task = agent.context.execute(
-                    code, store_history=True, surpress_messages=(not autoexecute), parent_header=message.header, identities=identities
-                )
-                checkpoint_index = None
+            # if isinstance(agent.context.subkernel, CheckpointableBeakerSubkernel) and is_checkpointing_enabled():
+            #     checkpoint_index, execution_task = await agent.context.subkernel.checkpoint_and_execute(
+            #         code, not autoexecute, parent_header=message.header, identities=identities
+            #     )
+            # else:
+            execution_task = agent.context.execute(
+                code, store_history=True, surpress_messages=(not autoexecute), parent_header=message.header, identities=identities
+            )
+            # checkpoint_index = None
             execute_request_msg = {
                 name: getattr(execution_task.execute_request_msg, name)
                 for name in execution_task.execute_request_msg.json_field_names
@@ -487,8 +487,8 @@ class BeakerSubkernel(abc.ABC):
                 "autoexecute": autoexecute,
                 "execute_request_msg": execute_request_msg,
             }
-            if checkpoint_index is not None:
-                payload["checkpoint_index"] = checkpoint_index
+            # if checkpoint_index is not None:
+            #     payload["checkpoint_index"] = checkpoint_index
             agent.context.send_response(
                 "iopub",
                 "add_child_codecell",
@@ -797,7 +797,8 @@ BaseSubkernel = BeakerSubkernel
 
 
 def is_checkpointing_enabled():
-    return getattr(config, "enable_checkpoints", True)
+    return False
+    # return getattr(config, "enable_checkpoints", True)
 
 
 class CheckpointableBeakerSubkernel(BeakerSubkernel):
