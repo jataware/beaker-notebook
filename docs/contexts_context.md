@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Creating a New Context
-parent: Contexts
+parent: Context Development
+grand_parent: Development
 nav_order: 1
 has_toc: true
 ---

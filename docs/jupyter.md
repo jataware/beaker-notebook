@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Working with Jupyter
-nav_order: 6
+parent: Development
+nav_order: 5
 has_toc: false
 ---
 

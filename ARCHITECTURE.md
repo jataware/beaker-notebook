@@ -63,11 +63,15 @@ beaker_kernel/
 │   └── storage/         # Storage backends
 ├── lib/                 # Core library components
 │   ├── code_analysis/   # Static code analysis
-│   ├── integrations/    # External integrations
-│   ├── exporters/       # Notebook exporters
-│   ├── templates/       # Code generation templates
+│   ├── integrations/    # Integration registry, skill providers, ad-hoc integrations
+│   ├── exporters/       # Notebook exporters (chat, full-context, streamline)
+│   ├── templates/       # Code generation templates (agent, context, subkernel, procedure, readme)
 │   ├── context.py       # Context (AI agent) framework
+│   ├── context_dump.py  # Context serialization for prompt assembly
 │   ├── subkernel.py     # Language subkernel framework
+│   ├── reflector.py     # Variable reflection abstraction
+│   ├── kernel_state.py  # Kernel-side state representation
+│   ├── notebook_state.py # Notebook-side state representation
 │   ├── agent.py         # AI agent base classes
 │   ├── agent_tasks.py   # Agent task definitions
 │   ├── config.py        # Configuration management
@@ -81,10 +85,10 @@ beaker_kernel/
 │   ├── autodiscovery.py # Extension autodiscovery
 │   └── utils.py         # Utility functions
 ├── contexts/            # Built-in AI contexts
-├── subkernels/         # Built-in language subkernels
-├── cli/                # Command-line interface
-├── builder/            # Build system integration
-└── util/               # Utility modules
+├── subkernels/          # Built-in language subkernels (each is a package; see below)
+├── cli/                 # Command-line interface
+├── builder/             # Build system integration
+└── util/                # Utility modules (includes import-redirect shim for legacy paths)
 ```
 
 ## Core Components
@@ -121,7 +125,7 @@ Provides business logic and manages system resources:
 - `BeakerKernelManager`: Manages individual kernel lifecycles
 - `BeakerKernelMappingManager`: Maps sessions to kernels
 - `BeakerKernelSpecManager`: Handles kernel specification discovery
-- `BeakerKernelProvisioner`: Provisions and manages kernel resources
+- `BeakerProvisioner` / `BeakerLocalProvisioner` / `BeakerProvisionerFactory`: Provisions and manages kernel resources, including support for distributed/remote kernels
 
 **Context Services** (`context/`):
 - `BeakerContextManager`: Manages context lifecycle and state with in-memory tracking
@@ -135,7 +139,13 @@ Provides business logic and manages system resources:
 
 **Storage** (`storage/`):
 - Persistent storage backends for notebooks and state
+- `BeakerLocalContentsManager` provides user-aware file content management with per-user home isolation
 - Configurable storage providers
+
+**Service API Convention** (`services/__init__.py`):
+- `ServiceApi` and `ServiceApiHandler` define a standardized REST handler pattern
+- Subclassing `ServiceApi` auto-registers handlers under `/beaker/<prefix>/…` via subclass introspection
+- Supports dataclass serialization with Jupyter JSON compatibility, simplifying the addition of new endpoints
 
 ### 3. Core Kernel Layer
 
@@ -157,6 +167,29 @@ The heart of Beaker's computational capabilities:
 - `BeakerSubkernel`: Base class for language-specific execution engines
 - Manages code execution, state persistence, and environment isolation
 - Includes a checkpointing framework (`CheckpointableBeakerSubkernel`) for snapshotting and rolling back kernel state across executions. **Checkpointing is temporarily disabled** in the current release because serializing kernel state can take several minutes in some cases; the implementation is retained and will be revisited in a future update.
+
+Built-in subkernels live in `subkernels/<language>/` as packages rather than single files. Each package contains:
+- `subkernel.py`: the `BeakerSubkernel` subclass for that language
+- `procedures/`: language-side helper scripts loaded into the running kernel (e.g. `fetch_state.<ext>`)
+- `procedures/reflectors/`: per-type variable reflectors invoked by the reflector system (see below)
+
+**Reflector System** (`lib/reflector.py` + `subkernels/*/procedures/reflectors/`):
+- Provides a uniform way to introspect variables in a running subkernel and produce a structured summary suitable for inclusion in agent context
+- Each language ships per-type reflectors (e.g. Python: `class`, `dataframe`, `function`, `mapping`, `ndarray`, `primitive`, `sequence`, `series`, `string`; Julia: `array`, `dict`, `function`, `module`, `type`; R: `data_frame`, `function`, `list`, `vector`) plus a `default` fallback
+- Reflectors live as discrete files in each subkernel package so they are discoverable and extendable without modifying core code
+
+**State Representation** (`lib/kernel_state.py`, `lib/notebook_state.py`, `lib/context_dump.py`):
+- `kernel_state.py` captures the current state of the subkernel (variables, imports, environment) for inclusion in the agent's prompt
+- `notebook_state.py` captures the current state of the notebook (cells, outputs, history) for the same purpose
+- `context_dump.py` assembles the serialized context payload that is fed to the LLM, with hooks for prompt-cache–friendly formatting
+
+**Integration System** (`lib/integrations/`):
+- Provides a registry of named integrations (data sources, APIs, skills) that contexts can expose to their agents
+- `registry.py` defines the registry; `base.py` defines the integration base class
+- `skill.py` implements skill integrations — bundles of metadata, instructions, examples, and file resources that augment an agent's capabilities
+- `adhoc.py` supports user-defined integrations created at runtime
+- `types.py` defines integration resource types (metadata, instructions, files, examples)
+- Integrations are addressed by **slug** rather than by name, allowing stable references across renames
 
 **Agent System** (`lib/agent.py`, `lib/agent_tasks.py`):
 - AI agent base classes and task definitions
@@ -186,7 +219,11 @@ The heart of Beaker's computational capabilities:
 
 **Built-in Extensions**:
 - **Contexts** (`contexts/`): Default AI-powered context with agents
-- **SubKernels** (`subkernels/`): Python, R, Julia language support
+- **SubKernels** (`subkernels/`): Python, R, and Julia language support, each shipped as a package with its own procedures and reflectors
+
+### 5. Backward Compatibility
+
+The `beaker_kernel/service/` (singular) module tree was reorganized in v2.0 into `beaker_kernel/app/`, `beaker_kernel/services/`, and `beaker_kernel/lib/admin.py`. To avoid breaking external code that imports from the old paths, `beaker_kernel/__init__.py` installs an import-redirect map (via `beaker_kernel.util.refactor.redirect_imports`) that transparently forwards legacy `beaker_kernel.service.*` imports to their new locations. New code should import from the new paths; the redirect is provided for transition only.
 
 ## Key Design Patterns
 

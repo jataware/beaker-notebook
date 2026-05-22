@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Debugging
+parent: Development
 nav_order: 6
 has_toc: true
 ---

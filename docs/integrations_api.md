@@ -1,8 +1,9 @@
 ---
 layout: default
-title: Integrations REST API
-parent: Integrations
-nav_order: 1
+title: REST API
+parent: Integration Development
+grand_parent: Development
+nav_order: 2
 has_toc: true
 ---
 

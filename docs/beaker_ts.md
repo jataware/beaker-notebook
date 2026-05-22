@@ -1,32 +1,30 @@
 ---
 layout: default
 title: beaker-ts
-nav_order: 8
-has_toc: false
-has_children: true
+parent: UI Development
+grand_parent: Development
+nav_order: 1
+has_toc: true
 ---
 
-# beaker-ts typescript library
+# beaker-ts TypeScript library
 
-Beaker comes with a typescript library that simplifies working with Beaker
-in the browser. Highlights of what beaker-ts provides include:
+`beaker-ts` is a low-level TypeScript library for embedding Beaker into your own front-end application. It provides session management, message handling, a lightweight reactive notebook model, and rendering utilities for working with a running Beaker kernel from the browser.
 
-* Easy creation of Beaker sessions
-  * Connecting to an existing Beaker kernel or spinning up a new one
-  * Ability to send/recieve messages directly to the Beaker kernel
-  * Kernel status tracking
-* A light-weight reactive notebook
-  * Interfaces and classes for all standard Jupyter cells
-  * A new Beaker "LLM Query" cell for interactions with the LLM agent
-  * Full rendering of types registered with Jupyter
-  * Exportable to a standard Jupyter .ipynb file
-  * Tested to be reactive in React and Vue frameworks
-* Session history tracking
-  * Tracks all actions taken in a notebook (in progress)
-  * Savable/Exportable to JSON (coming soon)
-  * Ability to fully roll-back a notebook to a previous point (planned feature)
+## What beaker-ts provides
 
-It is recommended to use the beaker-ts library to create and edit your Beaker
-sessions and notebooks.
+* **Sessions** — creating and managing Beaker sessions, including connecting to an existing kernel or spinning up a new one, sending and receiving messages directly to the kernel, and tracking kernel status.
+* **A lightweight reactive notebook** — interfaces and classes for all standard Jupyter cell types plus a Beaker-specific "LLM Query" cell for interactions with the agent. Tested to be reactive in React and Vue. Exportable to standard Jupyter `.ipynb` format.
+* **Rendering** — full rendering of all output types registered with Jupyter, with a pluggable system for adding custom MIME renderers.
+* **History tracking** — records the actions taken in a notebook to support future save/replay and rollback workflows.
+* **Utilities** — message helpers, type guards, and small utilities for working with Jupyter messages and notebook cells.
 
-[Full Beaker-ts API documentation](/beaker-kernel/beaker-ts/)
+The library is organized into modules — `session`, `notebook`, `history`, `util`, `render` — that correspond to each of these areas. Full per-module API reference, generated from the source, is available at:
+
+[Beaker-ts API documentation]({{ site.baseurl }}/beaker-ts/)
+
+## When to use beaker-ts
+
+If you are building a custom front-end that talks to a Beaker kernel, `beaker-ts` is the right starting point — it handles the Jupyter protocol details, session lifecycle, and notebook model so you can focus on your own UI.
+
+If you are extending the default Beaker UI (the notebook you see when you run `beaker notebook`), you will want to work with the `beaker-vue` component library or the `beaker-ui` application instead. Both are built on top of `beaker-ts` and are part of this repository.

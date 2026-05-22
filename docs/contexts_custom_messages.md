@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Custom Messages
-parent: Contexts
+parent: Context Development
+grand_parent: Development
 nav_order: 2
 has_toc: true
 ---
