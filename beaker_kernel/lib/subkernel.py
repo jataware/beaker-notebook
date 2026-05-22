@@ -467,6 +467,9 @@ class BeakerSubkernel(abc.ABC):
 
         try:
             execution_task: ExecutionTask
+            # Checkpointing is temporarily disabled: serializing kernel state can take several minutes in
+            # some cases, which makes the per-execution checkpoint unworkable. We plan to revisit this in
+            # a future update. Until then, code is executed directly without a surrounding checkpoint.
             # if isinstance(agent.context.subkernel, CheckpointableBeakerSubkernel) and is_checkpointing_enabled():
             #     checkpoint_index, execution_task = await agent.context.subkernel.checkpoint_and_execute(
             #         code, not autoexecute, parent_header=message.header, identities=identities
@@ -797,6 +800,11 @@ BaseSubkernel = BeakerSubkernel
 
 
 def is_checkpointing_enabled():
+    # Checkpointing is temporarily disabled regardless of the `enable_checkpoints` config flag.
+    # Serializing kernel state can take several minutes in some cases, which makes the
+    # checkpoint-per-execution model unusable in practice. The implementation is preserved below
+    # and we plan to revisit it in a future update once state serialization can be made fast and
+    # bounded. To re-enable, restore the commented-out body in place of the unconditional False.
     return False
     # return getattr(config, "enable_checkpoints", True)
 

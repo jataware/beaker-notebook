@@ -156,7 +156,7 @@ The heart of Beaker's computational capabilities:
 **SubKernel System** (`lib/subkernel.py`):
 - `BeakerSubkernel`: Base class for language-specific execution engines
 - Manages code execution, state persistence, and environment isolation
-- Supports checkpointing and state management across executions
+- Includes a checkpointing framework (`CheckpointableBeakerSubkernel`) for snapshotting and rolling back kernel state across executions. **Checkpointing is temporarily disabled** in the current release because serializing kernel state can take several minutes in some cases; the implementation is retained and will be revisited in a future update.
 
 **Agent System** (`lib/agent.py`, `lib/agent_tasks.py`):
 - AI agent base classes and task definitions

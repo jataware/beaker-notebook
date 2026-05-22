@@ -225,7 +225,13 @@ class ConfigClass:
         save_default_value=True,
     )
     enable_checkpoints: bool = configfield(
-        "Flag as to whether checkpoints are enabled or not.",
+        # NOTE: Checkpointing is temporarily disabled in code (see
+        # beaker_kernel.lib.subkernel.is_checkpointing_enabled) due to a performance issue where
+        # serializing kernel state can take several minutes in some cases. This flag is currently
+        # a no-op and is retained so the configuration surface does not change when checkpointing
+        # is revisited in a future update.
+        "Flag as to whether checkpoints are enabled or not. Currently disabled regardless of this "
+        "setting pending a fix for slow kernel-state serialization.",
         "ENABLE_CHECKPOINTS",
         default=True,
         sensitive=False,
