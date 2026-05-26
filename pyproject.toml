@@ -61,16 +61,18 @@ allow-direct-references = true
 
 [tool.hatch.build]
 require-runtime-dependencies = true
+artifacts = [
+  "src/beaker_notebook/app/ui",
+]
+
+[tool.hatch.build.targets.wheel]
 packages = [
   "src/beaker_notebook",
   "src/beaker_kernel",
 ]
-include = [
-  "src/beaker_notebook/app/ui",
-]
-artifacts = [
-  "src/beaker_notebook/app/ui",
-]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src"]
 
 [tool.hatch.envs.hatch-build]
 system-packages = true
