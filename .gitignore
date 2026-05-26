@@ -71,4 +71,4 @@ shell.nix
 .beaker.conf
 beaker_config.py
 beaker_*_config.py
-beaker_kernel/**/ui/*
+src/beaker_notebook/**/ui/*
