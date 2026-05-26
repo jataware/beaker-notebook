@@ -336,7 +336,6 @@ class ContextHandler(JupyterHandler):
     def get(self):
         """Get the main page for the application's interface."""
         ksm = self.kernel_spec_manager
-        # contexts: dict[str, BeakerContext] = autodiscover("contexts")
         context_manager: BeakerContextManager = self.serverapp.context_manager
         contexts = sorted(context_manager.list_contexts(), key=lambda context: context.weight)
         possible_subkernels: dict[str, BeakerSubkernel] = autodiscover("subkernels")

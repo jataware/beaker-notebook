@@ -389,17 +389,6 @@ export class BeakerSession {
         return cell;
     };
 
-    // public toJSON(): string {
-    //     return JSON.stringify({
-    //         notebook: this.notebook?.toJSON()
-    //     });
-    // }
-
-    // public fromJSON(): BeakerSession {
-    //     // TODO
-    //     return new BeakerSession();
-    // }
-
     /**
      * Populates the sessions notebook with the provided notebook json
      *

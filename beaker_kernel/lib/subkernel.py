@@ -218,8 +218,7 @@ class BeakerSubkernel(abc.ABC):
         return [candidate] if os.path.isdir(candidate) else []
 
     def _is_kernelstate_enabled(self):
-        # TODO: Make this actually conditional (remove "or True")
-        return bool(config.send_kernel_state) or True
+        return bool(config.send_kernel_state)
 
     def _has_kernelstate(self):
         """True when this subkernel has a fetch_state procedure registered, or

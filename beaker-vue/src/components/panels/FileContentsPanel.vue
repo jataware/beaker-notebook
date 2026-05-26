@@ -128,9 +128,9 @@ const mimeCategory = (mimetype: string): PreviewCategory => {
     if (mimetype === 'text/tsv') {
         return 'tsv'
     }
-    // todo: is this comprehensive?
     if (mimetype === 'application/vnd.ms-excel' ||
-        mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        mimetype === 'application/vnd.oasis.opendocument.spreadsheet')
     {
         return 'excel'
     }

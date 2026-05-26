@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject } from "vue";
+import { ref, computed, inject, watch } from "vue";
 import Tree from 'primevue/tree';
 import type { TreeNode } from 'primevue/treenode';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
@@ -93,11 +93,6 @@ const contextPanelOpen = ref(true);
 const toggleContextPanel = () => {
     contextPanelOpen.value = !contextPanelOpen.value;
 };
-
-// This should mostly be uncontrolled, but it was
-// "hard" to open by default without controlling
-// TODO easier way for tree to auto-open by default
-const contextExpandedKeys = ref({0: true, 1: true, 2: true, 3: true, 5: true});
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const activeContext = computed(() => {
@@ -169,6 +164,15 @@ const contextNodes = computed<TreeNode[]>(() => {
     return displayableNodes;
 
 });
+
+// Seeded from contextNodes' `expanded` flags so we don't hard-code numeric keys;
+// kept as a ref (not computed) so the user can collapse/expand interactively.
+const contextExpandedKeys = ref<Record<string, boolean>>({});
+watch(contextNodes, (nodes) => {
+    contextExpandedKeys.value = Object.fromEntries(
+        nodes.filter(node => node.expanded).map(node => [node.key, true])
+    );
+}, { immediate: true });
 
 </script>
 

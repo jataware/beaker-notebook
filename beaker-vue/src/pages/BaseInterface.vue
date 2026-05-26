@@ -313,10 +313,14 @@ const saveSnapshot = async (ignoreSession: boolean = false) => {
     const session: Session = beakerSession.value?.session;
     const sessionId = session?.sessionId ;
 
-    // TODO: Check session id matches
     const notebookData: {[key: string]: any} = {
         ...(notebookInfo.value || {}),
     };
+    if (notebookData.session_id && sessionId && notebookData.session_id !== sessionId) {
+        console.warn(`saveSnapshot: session id mismatch (expected ${notebookData.session_id}, got ${sessionId}); skipping save.`);
+        return;
+    }
+    notebookData.session_id = sessionId;
 
     // Only save state if there is state to save
     if (session.notebook) {

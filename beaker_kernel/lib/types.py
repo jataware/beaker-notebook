@@ -307,7 +307,7 @@ class ContextInfo:
             short_name=context_cls.SHORT_NAME,
             full_name=context_cls.FULL_NAME,
             cls=to_import_string(context_cls),
-            description=context_cls.__doc__,  # TODO: Improve this
+            description=inspect.cleandoc(context_cls.__doc__) if context_cls.__doc__ else None,
             weight=getattr(context_cls, "WEIGHT", None),
             agent=agent,
             actions={

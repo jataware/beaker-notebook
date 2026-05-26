@@ -91,6 +91,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
 
     const activeContext = ref();
     const notebookComponent = ref();
+    const customRendererMimetypes = ref<Set<string>>(new Set());
 
     const sessionName = props.sessionName ?? props.sessionId;
     const rawSession: BeakerSession = new BeakerSession(
@@ -122,8 +123,16 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
             emit("session-status-changed", newStatus);
           }
           if (msg.header.msg_type === "context_info_response") {
-            // TODO: Clear previously loaded custom renderers on context switch to prevent
-            // stale renderers from persisting when switching between contexts.
+            // Remove any renderers loaded for the prior context so they don't shadow
+            // standard renderers after a context switch.
+            const rendererStore = (rawSession.renderer as any)._renderers;
+            if (rendererStore) {
+              for (const mimetype of customRendererMimetypes.value) {
+                delete rendererStore[mimetype];
+              }
+            }
+            customRendererMimetypes.value = new Set();
+
             if (msg.content.info?.custom_renderers) {
               console.debug("Custom Renderers", msg.content.info.custom_renderers);
               // Group by URL to avoid re-importing the same module multiple times
@@ -140,6 +149,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
                     const renderer = mod[name] ?? mod.default;
                     if (renderer) {
                       rawSession.renderer.addRenderer(renderer);
+                      customRendererMimetypes.value.add(mimetype);
                     } else {
                       console.warn(`Custom renderer export "${name}" for ${mimetype} not found in ${url}`);
                     }
@@ -204,8 +214,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
 
     setContext(contextPayload: any) {
         const showToast: (...args) => void = inject('show_toast');
-        // TODO: Figure out a better way set context to "loading" state
-        this.activeContext = {};
+        this.activeContext = { loading: true };
 
         const future = this.session.setContext(contextPayload);
         future.then((result: any) => {

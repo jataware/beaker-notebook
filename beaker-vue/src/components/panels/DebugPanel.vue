@@ -44,7 +44,7 @@
 
 <script lang="ts" setup>
 
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import DebugLogMessage from "../misc/DebugLogMessage.vue";
@@ -59,11 +59,22 @@ const emit = defineEmits([
 ]);
 
 const filterValue = ref("");
+const debouncedFilter = ref("");
 const sortDirection = ref("asc");
 
 const hideSubkernelInternals = ref(false);
 
-// TODO debounce for quick typing
+let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+watch(filterValue, (value) => {
+    if (filterDebounceTimer !== null) {
+        clearTimeout(filterDebounceTimer);
+    }
+    filterDebounceTimer = setTimeout(() => {
+        debouncedFilter.value = value;
+        filterDebounceTimer = null;
+    }, 400);
+});
+
 const filteredLogs = computed(() => {
     const sortby: (arg: any) => number = props.sortby || ((entry) => entry.timestamp);
     const asc = (a: any, b: any) => (sortby(a) > sortby(b) ? 1 : (sortby(a) < sortby(b)) ? -1 : 0);
@@ -88,7 +99,7 @@ const filteredLogs = computed(() => {
     }
 
     const filtered = props.entries
-        ?.filter(entry => filterValue.value !== "" ? entry?.type?.includes(filterValue.value) : true)
+        ?.filter(entry => debouncedFilter.value !== "" ? entry?.type?.includes(debouncedFilter.value) : true)
         ?.filter(entry => hideSubkernelInternals.value ? !isSubkernelInternal(entry) : true);
 
 

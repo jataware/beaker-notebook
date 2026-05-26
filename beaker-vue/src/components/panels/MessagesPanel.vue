@@ -45,7 +45,7 @@
 
 <script lang="ts" setup>
 
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
 import JSONMessage from "../misc/JSONMessage.vue";
@@ -60,7 +60,19 @@ const emit = defineEmits([
 ]);
 
 const filterValue = ref("");
+const debouncedFilter = ref("");
 const sortDirection = ref("asc");
+
+let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+watch(filterValue, (value) => {
+    if (filterDebounceTimer !== null) {
+        clearTimeout(filterDebounceTimer);
+    }
+    filterDebounceTimer = setTimeout(() => {
+        debouncedFilter.value = value;
+        filterDebounceTimer = null;
+    }, 400);
+});
 
 const options = ref([]);
 
@@ -72,21 +84,19 @@ const linenum = computed(() => {
     return options.value.includes('linenum');
 })
 
-// TODO debounce for quick typing
 const filteredLogs = computed(() => {
-const sortby: (arg: any) => number = props.sortby || ((entry) => entry.timestamp);
-const asc = (a: any, b: any) => (sortby(a) > sortby(b) ? 1 : (sortby(a) < sortby(b)) ? -1 : 0);
-const desc = (a: any, b: any) => (sortby(a) < sortby(b) ? 1 : (sortby(a) > sortby(b)) ? -1 : 0);
+    const sortby: (arg: any) => number = props.sortby || ((entry) => entry.timestamp);
+    const asc = (a: any, b: any) => (sortby(a) > sortby(b) ? 1 : (sortby(a) < sortby(b)) ? -1 : 0);
+    const desc = (a: any, b: any) => (sortby(a) < sortby(b) ? 1 : (sortby(a) > sortby(b)) ? -1 : 0);
 
-const filtered = props.entries?.filter(entry => entry.type.includes(filterValue.value));
+    const filtered = props.entries?.filter(entry => entry.type.includes(debouncedFilter.value));
 
-// Return sorted list
-if (sortDirection.value === 'asc') {
-    return filtered.sort(asc);
-}
-else {
-    return filtered.sort(desc);
-}
+    if (sortDirection.value === 'asc') {
+        return filtered.sort(asc);
+    }
+    else {
+        return filtered.sort(desc);
+    }
 });
 
 
