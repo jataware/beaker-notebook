@@ -15,9 +15,9 @@ from typing import Any, Optional
 
 import yaml
 
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-from beaker_kernel.lib.workflow import Workflow
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.workflow import Workflow
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ def _discover_legacy_contexts(
     """
     Discover contexts from legacy JSON mappings that weren't found via entry points.
     """
-    from beaker_kernel.lib.autodiscovery import autodiscover
+    from beaker_notebook.lib.autodiscovery import autodiscover
 
     ep_names = {ep.name for ep in eps}
     all_contexts = autodiscover("contexts")
@@ -235,7 +235,7 @@ def _find_integration_providers(
     a SkillIntegrationProvider) with any declared via the class-level
     INTEGRATION_PROVIDERS attribute.
     """
-    from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
+    from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
 
     providers: list[BaseIntegrationProvider] = [SkillIntegrationProvider("Default Skills")]
 

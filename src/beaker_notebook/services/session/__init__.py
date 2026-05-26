@@ -7,7 +7,7 @@ from jupyter_core.utils import ensure_async
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 from traitlets import default
 
-from beaker_kernel.services.auth import current_user, BeakerUser
+from beaker_notebook.services.auth import current_user, BeakerUser
 
 
 class BeakerSessionManager(SessionManager):

@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any
 
-from beaker_kernel.lib import BeakerSubkernel
+from beaker_notebook.lib import BeakerSubkernel
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 {
     "argv": [
-        "python3", "-m", "beaker_kernel.kernel",
+        "python3", "-m", "beaker_notebook.kernel",
         "start", "{connection_file}"
     ],
     "display_name": "Beaker Kernel",

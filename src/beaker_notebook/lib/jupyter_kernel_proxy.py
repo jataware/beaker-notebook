@@ -310,7 +310,7 @@ class KernelProxyManager(object):
         "Update self.kernels with an ordered dict where keys are file name and"
         "values are the configuration (file content) as dict"
 
-        from beaker_kernel.lib.config import config as beaker_config
+        from beaker_notebook.lib.config import config as beaker_config
 
         kernelfile_dir = os.path.join(beaker_config.beaker_run_path, "kernelfiles")
         files = glob.glob(os.path.join(jupyter_runtime_dir(), "kernel-*.json"))

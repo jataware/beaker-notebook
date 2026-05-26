@@ -18,10 +18,10 @@ class AgentFile(TemplateFile):
 from typing import TYPE_CHECKING
 
 from archytas.tool_utils import tool
-from beaker_kernel.lib import BeakerAgent
+from beaker_notebook.lib import BeakerAgent
 
 if TYPE_CHECKING:
-    from beaker_kernel.kernel import BeakerKernel
+    from beaker_notebook.kernel import BeakerKernel
 
 
 class {agent_class}(BeakerAgent):

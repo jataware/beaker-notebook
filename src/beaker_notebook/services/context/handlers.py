@@ -1,6 +1,6 @@
 import typing
 
-from beaker_kernel.services import ServiceApi, ServiceApiHandler, HTTPError
+from beaker_notebook.services import ServiceApi, ServiceApiHandler, HTTPError
 
 if typing.TYPE_CHECKING:
     from .manager import BeakerContextManager

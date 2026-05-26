@@ -6,14 +6,14 @@ from datetime import datetime
 from itertools import islice
 from typing import get_origin, get_args, Mapping
 
-from beaker_kernel.lib.integrations.types import Integration
-from beaker_kernel.lib.utils import to_import_string, import_dotted_class
-from beaker_kernel.lib.workflow import Workflow
+from beaker_notebook.lib.integrations.types import Integration
+from beaker_notebook.lib.utils import to_import_string, import_dotted_class
+from beaker_notebook.lib.workflow import Workflow
 
 if typing.TYPE_CHECKING:
-    from beaker_kernel.lib.context import BeakerContext
-    from beaker_kernel.lib.agent import BeakerAgent
-    from beaker_kernel.lib.subkernel import BeakerSubkernel
+    from beaker_notebook.lib.context import BeakerContext
+    from beaker_notebook.lib.agent import BeakerAgent
+    from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 
 def is_action(target: typing.Any) -> bool:

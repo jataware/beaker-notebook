@@ -5,7 +5,7 @@ from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_quoteattr
 import nbformat
 from nbformat import NotebookNode
 
-from beaker_kernel.lib.utils import normalize_notebook
+from beaker_notebook.lib.utils import normalize_notebook
 
 DEFAULT_TRUNCATION_LIMIT = 200
 DEFAULT_TRUNCATION_RATIO = (4/5)

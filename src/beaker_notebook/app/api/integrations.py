@@ -9,7 +9,7 @@ from jupyter_server.base.handlers import JupyterHandler
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 from jupyter_server.services.sessions.sessionmanager import SessionManager
 
-from beaker_kernel.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.autodiscovery import autodiscover
 
 import tornado
 

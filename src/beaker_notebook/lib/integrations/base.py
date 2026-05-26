@@ -5,8 +5,8 @@ from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
 from typing_extensions import Self
 from uuid import uuid4
 
-from beaker_kernel.lib.integrations.types import Integration, Resource
-from beaker_kernel.lib.autodiscovery import find_resource_dirs
+from beaker_notebook.lib.integrations.types import Integration, Resource
+from beaker_notebook.lib.autodiscovery import find_resource_dirs
 
 class BaseIntegrationProvider(ABC):
 

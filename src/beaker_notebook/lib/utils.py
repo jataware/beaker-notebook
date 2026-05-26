@@ -24,7 +24,7 @@ from .jupyter_kernel_proxy import ( KERNEL_SOCKETS, KERNEL_SOCKETS_NAMES,
                                    JupyterMessage, JupyterMessageTuple)
 
 if TYPE_CHECKING:
-    from beaker_kernel.lib.agent import BeakerAgent
+    from beaker_notebook.lib.agent import BeakerAgent
     from archytas.chat_history import ToolMessage, ChatHistory
     from nbformat import NotebookNode
 

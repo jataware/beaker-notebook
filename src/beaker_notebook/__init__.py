@@ -1,4 +1,4 @@
-from beaker_kernel.util.refactor import redirect_imports, ImportRedirectMap
+from beaker_notebook.util.refactor import redirect_imports, ImportRedirectMap
 
 redirect_map: ImportRedirectMap = {
     'beaker_kernel.service.admin_utils': {
@@ -83,6 +83,89 @@ redirect_map: ImportRedirectMap = {
         'FileNotebookManager': 'beaker_kernel.services.storage.notebook',
         'NotebookInfo': 'beaker_kernel.services.storage.notebook',
         'with_hidden_files': 'beaker_kernel.services.storage.notebook',
+    },
+    'beaker_notebook.service.admin_utils': {
+        'build_edges_map': 'beaker_notebook.lib.admin',
+        'build_proc_info': 'beaker_notebook.lib.admin',
+        'fetch_kernel_info': 'beaker_notebook.lib.admin',
+        'fetch_system_stats': 'beaker_notebook.lib.admin',
+    },
+    'beaker_notebook.service.api': {},
+    'beaker_notebook.service.api.handlers': {
+        'add_handler_prefix': 'beaker_notebook.app.api.handlers',
+        'find_api_handlers': 'beaker_notebook.app.api.handlers',
+        'register_api_handlers': 'beaker_notebook.app.api.handlers',
+    },
+    'beaker_notebook.service.api.integrations': {
+        'BeakerAPIMixin': 'beaker_notebook.app.api.integrations',
+        'IntegrationHandler': 'beaker_notebook.app.api.integrations',
+        'IntegrationResourceHandler': 'beaker_notebook.app.api.integrations',
+        'get_context': 'beaker_notebook.app.api.integrations',
+    },
+    'beaker_notebook.service.api.notebook': {
+        'NotebookHandler': 'beaker_notebook.app.api.notebook'
+    },
+    'beaker_notebook.service.auth': {
+        'BeakerUser': 'beaker_notebook.services.auth',
+        'current_request': 'beaker_notebook.services.auth',
+        'current_user': 'beaker_notebook.services.auth',
+        'BeakerAuthorizer': 'beaker_notebook.services.auth',
+        'BeakerIdentityProvider': 'beaker_notebook.services.auth',
+        'BeakerPermission': 'beaker_notebook.services.auth',
+        'BeakerRole': 'beaker_notebook.services.auth',
+        'RoleBasedUser': 'beaker_notebook.services.auth',
+    },
+    'beaker_notebook.service.auth.dummy': {
+        'DummyAuthorizer': 'beaker_notebook.services.auth.dummy',
+        'DummyIdentityProvider': 'beaker_notebook.services.auth.dummy',
+    },
+    'beaker_notebook.service.auth.notebook': {
+        'NotebookAuthorizer': 'beaker_notebook.services.auth.notebook',
+        'NotebookIdentityProvider': 'beaker_notebook.services.auth.notebook',
+    },
+    'beaker_notebook.service.base': {
+        'BaseBeakerApp': 'beaker_notebook.app.base',
+        'BeakerKernelManager': 'beaker_notebook.services.kernel.manager',
+        'BeakerKernelMappingManager': 'beaker_notebook.services.kernel.mappingmanager',
+        'BeakerKernelSpecManager': 'beaker_notebook.services.kernel.spec',
+        'BeakerSessionManager': 'beaker_notebook.services.session',
+    },
+    'beaker_notebook.service.dev': {
+        'BeakerWatchDog': 'beaker_notebook.app.dev_app',
+        'DevBeakerJupyterApp': 'beaker_notebook.app.dev_app',
+        'create_observer': 'beaker_notebook.app.dev_app',
+    },
+    'beaker_notebook.service.handlers': {
+        'ConfigController': 'beaker_notebook.app.handlers',
+        'ConfigHandler': 'beaker_notebook.app.handlers',
+        'ContextHandler': 'beaker_notebook.app.handlers',
+        'ExportAsHandler': 'beaker_notebook.app.handlers',
+        'PageHandler': 'beaker_notebook.app.handlers',
+        'StatsHandler': 'beaker_notebook.app.handlers',
+        'register_handlers': 'beaker_notebook.app.handlers',
+        'request_log_handler': 'beaker_notebook.app.handlers',
+        'sanitize_env': 'beaker_notebook.app.handlers',
+    },
+    'beaker_notebook.service.notebook': {
+        'BeakerNotebookApp': 'beaker_notebook.app.notebook_app'
+    },
+    'beaker_notebook.service.server': {
+        'BeakerServerApp': 'beaker_notebook.app.server_app'
+    },
+    'beaker_notebook.service.storage': {},
+    'beaker_notebook.service.storage.base': {
+        'BaseBeakerContentsManager': 'beaker_notebook.services.storage.base',
+        'BeakerLocalContentsHandler': 'beaker_notebook.services.storage.base',
+        'BeakerLocalContentsManager': 'beaker_notebook.services.storage.base',
+        'BeakerStorageManager': 'beaker_notebook.services.storage.base',
+        'with_hidden_files': 'beaker_notebook.services.storage.base',
+    },
+    'beaker_notebook.service.storage.notebook': {
+        'BaseNotebookManager': 'beaker_notebook.services.storage.notebook',
+        'BrowserLocalDataNotebookManager': 'beaker_notebook.services.storage.notebook',
+        'FileNotebookManager': 'beaker_notebook.services.storage.notebook',
+        'NotebookInfo': 'beaker_notebook.services.storage.notebook',
+        'with_hidden_files': 'beaker_notebook.services.storage.notebook',
     },
 }
 

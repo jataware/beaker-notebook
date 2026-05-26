@@ -290,7 +290,7 @@ class BeakerSubkernel(abc.ABC):
         applies the configured sample-byte budget, and renders the agent-
         facing markdown block.
         """
-        from beaker_kernel.lib.kernel_state import (
+        from beaker_notebook.lib.kernel_state import (
             apply_sample_budget,
             render_agent_payload,
         )
@@ -323,7 +323,7 @@ class BeakerSubkernel(abc.ABC):
             str: A markdown block containing the structured descriptions and a
                  list of any names that weren't found in the kernel.
         """
-        from beaker_kernel.lib.kernel_state import apply_sample_budget
+        from beaker_notebook.lib.kernel_state import apply_sample_budget
         if not names:
             return "describe_variables called with no names; pass at least one."
         if "describe_variables" not in (self.context.templates or {}):

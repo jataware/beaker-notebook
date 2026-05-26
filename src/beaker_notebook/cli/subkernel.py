@@ -20,7 +20,7 @@ normalize_file_name_component = BuilderInterface.normalize_file_name_component
 
 from .helpers import find_pyproject_file
 
-from beaker_kernel.lib.config import config
+from beaker_notebook.lib.config import config
 
 
 HATCH_NEW_SUBKERNEL_CONFIG_FILE_DEFAULTS = {
@@ -240,7 +240,7 @@ def list_subkernels(all):
     Information on which kernels/packages are required to run a kernel is usually found in the docsting for a subkernel,
     viewable when run with the -a flag.
     """
-    from beaker_kernel.lib.subkernel import autodiscover_subkernels
+    from beaker_notebook.lib.subkernel import autodiscover_subkernels
     # Fetch installed jupyter subkernels
     from jupyter_client.kernelspec import KernelSpecManager
     ksm = KernelSpecManager()
@@ -312,8 +312,8 @@ def verify_subkernel(slug):
     SLUG, only that subkernel is checked. The command exits non-zero if any
     check fails so it can be wired into CI.
     """
-    from beaker_kernel.lib.subkernel import autodiscover_subkernels
-    from beaker_kernel.lib.reflector import (
+    from beaker_notebook.lib.subkernel import autodiscover_subkernels
+    from beaker_notebook.lib.reflector import (
         REFLECTOR_SUBDIR,
         REQUIRED_HEADER_KEYS,
         parse_reflector_header,
@@ -460,7 +460,7 @@ def verify_subkernel(slug):
         # 4. Render fetch_state with the populated registry to ensure it
         #    composes without Jinja errors.
         if fetch_state_files:
-            from beaker_kernel.lib.reflector import ReflectorRegistry
+            from beaker_notebook.lib.reflector import ReflectorRegistry
             registry = ReflectorRegistry.from_jinja_env(env)
             try:
                 env.get_template(fetch_state_files[0]).render(

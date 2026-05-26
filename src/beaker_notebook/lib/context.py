@@ -20,13 +20,13 @@ from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 from nbformat import NotebookNode
 import yaml
 
-from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook
-from beaker_kernel.lib.config import config as beaker_config
-from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-from beaker_kernel.lib.integrations.registry import IntegrationProviderRegistry
-from beaker_kernel.lib.integrations.types import Integration
-from beaker_kernel.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
+from beaker_notebook.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook
+from beaker_notebook.lib.config import config as beaker_config
+from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.integrations.registry import IntegrationProviderRegistry
+from beaker_notebook.lib.integrations.types import Integration
+from beaker_notebook.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
 
 
 from .jupyter_kernel_proxy import InterceptionFilter, JupyterMessage
@@ -34,7 +34,7 @@ from .jupyter_kernel_proxy import InterceptionFilter, JupyterMessage
 if TYPE_CHECKING:
     from archytas.react import ReActAgent
 
-    from beaker_kernel.kernel import BeakerKernel
+    from beaker_notebook.kernel import BeakerKernel
 
     from .agent import BeakerAgent
     from .subkernel import BeakerSubkernel
@@ -175,7 +175,7 @@ class BeakerContext:
             # environment. Context-level reflectors are registered first (so
             # they win on duplicate names) by virtue of FileSystemLoader's
             # in-order resolution.
-            from beaker_kernel.lib.reflector import ReflectorRegistry
+            from beaker_notebook.lib.reflector import ReflectorRegistry
             self.subkernel.reflectors = ReflectorRegistry.from_jinja_env(self.jinja_env)
 
         for workflow_id, workflow in self.workflows.items():
@@ -287,7 +287,7 @@ class BeakerContext:
 
     @property
     def default_integration_providers(self) -> set[BaseIntegrationProvider]:
-        from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
+        from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
 
         # Load global default skills
         default_providers = { SkillIntegrationProvider("Default Skills"), }

@@ -9,7 +9,7 @@ import traitlets
 from jupyter_server.base.handlers import AuthenticatedFileHandler
 from jupyter_server.services.contents.manager import ContentsManager
 from jupyter_server.services.contents.largefilemanager import AsyncLargeFileManager
-from beaker_kernel.services.auth import current_user, BeakerUser, BeakerAuthorizer, BeakerIdentityProvider
+from beaker_notebook.services.auth import current_user, BeakerUser, BeakerAuthorizer, BeakerIdentityProvider
 
 
 def with_hidden_files(func):

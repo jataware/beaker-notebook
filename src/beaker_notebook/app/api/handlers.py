@@ -8,16 +8,16 @@ from dataclasses import is_dataclass, asdict
 from typing import TYPE_CHECKING, get_origin, get_args, GenericAlias, Union, Generic, Generator, Optional, Any
 
 
-from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.app import BeakerApp
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.subkernel import BeakerSubkernel
-from beaker_kernel.lib.agent_tasks import summarize
-from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
-from beaker_kernel.lib import admin
+from beaker_notebook.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.app import BeakerApp
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.agent_tasks import summarize
+from beaker_notebook.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
+from beaker_notebook.lib import admin
 
 if TYPE_CHECKING:
-    from beaker_kernel.app.base import BaseBeakerApp
+    from beaker_notebook.app.base import BaseBeakerApp
 
 logger = logging.getLogger(__name__)
 

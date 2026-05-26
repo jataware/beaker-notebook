@@ -4,7 +4,7 @@ from datetime import datetime, date
 from typing import Any, Literal, Optional, TypeAlias, Union
 from uuid import uuid4
 
-from beaker_kernel.lib.utils import slugify
+from beaker_notebook.lib.utils import slugify
 
 
 IntegrationTypes: TypeAlias = Literal["api", "database", "dataset", "skill"]

@@ -18,15 +18,15 @@ from jupyterlab_server import LabServerApp
 from tornado import web, httputil
 from tornado.web import StaticFileHandler, RequestHandler, HTTPError
 
-from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.app import BeakerApp
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.subkernel import BeakerSubkernel
-from beaker_kernel.lib.utils import normalize_notebook
-from beaker_kernel.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
-from beaker_kernel.lib import admin
-from beaker_kernel.services.auth import BeakerUser
-from beaker_kernel.services.context.manager import BeakerContextManager
+from beaker_notebook.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.app import BeakerApp
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.utils import normalize_notebook
+from beaker_notebook.lib.config import config, locate_config, Config, Table, Choice, recursiveOptionalUpdate, reset_config
+from beaker_notebook.lib import admin
+from beaker_notebook.services.auth import BeakerUser
+from beaker_notebook.services.context.manager import BeakerContextManager
 from .api.handlers import register_api_handlers
 
 if TYPE_CHECKING:

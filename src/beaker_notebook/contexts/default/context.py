@@ -2,15 +2,15 @@ from typing import TYPE_CHECKING, Any, Dict, List
 import logging
 logger = logging.getLogger(__name__)
 
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.autodiscovery import autodiscover, AutodiscoveryItems
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.autodiscovery import autodiscover, AutodiscoveryItems
 
 from .agent import DefaultAgent
 
 if TYPE_CHECKING:
-    from beaker_kernel.kernel import BeakerKernel
-    from beaker_kernel.lib.agent import BeakerAgent
-    from beaker_kernel.lib.subkernel import BeakerSubkernel
+    from beaker_notebook.kernel import BeakerKernel
+    from beaker_notebook.lib.agent import BeakerAgent
+    from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 
 class DefaultContext(BeakerContext):

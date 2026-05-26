@@ -121,7 +121,7 @@ def list_apps():
     """
     List installed apps.
     """
-    from beaker_kernel.lib.autodiscovery import autodiscover
+    from beaker_notebook.lib.autodiscovery import autodiscover
     apps = autodiscover("apps")
     if apps:
         click.echo("Currently installed apps:\n")

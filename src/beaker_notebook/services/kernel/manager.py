@@ -7,11 +7,11 @@ from typing import Optional, TYPE_CHECKING
 from traitlets.traitlets import Unicode, Float
 from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
 
-from beaker_kernel.lib.app import BeakerApp
-from beaker_kernel.lib.config import config
+from beaker_notebook.lib.app import BeakerApp
+from beaker_notebook.lib.config import config
 
 if TYPE_CHECKING:
-    from beaker_kernel.app.base import BaseBeakerApp
+    from beaker_notebook.app.base import BaseBeakerApp
 
 
 class BeakerKernelManager(AsyncIOLoopKernelManager):

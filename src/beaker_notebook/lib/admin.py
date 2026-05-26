@@ -4,7 +4,7 @@ import os
 from collections import defaultdict
 from jupyter_core.paths import jupyter_runtime_dir
 
-from beaker_kernel.lib.config import config
+from beaker_notebook.lib.config import config
 
 async def fetch_system_stats():
     ps_process = asyncio.create_subprocess_exec('/usr/bin/ps', '-A', '-o', 'pid,ppid,%cpu,cputime,%mem,nlwp,rss,cmd', '--cumulative', 'Sww', '--no-headers', stdout=asyncio.subprocess.PIPE)

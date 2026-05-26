@@ -15,11 +15,11 @@ from typing import Literal, Optional, ClassVar, Awaitable
 import requests
 from tornado import ioloop
 
-from beaker_kernel.lib.config import reset_config, config
-from beaker_kernel.lib.context import BeakerContext, autodiscover_contexts
-from beaker_kernel.lib.subkernel import BeakerSubkernel
-from beaker_kernel.lib.jupyter_kernel_proxy import InterceptionFilter, JupyterMessage, KernelProxyManager
-from beaker_kernel.lib.utils import (message_handler, LogMessageEncoder, magic,
+from beaker_notebook.lib.config import reset_config, config
+from beaker_notebook.lib.context import BeakerContext, autodiscover_contexts
+from beaker_notebook.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.jupyter_kernel_proxy import InterceptionFilter, JupyterMessage, KernelProxyManager
+from beaker_notebook.lib.utils import (message_handler, LogMessageEncoder, magic,
                         handle_message, get_socket, execution_context, parent_message_context,
                         ForwardMessage, ensure_async)
 

@@ -16,13 +16,13 @@ class ContextFile(TemplateFile):
     TEMPLATE = """\
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from beaker_kernel.lib import BeakerContext
-from beaker_kernel.lib.utils import action
+from beaker_notebook.lib import BeakerContext
+from beaker_notebook.lib.utils import action
 
 from .agent import {agent_class}
 
 if TYPE_CHECKING:
-    from beaker_kernel.kernel import BeakerKernel
+    from beaker_notebook.kernel import BeakerKernel
 
 
 class {context_class}(BeakerContext):

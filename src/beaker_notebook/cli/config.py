@@ -9,8 +9,8 @@ from typing import Mapping, Sequence, Any, get_origin, get_args
 
 import click
 
-from beaker_kernel.lib.config import locate_config, config, ConfigClass, Table, recursiveOptionalUpdate, Choice
-from beaker_kernel.lib.utils import import_dotted_class
+from beaker_notebook.lib.config import locate_config, config, ConfigClass, Table, recursiveOptionalUpdate, Choice
+from beaker_notebook.lib.utils import import_dotted_class
 
 
 SENSITIVE_STR_REPR = "*" * 8

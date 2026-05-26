@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from functools import wraps
 
-from beaker_kernel.lib.config import locate_envfile, locate_config, reset_config
+from beaker_notebook.lib.config import locate_envfile, locate_config, reset_config
 
 def find_file_along_path(filename: str, start_path: Path | str | None = None) -> Path | None:
     if start_path is None:

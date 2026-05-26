@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterator, Literal, Optional, Any, TypedDict
 
-from beaker_kernel.lib.utils import slugify
+from beaker_notebook.lib.utils import slugify
 
 if TYPE_CHECKING:
     from .context import BeakerContext

@@ -228,8 +228,8 @@ def info(project_name_or_path):
     """
     Information about a project. Looks for a project in current location if no project name is provided.
     """
-    from beaker_kernel.lib import BeakerContext, BeakerSubkernel
-    from beaker_kernel.builder.beaker import BeakerBuildHook
+    from beaker_notebook.lib import BeakerContext, BeakerSubkernel
+    from beaker_notebook.builder.beaker import BeakerBuildHook
     from hatchling.builders.wheel import WheelBuilderConfig, WheelBuilder
     project_info = None
     # Case if project is not yet installed or is running against unpublished modifications

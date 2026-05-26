@@ -10,9 +10,9 @@ from archytas.prompt import PromptSection
 from archytas.react import ReActAgent
 from archytas.tool_utils import AgentRef, LoopControllerRef, ReactContextRef, tool, statetool, MultiModalResponse
 
-from beaker_kernel.lib.config import config
-from beaker_kernel.lib.utils import DefaultModel, set_tool_execution_context, succinct_tool_summarizer
-from beaker_kernel.lib.notebook_state import notebook_state_to_xml, format_cell, is_multimedia_mimetype
+from beaker_notebook.lib.config import config
+from beaker_notebook.lib.utils import DefaultModel, set_tool_execution_context, succinct_tool_summarizer
+from beaker_notebook.lib.notebook_state import notebook_state_to_xml, format_cell, is_multimedia_mimetype
 
 if typing.TYPE_CHECKING:
     from .context import BeakerContext

@@ -7,15 +7,15 @@ from traitlets import Unicode, Integer
 from traitlets.utils.importstring import import_item
 from jupyter_server.services.kernels.kernelmanager import AsyncMappingKernelManager
 
-from beaker_kernel.lib.config import config
-from beaker_kernel.services.auth import current_user, BeakerUser
+from beaker_notebook.lib.config import config
+from beaker_notebook.services.auth import current_user, BeakerUser
 
 from .manager import BeakerKernelManager
 
 
 class BeakerKernelMappingManager(AsyncMappingKernelManager):
 
-    kernel_manager_class = traitlets.DottedObjectName("beaker_kernel.services.kernel.manager.BeakerKernelManager")
+    kernel_manager_class = traitlets.DottedObjectName("beaker_notebook.services.kernel.manager.BeakerKernelManager")
     connection_dir = Unicode(
         os.path.join(config.beaker_run_path, "kernelfiles"),
         help="Directory for kernel connection files",

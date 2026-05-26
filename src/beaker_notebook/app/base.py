@@ -18,11 +18,11 @@ from jupyter_client import kernelspec
 from jupyter_server.serverapp import ServerApp
 from jupyter_server.utils import url_path_join
 
-from beaker_kernel.lib.app import BeakerApp
-from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.config import config, CONFIG_FILE_SEARCH_LOCATIONS
-from beaker_kernel.lib.utils import import_dotted_class
-from beaker_kernel.app.handlers import register_handlers
+from beaker_notebook.lib.app import BeakerApp
+from beaker_notebook.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.config import config, CONFIG_FILE_SEARCH_LOCATIONS
+from beaker_notebook.lib.utils import import_dotted_class
+from beaker_notebook.app.handlers import register_handlers
 
 
 logger = logging.getLogger("beaker_server")
@@ -40,29 +40,29 @@ class BaseBeakerApp(ServerApp):
     app_slug = traitlets.Unicode(config=True)
 
     kernel_manager_class = traitlets.Type(
-        f"beaker_kernel.services.kernel.mappingmanager.BeakerKernelMappingManager",
+        f"beaker_notebook.services.kernel.mappingmanager.BeakerKernelMappingManager",
         config=True
     )
     session_manager_class = traitlets.Type(
-        f"beaker_kernel.services.session.BeakerSessionManager",
+        f"beaker_notebook.services.session.BeakerSessionManager",
         config=True
     )
     contents_manager_class = traitlets.Type(
-        klass=f"beaker_kernel.services.storage.base.BaseBeakerContentsManager",
-        default_value=f"beaker_kernel.services.storage.base.BeakerLocalContentsManager",
+        klass=f"beaker_notebook.services.storage.base.BaseBeakerContentsManager",
+        default_value=f"beaker_notebook.services.storage.base.BeakerLocalContentsManager",
         config=True,
     )
     kernel_spec_manager_class = traitlets.Type(
-        f"beaker_kernel.services.kernel.spec.BeakerKernelSpecManager",
+        f"beaker_notebook.services.kernel.spec.BeakerKernelSpecManager",
         config=True
     )
     notebook_manager_class = traitlets.Type(
-        f"beaker_kernel.services.storage.notebook.BaseNotebookManager",
-        # default_value=f"beaker_kernel.services.storage.notebook.FileNotebookManager",
+        f"beaker_notebook.services.storage.notebook.BaseNotebookManager",
+        # default_value=f"beaker_notebook.services.storage.notebook.FileNotebookManager",
         config=True
     )
     context_manager_class = traitlets.Type(
-        f"beaker_kernel.services.context.manager.BeakerContextManager",
+        f"beaker_notebook.services.context.manager.BeakerContextManager",
         config=True,
     )
     virtual_home_root = traitlets.Unicode(
@@ -104,12 +104,12 @@ class BaseBeakerApp(ServerApp):
 
     @traitlets.default("identity_provider_class")
     def _default_identity_provider_class(self):
-        from beaker_kernel.services.auth.notebook import NotebookIdentityProvider
+        from beaker_notebook.services.auth.notebook import NotebookIdentityProvider
         return NotebookIdentityProvider
 
     @traitlets.default("authorizer_class")
     def _default_authorizer_class(self):
-        from beaker_kernel.services.auth.notebook import NotebookAuthorizer
+        from beaker_notebook.services.auth.notebook import NotebookAuthorizer
         return NotebookAuthorizer
 
     @traitlets.default("config_file_name")
@@ -129,12 +129,12 @@ class BaseBeakerApp(ServerApp):
 
     @traitlets.default("notebook_manager_class")
     def _default_notebook_manager_class(self):
-        from beaker_kernel.services.storage.notebook import FileNotebookManager
+        from beaker_notebook.services.storage.notebook import FileNotebookManager
         return FileNotebookManager
 
     @traitlets.default("context_manager_class")
     def _default_context_manager_class(self):
-        from beaker_kernel.services.context.manager import BeakerContextManager
+        from beaker_notebook.services.context.manager import BeakerContextManager
         return BeakerContextManager
 
     def __init__(self, **kwargs):
@@ -158,7 +158,7 @@ class BaseBeakerApp(ServerApp):
         self.notebook_manager = self.notebook_manager_class(
             parent=self,
         )
-        from beaker_kernel.services.context.manager import BeakerContextManager
+        from beaker_notebook.services.context.manager import BeakerContextManager
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):

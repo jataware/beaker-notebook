@@ -9,12 +9,12 @@ from queue import Empty
 from jupyter_client.jsonutil import json_default
 from jupyter_server.base.handlers import JupyterHandler
 
-from beaker_kernel.lib.utils import ensure_async
+from beaker_notebook.lib.utils import ensure_async
 
 import tornado
 
 if typing.TYPE_CHECKING:
-    from beaker_kernel.services.storage.notebook import BaseNotebookManager, NotebookInfo, NotebookContent
+    from beaker_notebook.services.storage.notebook import BaseNotebookManager, NotebookInfo, NotebookContent
 
 logger = logging.getLogger(__name__)
 

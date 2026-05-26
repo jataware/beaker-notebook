@@ -9,7 +9,7 @@ from traitlets.config import Configurable
 from jupyter_core.utils import ensure_async
 from jupyter_server.services.contents.manager import ContentsManager
 from jupyter_server.services.contents.filemanager import AsyncFileContentsManager
-from beaker_kernel.services.auth import BeakerUser
+from beaker_notebook.services.auth import BeakerUser
 
 
 def with_hidden_files(func):

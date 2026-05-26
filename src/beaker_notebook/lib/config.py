@@ -13,7 +13,7 @@ from pathlib import Path
 from copy import deepcopy
 from typing import Callable, Any, TypeVar, Generic, Literal, get_args, get_origin, Mapping
 
-from beaker_kernel.lib.utils import DefaultModel
+from beaker_notebook.lib.utils import DefaultModel
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,7 @@ class ConfigClass:
     )
     enable_checkpoints: bool = configfield(
         # NOTE: Checkpointing is temporarily disabled in code (see
-        # beaker_kernel.lib.subkernel.is_checkpointing_enabled) due to a performance issue where
+        # beaker_notebook.lib.subkernel.is_checkpointing_enabled) due to a performance issue where
         # serializing kernel state can take several minutes in some cases. This flag is currently
         # a no-op and is retained so the configuration surface does not change when checkpointing
         # is revisited in a future update.

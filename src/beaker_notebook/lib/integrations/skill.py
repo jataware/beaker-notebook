@@ -11,8 +11,8 @@ import requests
 import yaml
 from archytas.tool_utils import tool, AgentRef
 
-from beaker_kernel.lib.autodiscovery import find_resource_dirs
-from beaker_kernel.lib.integrations.types import (
+from beaker_notebook.lib.autodiscovery import find_resource_dirs
+from beaker_notebook.lib.integrations.types import (
     Integration,
     Resource,
     SkillExampleResource,
@@ -23,7 +23,7 @@ from beaker_kernel.lib.integrations.types import (
 )
 from .base import BaseIntegrationProvider
 if TYPE_CHECKING:
-    from beaker_kernel.lib.agent import BeakerAgent
+    from beaker_notebook.lib.agent import BeakerAgent
     from archytas.chat_history import ChatHistory
     from archytas.models.base import BaseArchytasModel
     from langchain_core.messages import ToolMessage

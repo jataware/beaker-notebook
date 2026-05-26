@@ -5,9 +5,9 @@ import re
 from archytas.tool_utils import AgentRef, LoopControllerRef, tool
 from archytas.multimodal import MultiModalResponse
 
-from beaker_kernel.lib.agent import BeakerAgent
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.utils import ExecutionError
+from beaker_notebook.lib.agent import BeakerAgent
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.utils import ExecutionError
 
 
 logger = logging.getLogger(__name__)

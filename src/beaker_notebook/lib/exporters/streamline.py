@@ -3,7 +3,7 @@ from traitlets.config import default
 from nbconvert.exporters.notebook import NotebookExporter
 from nbconvert.preprocessors import Preprocessor
 from archytas.models.base import BaseArchytasModel
-from beaker_kernel.lib.config import config
+from beaker_notebook.lib.config import config
 from uuid import uuid4
 
 from typing import TypedDict

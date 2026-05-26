@@ -1,5 +1,5 @@
-from beaker_kernel.app.base import BaseBeakerApp
-from beaker_kernel.services.auth.notebook import NotebookAuthorizer, NotebookIdentityProvider
+from beaker_notebook.app.base import BaseBeakerApp
+from beaker_notebook.services.auth.notebook import NotebookAuthorizer, NotebookIdentityProvider
 
 
 class BeakerNotebookApp(BaseBeakerApp):

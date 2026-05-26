@@ -13,8 +13,8 @@ from archytas.tool_utils import AgentRef, LoopControllerRef, ReactContextRef, to
 from jinja2 import Environment, nodes
 from jinja2.ext import Extension
 
-from beaker_kernel.lib.integrations.base import MutableBaseIntegrationProvider
-from beaker_kernel.lib.integrations.types import ExampleResource, FileResource, Integration, Resource
+from beaker_notebook.lib.integrations.base import MutableBaseIntegrationProvider
+from beaker_notebook.lib.integrations.types import ExampleResource, FileResource, Integration, Resource
 
 if TYPE_CHECKING:
     from adhoc_api.curation import Example

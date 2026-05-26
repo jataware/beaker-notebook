@@ -15,10 +15,10 @@ from hatchling.plugin import hookimpl
 from pathlib import Path
 
 if TYPE_CHECKING:
-        from beaker_kernel.lib.app import BeakerApp
-        from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-        from beaker_kernel.lib.context import BeakerContext
-        from beaker_kernel.lib.subkernel import BeakerSubkernel
+        from beaker_notebook.lib.app import BeakerApp
+        from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+        from beaker_notebook.lib.context import BeakerContext
+        from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 
 ClassDef = namedtuple("ClassDef", ("mod_str", "class_name", "cls"))
@@ -138,18 +138,20 @@ class BeakerBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
-        # If we are building beaker_kernel itself, we need to make sure the source is on the Python path so it can be
+        # If we are building beaker_notebook itself, we need to make sure the source is on the Python path so it can be
         # loaded.
-        if any("beaker_kernel" in pkg for pkg in self.build_config.packages):
-            local_path = os.path.abspath(os.curdir)
-            sys.path.insert(0, local_path)
-            self.inserted_paths.add(local_path)
+        if any("beaker_notebook" in pkg for pkg in self.build_config.packages):
+            root = Path(os.path.abspath(self.build_config.root))
+            for src in self.build_config.sources.keys():
+                local_path = str((root / src).resolve())
+                sys.path.insert(0, local_path)
+                self.inserted_paths.add(local_path)
 
-        from beaker_kernel.lib.app import BeakerApp
-        from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-        from beaker_kernel.lib.context import BeakerContext
-        from beaker_kernel.lib.subkernel import BeakerSubkernel
-        from beaker_kernel.lib.extension import BeakerExtension, BeakerCLICommands
+        from beaker_notebook.lib.app import BeakerApp
+        from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+        from beaker_notebook.lib.context import BeakerContext
+        from beaker_notebook.lib.subkernel import BeakerSubkernel
+        from beaker_notebook.lib.extension import BeakerExtension, BeakerCLICommands
 
         dest = os.path.join(self.root, "build", "data_share_beaker")
 

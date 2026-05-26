@@ -1,13 +1,13 @@
 from hatch.template.plugin.interface import TemplateInterface
 from hatch.template.files_default import PyProject, Readme as HatchReadme
 
-from beaker_kernel.lib.templates import InitFile
-from beaker_kernel.lib.templates.paths import package_name
-from beaker_kernel.lib.templates.agent_file import AgentFile
-from beaker_kernel.lib.templates.context_file import ContextFile
-from beaker_kernel.lib.templates.readme_file import ReadmeFile
-from beaker_kernel.lib.templates.procedure_file import ProcedureFile
-from beaker_kernel.lib.templates.subkernel_file import SubkernelFile
+from beaker_notebook.lib.templates import InitFile
+from beaker_notebook.lib.templates.paths import package_name
+from beaker_notebook.lib.templates.agent_file import AgentFile
+from beaker_notebook.lib.templates.context_file import ContextFile
+from beaker_notebook.lib.templates.readme_file import ReadmeFile
+from beaker_notebook.lib.templates.procedure_file import ProcedureFile
+from beaker_notebook.lib.templates.subkernel_file import SubkernelFile
 
 class BeakerNewProjectTemplateHook(TemplateInterface):
     PLUGIN_NAME = 'beaker-new-project'
@@ -21,7 +21,7 @@ class BeakerNewProjectTemplateHook(TemplateInterface):
         from importlib.metadata import version
         extra_dependencies = self.plugin_config.get("dependencies", [])
 
-        config["dependencies"].add(f"beaker_kernel~={version('beaker_kernel')}")
+        config["dependencies"].add(f"beaker_notebook~={version('beaker_notebook')}")
         if extra_dependencies:
             config["dependencies"].update(extra_dependencies)
 

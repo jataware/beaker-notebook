@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Iterator
 
-from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
 
 
 class IntegrationProviderRegistry:
@@ -41,7 +41,7 @@ class IntegrationProviderRegistry:
     async def system_preamble(self) -> str | None:
         if not self._by_class:
             return None
-        from beaker_kernel.lib.utils import ensure_async
+        from beaker_notebook.lib.utils import ensure_async
         parts: list[str] = []
         for provider in self._by_class.values():
             result = await ensure_async(provider.system_preamble())

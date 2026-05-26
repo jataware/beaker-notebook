@@ -7,27 +7,27 @@ from traitlets import Type, default
 from traitlets.config.configurable import LoggingConfigurable
 from traitlets.utils.importstring import import_item
 
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.types import ContextInfo
-from beaker_kernel.lib.utils import to_import_string
-from beaker_kernel.services import ServiceApi
-from beaker_kernel.services.context.handlers import ContextApi
-from beaker_kernel.services.context.util import find_differences
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.types import ContextInfo
+from beaker_notebook.lib.utils import to_import_string
+from beaker_notebook.services import ServiceApi
+from beaker_notebook.services.context.handlers import ContextApi
+from beaker_notebook.services.context.util import find_differences
 
 if TYPE_CHECKING:
-    from beaker_kernel.app.base import BaseBeakerApp
-    from beaker_kernel.services.context.discovery_service import ContextDiscoveryService
+    from beaker_notebook.app.base import BaseBeakerApp
+    from beaker_notebook.services.context.discovery_service import ContextDiscoveryService
 
 
 class BeakerContextManager(LoggingConfigurable):
     parent: "BaseBeakerApp"
 
     context_discovery_class = traitlets.DottedObjectName(
-        "beaker_kernel.services.context.discovery_service.ContextDiscoveryService",
+        "beaker_notebook.services.context.discovery_service.ContextDiscoveryService",
         config=True,
     )
     context_discovery_service: "ContextDiscoveryService" = traitlets.Instance(
-        klass="beaker_kernel.services.context.discovery_service.ContextDiscoveryService",
+        klass="beaker_notebook.services.context.discovery_service.ContextDiscoveryService",
     )
     api_cls = Type(
         default_value=ContextApi,

@@ -62,13 +62,14 @@ allow-direct-references = true
 [tool.hatch.build]
 require-runtime-dependencies = true
 packages = [
-  "beaker_notebook",
+  "src/beaker_notebook",
+  "src/beaker_kernel",
 ]
 include = [
-  "beaker_notebook/app/ui",
+  "src/beaker_notebook/app/ui",
 ]
 artifacts = [
-  "beaker_notebook/app/ui",
+  "src/beaker_notebook/app/ui",
 ]
 
 [tool.hatch.envs.hatch-build]
@@ -76,10 +77,10 @@ system-packages = true
 
 # Beaker builder, loaded as a custom hook since it's not yet registered.
 [tool.hatch.build.targets.wheel.hooks.custom]
-path = "beaker_notebook/builder/beaker.py"
+path = "src/beaker_notebook/builder/beaker.py"
 
 [tool.hatch.build.targets.wheel.shared-data]
-"beaker_notebook/kernel.json" = "share/jupyter/kernels/beaker_notebook/kernel.json"
+"src/beaker_notebook/kernel.json" = "share/jupyter/kernels/beaker_kernel/kernel.json"
 
 
 [tool.bumpversion]
@@ -145,7 +146,7 @@ Issues = "https://github.com/jataware/beaker-kernel/issues"
 Source = "https://github.com/jataware/beaker-kernel"
 
 [tool.hatch.version]
-path = "beaker_notebook/__about__.py"
+path = "src/beaker_notebook/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -260,7 +261,7 @@ source_pkgs = ["beaker_notebook", "tests"]
 branch = true
 parallel = true
 omit = [
-  "beaker_notebook/__about__.py",
+  "src/beaker_notebook/__about__.py",
 ]
 
 [tool.coverage.paths]

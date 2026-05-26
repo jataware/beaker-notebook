@@ -7,12 +7,12 @@ from dataclasses import is_dataclass, asdict
 from jupyter_client.jsonutil import json_default
 from jupyter_server.base.handlers import JupyterHandler
 
-from beaker_kernel.lib.utils import ensure_async
+from beaker_notebook.lib.utils import ensure_async
 
 import tornado
 
 if typing.TYPE_CHECKING:
-    from beaker_kernel.services.kernel import BeakerKernelManager, BeakerKernelMappingManager
+    from beaker_notebook.services.kernel import BeakerKernelManager, BeakerKernelMappingManager
 
 logger = logging.getLogger(__name__)
 

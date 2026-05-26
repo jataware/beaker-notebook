@@ -9,11 +9,11 @@ import sys
 from watchdog.observers import Observer
 from watchdog import events as watchdog_events
 
-import beaker_kernel
-from beaker_kernel.app.notebook_app import BeakerNotebookApp
-from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.config import config
-from beaker_kernel.services.auth.dummy import DummyAuthorizer, DummyIdentityProvider
+import beaker_notebook
+from beaker_notebook.app.notebook_app import BeakerNotebookApp
+from beaker_notebook.lib.autodiscovery import autodiscover
+from beaker_notebook.lib.config import config
+from beaker_notebook.services.auth.dummy import DummyAuthorizer, DummyIdentityProvider
 
 
 logger = logging.getLogger(__file__)
@@ -71,7 +71,7 @@ class BeakerWatchDog(watchdog_events.FileSystemEventHandler):
 def create_observer(extra_dirs=None, callback=None):
     contexts = autodiscover("contexts")
     subkernels = autodiscover("subkernels")
-    modules = set([inspect.getmodule(beaker_kernel)])
+    modules = set([inspect.getmodule(beaker_notebook)])
     modules.update([inspect.getmodule(cls) for _, cls in contexts.items()])
     modules.update([inspect.getmodule(cls) for _, cls in subkernels.items()])
     mod_paths = [os.path.dirname(inspect.getabsfile(mod)) for mod in modules]

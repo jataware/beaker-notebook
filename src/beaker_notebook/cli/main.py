@@ -2,7 +2,7 @@ import click
 import importlib
 import os
 
-from beaker_kernel.lib.autodiscovery import find_mappings, autodiscover
+from beaker_notebook.lib.autodiscovery import find_mappings, autodiscover
 
 
 class BeakerCli(click.Group):

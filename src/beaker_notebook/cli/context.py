@@ -143,7 +143,7 @@ def dump_contexts(output, context_slug, package, compact):
     Discovers installed contexts and extracts their integrations, workflows,
     and metadata into a JSON structure suitable for ingestion into BeakerHub.
     """
-    from beaker_kernel.lib.context_dump import generate_context_dumps, dumps_to_json
+    from beaker_notebook.lib.context_dump import generate_context_dumps, dumps_to_json
 
     dumps = generate_context_dumps(
         context_filter=context_slug,
@@ -173,8 +173,8 @@ def list_contexts():
     """
     List installed contexts.
     """
-    from beaker_kernel.lib.context import autodiscover_contexts
-    from beaker_kernel.lib import BeakerContext, BeakerAgent
+    from beaker_notebook.lib.context import autodiscover_contexts
+    from beaker_notebook.lib import BeakerContext, BeakerAgent
     contexts = autodiscover_contexts()
     if contexts:
         click.echo("Currently installed contexts:\n")

@@ -5,7 +5,7 @@ from typing import ClassVar
 import traitlets
 from traitlets.config import SingletonConfigurable
 
-from beaker_kernel.lib.context import BeakerContext, autodiscover_contexts
+from beaker_notebook.lib.context import BeakerContext, autodiscover_contexts
 
 
 class ContextDiscoveryService(SingletonConfigurable):
