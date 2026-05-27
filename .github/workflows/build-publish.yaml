@@ -19,18 +19,20 @@ jobs:
                 ref: ${{ github.event.workflow_run.head_branch }}
                 fetch-depth: 0
 
-            - name: Check Tag On main branch
-              id: tag_on_main
+            - name: Check tag is releasable
+              id: check_tag
               run: |
                   TAG_COMMIT=$(git rev-list -n 1 ${{ github.ref }})
-                  BRANCH=$(git branch -r --contains $TAG_COMMIT | tr -d ' ' | grep -o '^origin/main$' || true)
-                  echo "branch_match=$BRANCH"
-                  echo "branch_match=$BRANCH" >> $GITHUB_OUTPUT
+                  ON_MAIN=$(git branch -r --contains $TAG_COMMIT | tr -d ' ' | grep -o '^origin/main$' || true)
+                  IS_PRERELEASE=$(echo "${{ github.ref }}" | grep -oE 'v.*[^a-zA-Z][ab][0-9][0-9.-]*$' || true)
+                  echo "on_main=$ON_MAIN" >> $GITHUB_OUTPUT
+                  echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+                  echo "ok=${ON_MAIN}${IS_PRERELEASE}" >> $GITHUB_OUTPUT
 
-            - name: Fail if tag is not on main
-              if: steps.tag_on_main.outputs.branch_match == ''
+            - name: Fail if tag is not on main and not a prerelease version
+              if: steps.check_tag.outputs.ok == ''
               run: |
-                  echo "Tag is not pointing to a commit on main. Exiting."
+                  echo "Tag is not on main and is not a prerelease version. Exiting."
                   exit 1
 
     build-python:
