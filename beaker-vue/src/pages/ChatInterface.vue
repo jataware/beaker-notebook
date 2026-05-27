@@ -164,7 +164,7 @@ import BeakerSession from '../components/session/BeakerSession.vue';
 
 import { standardRendererFactories } from '@jupyterlab/rendermime';
 
-import { JupyterMimeRenderer, type IBeakerCell } from 'beaker-kernel';
+import { JupyterMimeRenderer, type IBeakerCell } from '@jataware/beaker-client';
 import type { NavOption } from '../components/misc/BeakerHeader.vue';
 
 import { inject, ref, computed, watch, provide } from 'vue';

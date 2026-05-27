@@ -116,7 +116,7 @@
 
 <script setup lang="ts">
 import { inject, onBeforeMount, computed, ref, capitalize } from "vue";
-import { type BeakerQueryEvent, type BeakerQueryEventType, type IBeakerCell } from "beaker-kernel";
+import { type BeakerQueryEvent, type BeakerQueryEventType, type IBeakerCell } from "@jataware/beaker-client";
 import { marked } from 'marked';
 import BeakerCodeCell from "./BeakerCodeCell.vue";
 import BeakerCodecellOutput from "./BeakerCodeCellOutput.vue";

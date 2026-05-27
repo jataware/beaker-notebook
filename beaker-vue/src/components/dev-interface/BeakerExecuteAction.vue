@@ -89,7 +89,7 @@ import VueJsonPretty from 'vue-json-pretty';
 import 'vue-json-pretty/lib/styles.css';
 import Panel from 'primevue/panel';
 
-import { BeakerSession } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import CodeEditor from '../misc/CodeEditor.vue';
 

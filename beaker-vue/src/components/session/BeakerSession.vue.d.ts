@@ -1,5 +1,5 @@
 import { reactive, ref, inject, provide, VNode, defineComponent, PropType, ComponentInternalInstance, DefineComponent } from 'vue';
-import { BeakerSession, IBeakerRendererOptions, JupyterMimeRenderer, IBeakerCell } from 'beaker-kernel';
+import { BeakerSession, IBeakerRendererOptions, JupyterMimeRenderer, IBeakerCell } from '@jataware/beaker-client';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
 
 

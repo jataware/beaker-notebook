@@ -1,4 +1,4 @@
-import type { BeakerQueryEvent } from "beaker-kernel";
+import type { BeakerQueryEvent } from "@jataware/beaker-client";
 
 const terminalEvents = [
     "error",

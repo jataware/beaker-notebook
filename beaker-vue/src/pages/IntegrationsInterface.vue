@@ -160,7 +160,7 @@
 
 <script setup lang="tsx">
 import { ref, watch, computed, nextTick, onMounted, inject, h, type Component } from 'vue';
-import { JupyterMimeRenderer, type IMimeRenderer } from 'beaker-kernel';
+import { JupyterMimeRenderer, type IMimeRenderer } from '@jataware/beaker-client';
 import type { BeakerNotebookComponentType } from '../components/notebook/BeakerNotebook.vue';
 import type { BeakerSessionComponentType } from '../components/session/BeakerSession.vue';
 import { JSONRenderer, LatexRenderer, MarkdownRenderer, wrapJupyterRenderer, type BeakerRenderOutput, TableRenderer } from '../renderers';

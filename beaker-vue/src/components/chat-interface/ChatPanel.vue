@@ -20,7 +20,7 @@
 
 <script setup lang="tsx">
 import { ref, inject, computed } from 'vue';
-import { BeakerSession } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
 
 const session = inject<BeakerSession>('session');
 

@@ -44,7 +44,7 @@
 
 <script setup lang="tsx">
 import { ref, inject, computed } from 'vue';
-import type { BeakerSession } from 'beaker-kernel';
+import type { BeakerSession } from '@jataware/beaker-client';
 import BeakerCell from '../cell/BeakerCell.vue';
 import type { BeakerNotebookComponentType } from './BeakerNotebook.vue';
 

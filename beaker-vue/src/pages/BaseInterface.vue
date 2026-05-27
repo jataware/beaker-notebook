@@ -102,7 +102,7 @@ import BeakerHeader from '../components/misc/BeakerHeader.vue';
 import Card from 'primevue/card';
 import Toast from 'primevue/toast';
 import { useToast } from 'primevue/usetoast';
-import {BeakerSession as Session} from 'beaker-kernel'
+import {BeakerSession as Session} from '@jataware/beaker-client'
 import InputText from 'primevue/inputtext';
 import InputGroup from 'primevue/inputgroup';
 import Button from 'primevue/button';

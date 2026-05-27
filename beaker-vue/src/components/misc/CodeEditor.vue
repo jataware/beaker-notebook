@@ -20,7 +20,7 @@ import { autocompletion, completionKeymap, completionStatus, selectedCompletion,
 import { AnnotationProviderFactory, type AnnotationData } from "../../util/annotations";
 import type { IBeakerTheme } from '../../plugins/theme';
 import { type BeakerLanguage, LanguageRegistry, getCompletions } from "../../util/autocomplete";
-import { BeakerSession } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
 
 const session: BeakerSession = inject('session');
 

@@ -1,6 +1,6 @@
 import { type Component, defineComponent, h } from 'vue';
 
-import type { IMimeRenderer, MimetypeString } from 'beaker-kernel';
+import type { IMimeRenderer, MimetypeString } from '@jataware/beaker-client';
 import type { PartialJSONObject } from '@lumino/coreutils';
 import VueJsonPretty from 'vue-json-pretty';
 import { marked } from 'marked';

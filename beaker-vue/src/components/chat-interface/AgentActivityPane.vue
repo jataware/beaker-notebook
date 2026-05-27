@@ -40,7 +40,7 @@ import { computed, inject } from 'vue';
 import ProgressBar from 'primevue/progressbar';
 import Button from 'primevue/button';
 import ChatQueryCellEvent from './ChatQueryCellEvent.vue';
-import { type IBeakerCell } from "beaker-kernel";
+import { type IBeakerCell } from "@jataware/beaker-client";
 import { isLastEventTerminal } from "../cell/cellOperations";
 
 const emit = defineEmits<{

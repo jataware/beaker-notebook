@@ -1,6 +1,6 @@
 import { ref, computed, watch, nextTick, inject, reactive, type Ref, type ComputedRef } from 'vue';
-import { JupyterMimeRenderer } from 'beaker-kernel';
-import type { IBeakerCell, IMimeRenderer } from 'beaker-kernel';
+import { JupyterMimeRenderer } from '@jataware/beaker-client';
+import type { IBeakerCell, IMimeRenderer } from '@jataware/beaker-client';
 import type { BeakerNotebookComponentType } from '../components/notebook/BeakerNotebook.vue';
 import type { BeakerSessionComponentType } from '../components/session/BeakerSession.vue';
 import { JavascriptRenderer, JSONRenderer, LatexRenderer, MarkdownRenderer, wrapJupyterRenderer, TableRenderer, type BeakerRenderOutput } from '../renderers';

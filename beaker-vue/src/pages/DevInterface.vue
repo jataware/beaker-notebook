@@ -112,7 +112,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, inject, toRaw, nextTick } from 'vue';
-import { JupyterMimeRenderer, type IBeakerCell, type IMimeRenderer } from 'beaker-kernel';
+import { JupyterMimeRenderer, type IBeakerCell, type IMimeRenderer } from '@jataware/beaker-client';
 import BeakerNotebook from '../components/notebook/BeakerNotebook.vue';
 import BaseInterface from './BaseInterface.vue';
 import BeakerNotebookToolbar from '../components/notebook/BeakerNotebookToolbar.vue';

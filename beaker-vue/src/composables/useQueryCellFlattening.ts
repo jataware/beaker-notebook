@@ -1,6 +1,6 @@
 import { ref, watch, nextTick, type Ref } from 'vue';
 import type { BeakerSessionComponentType } from '../components/session/BeakerSession.vue';
-import type { IBeakerQueryThoughtEvent } from 'beaker-kernel';
+import type { IBeakerQueryThoughtEvent } from '@jataware/beaker-client';
 
 export function useQueryCellFlattening(
     beakerSession: () => BeakerSessionComponentType,

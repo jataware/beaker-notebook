@@ -38,7 +38,7 @@
 import { ref, inject, computed, nextTick, onBeforeMount, getCurrentInstance, onBeforeUnmount} from "vue";
 import { marked } from 'marked';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
-import type { IBeakerToolCall } from 'beaker-kernel';
+import type { IBeakerToolCall } from '@jataware/beaker-client';
 import Button from 'primevue/button';
 import BrainIconSvg from '../../assets/icon-components/BrainIcon.vue';
 import BeakerToolCallRow from './BeakerToolCallRow.vue';
@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
 </script>
 
 <script lang="ts">
-import { BeakerMarkdownCell } from "beaker-kernel";
+import { BeakerMarkdownCell } from "@jataware/beaker-client";
 export default {
     modelClass: BeakerMarkdownCell,
     icon: "pi pi-pencil",

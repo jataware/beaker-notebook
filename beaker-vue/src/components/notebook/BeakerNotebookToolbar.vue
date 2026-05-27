@@ -131,8 +131,8 @@
 import { computed, inject, ref, capitalize, watch, onBeforeMount, toRaw } from "vue";
 import { PageConfig } from '@jupyterlab/coreutils';
 import { URLExt } from '@jupyterlab/coreutils';
-import type { BeakerSession, BeakerBaseCell } from 'beaker-kernel';
-import { BeakerNotebook, BeakerCodeCell, BeakerMarkdownCell, BeakerRawCell, BeakerQueryCell } from 'beaker-kernel';
+import type { BeakerSession, BeakerBaseCell } from '@jataware/beaker-client';
+import { BeakerNotebook, BeakerCodeCell, BeakerMarkdownCell, BeakerRawCell, BeakerQueryCell } from '@jataware/beaker-client';
 import type { BeakerNotebookComponentType } from './BeakerNotebook.vue';
 import contentDisposition from "content-disposition";
 

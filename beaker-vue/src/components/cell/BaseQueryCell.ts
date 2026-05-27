@@ -1,5 +1,5 @@
 import { ref, shallowRef, inject, computed, nextTick, getCurrentInstance } from "vue";
-import { BeakerSession } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
 import type { BeakerSessionComponentType } from "../session/BeakerSession.vue";
 
 export const useBaseQueryCell = (props) => {

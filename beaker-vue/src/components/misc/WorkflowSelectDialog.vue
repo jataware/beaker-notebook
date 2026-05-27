@@ -141,7 +141,7 @@
 import { computed, inject, ref, watch, type ComputedRef } from "vue";
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import { Button, Divider, Card, InputGroup, InputGroupAddon, InputText, Chip, Badge } from "primevue";
-import { type BeakerSession } from "beaker-kernel";
+import { type BeakerSession } from "@jataware/beaker-client";
 import { useWorkflows } from '../../composables/useWorkflows';
 
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");

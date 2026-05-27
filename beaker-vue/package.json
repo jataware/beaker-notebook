@@ -1,6 +1,7 @@
 {
-  "name": "beaker-vue",
+  "name": "@jataware/beaker-vue",
   "version": "2.0.0-b.1",
+  "description": "Beaker Notebook Vue component library",
   "declaration": true,
   "scripts": {
     "dev": "vite --config vite.config.app.ts",
@@ -56,7 +57,7 @@
     "@primevue/icons": "^4.3.4",
     "@primevue/themes": "^4.3.4",
     "ansi-html-community": "^0.0.8",
-    "beaker-kernel": "^2.0.0-b.1",
+    "@jataware/beaker-client": "^2.0.0-b.1",
     "buffer": "^6.0.3",
     "codemirror": "^6.0.1",
     "codemirror-lang-r": "^0.1.1",

@@ -66,7 +66,7 @@ import CodeCellOutput from "./BeakerCodeCellOutput.vue";
 import Badge from 'primevue/badge';
 import Button from 'primevue/button';
 import { findSelectableParent } from "../../util";
-import { BeakerSession } from "beaker-kernel";
+import { BeakerSession } from "@jataware/beaker-client";
 import CodeEditor from "../misc/CodeEditor.vue";
 import AnnotationButton from "../misc/buttons/AnnotationButton.vue";
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
@@ -254,7 +254,7 @@ watch(
 </script>
 
 <script lang="ts">
-import { BeakerCodeCell } from "beaker-kernel";
+import { BeakerCodeCell } from "@jataware/beaker-client";
 export default {
     modelClass: BeakerCodeCell,
     icon: "pi pi-code",

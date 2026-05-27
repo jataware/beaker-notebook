@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
 </script>
 
 <script lang="ts">
-import { BeakerMarkdownCell } from "beaker-kernel";
+import { BeakerMarkdownCell } from "@jataware/beaker-client";
 export default {
     modelClass: BeakerMarkdownCell,
     icon: "pi pi-pencil",

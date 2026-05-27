@@ -24,7 +24,7 @@
 import { ref, inject, computed, watch, reactive, render, onMounted, onBeforeMount } from "vue";
 import { useDialog } from "primevue";
 import SelectButton from "primevue/selectbutton";
-import { BeakerSession } from "beaker-kernel";
+import { BeakerSession } from "@jataware/beaker-client";
 import type { BeakerRenderOutput } from "../../renderers";
 import ImageZoomDialog from "./ImageZoomDialog.vue";
 import { merge } from "lodash";

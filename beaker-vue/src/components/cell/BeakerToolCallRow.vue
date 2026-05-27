@@ -56,7 +56,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { IBeakerToolCall } from "beaker-kernel";
+import type { IBeakerToolCall } from "@jataware/beaker-client";
 import { has } from "lodash";
 
 const props = defineProps<{

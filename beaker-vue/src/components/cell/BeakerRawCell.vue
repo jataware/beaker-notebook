@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
 </script>
 
 <script lang="ts">
-import { BeakerRawCell } from "beaker-kernel";
+import { BeakerRawCell } from "@jataware/beaker-client";
 export default {
     modelClass: BeakerRawCell,
     icon: "pi pi-question-circle",

@@ -25,7 +25,7 @@
 import { ref, nextTick, inject } from "vue";
 import Card from 'primevue/card';
 import Button from 'primevue/button';
-import { BeakerSession } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import ContainedTextArea from '../misc/ContainedTextArea.vue';
 

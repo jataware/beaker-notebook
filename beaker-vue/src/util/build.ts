@@ -40,7 +40,7 @@ export async function defineBeakerRendererConfig(overrides?: UserConfig): Promis
                 fileName: (_format, entryName) => `${entryName}.js`,
             },
             rollupOptions: {
-                external: ['vue', 'beaker-vue', 'beaker-kernel'],
+                external: ['vue', '@jataware/beaker-vue', '@jataware/beaker-client'],
                 output: {
                     paths: {
                         vue: '/static/vue.esm-browser.prod.js?url',

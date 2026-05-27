@@ -6,8 +6,8 @@
 
 <script lang="tsx">
 import { defineComponent, ref, computed, nextTick, provide, inject, type DefineComponent } from "vue";
-import { BeakerSession, BeakerNotebook, BeakerCodeCell, BeakerBaseCell } from 'beaker-kernel';
-import type { IBeakerCell } from 'beaker-kernel';
+import { BeakerSession, BeakerNotebook, BeakerCodeCell, BeakerBaseCell } from '@jataware/beaker-client';
+import type { IBeakerCell } from '@jataware/beaker-client';
 import type { IBeakerCellComponent, BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import scrollIntoView from 'scroll-into-view-if-needed';
 

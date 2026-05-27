@@ -168,7 +168,7 @@ import Button from "primevue/button";
 import InputGroup from 'primevue/inputgroup';
 import InputText from 'primevue/inputtext';
 import InputGroupAddon from 'primevue/inputgroupaddon';
-import { type IBeakerCell } from "beaker-kernel";
+import { type IBeakerCell } from "@jataware/beaker-client";
 import BeakerQueryCellEvent from "../cell/BeakerQueryCellEvent.vue";
 import ContainedTextArea from '../misc/ContainedTextArea.vue';
 import type { BeakerSessionComponentType } from "../session/BeakerSession.vue";
@@ -348,7 +348,7 @@ onBeforeUnmount(() => {
 </script>
 
 <script lang="ts">
-import { BeakerQueryCell } from "beaker-kernel";
+import { BeakerQueryCell } from "@jataware/beaker-client";
 export default {
     modelClass: BeakerQueryCell,
     icon: "pi pi-sparkles",

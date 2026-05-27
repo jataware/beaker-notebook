@@ -2,7 +2,7 @@ import { LanguageSupport, language as languageFacet } from "@codemirror/language
 import type { Language as CMLanguage, LRLanguage } from "@codemirror/language";
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
-import { BeakerSession, type IBeakerFuture } from 'beaker-kernel';
+import { BeakerSession, type IBeakerFuture } from '@jataware/beaker-client';
 
 import { pythonLanguage, python } from "@codemirror/lang-python";
 import { rLanguage, r } from 'codemirror-lang-r';

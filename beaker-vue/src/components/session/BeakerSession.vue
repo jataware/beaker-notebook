@@ -8,8 +8,8 @@
 import { reactive, ref, inject, provide, defineComponent } from 'vue';
 import type { VNode, PropType, ComponentInternalInstance, DefineComponent } from 'vue';
 import CodeEditor from '../misc/CodeEditor.vue';
-import { BeakerSession } from 'beaker-kernel';
-import type { IMimeRenderer, IBeakerCell, BeakerKernelStatus } from 'beaker-kernel';
+import { BeakerSession } from '@jataware/beaker-client';
+import type { IMimeRenderer, IBeakerCell, BeakerKernelStatus } from '@jataware/beaker-client';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
 import type { ConnectionStatus as JupyterConnectionStatus } from '@jupyterlab/services/lib/kernel/kernel';
 

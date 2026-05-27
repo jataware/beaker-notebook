@@ -123,7 +123,7 @@ import Button from 'primevue/button';
 import DraggableMarker from './DraggableMarker.vue';
 import type { BeakerNotebookComponentType } from '../notebook/BeakerNotebook.vue';
 
-import type { IBeakerCell } from "beaker-kernel";
+import type { IBeakerCell } from "@jataware/beaker-client";
 import Select from "primevue/select";
 import Popover from "primevue/popover";
 import type { BeakerSessionComponentType } from "../session/BeakerSession.vue";
