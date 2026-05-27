@@ -1,6 +1,8 @@
 import { fileURLToPath, URL } from 'node:url';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 
-import { defineConfig, type UserConfig } from 'vite';
+import { defineConfig, type UserConfig, type Plugin } from 'vite';
 import vueDevTools from 'vite-plugin-vue-devtools';
 import { baseConfig } from './vite.config';
 
@@ -12,9 +14,22 @@ const proxyConfig = {
 }
 
 
+function copyVueEsmPlugin(): Plugin {
+  return {
+    name: 'copy-vue-esm-browser',
+    writeBundle() {
+      const src = fileURLToPath(new URL('node_modules/vue/dist/vue.esm-browser.prod.js', import.meta.url));
+      const dest = fileURLToPath(new URL('html/static', import.meta.url));
+      mkdirSync(dest, { recursive: true });
+      copyFileSync(src, path.join(dest, 'vue.esm-browser.prod.js'));
+    },
+  };
+}
+
 // https://vite.dev/config/
 export const appConfig: UserConfig = {
   ...baseConfig,
+  base: "./",
   server: {
     host: '0.0.0.0',
     port: 8080,
@@ -38,6 +53,7 @@ export const appConfig: UserConfig = {
   plugins: [
     ...(baseConfig.plugins ?? []),
     vueDevTools(),
+    copyVueEsmPlugin(),
   ],
   build: {
     target: 'esnext',

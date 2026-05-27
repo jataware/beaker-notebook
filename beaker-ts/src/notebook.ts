@@ -5,7 +5,7 @@ import { IShellFuture } from '@jupyterlab/services/lib/kernel/kernel';
 import { v4 as uuidv4 } from 'uuid';
 
 import { BeakerSession } from './session';
-import { IBeakerFuture, BeakerCellFuture, BeakerCellFutures, truncateNotebookForAgent } from './util';
+import { IBeakerFuture, BeakerCellFuture, BeakerCellFutures } from './util';
 
 
 export interface IBeakerHeader extends messages.IHeader<messages.MessageType> {
@@ -143,19 +143,36 @@ export interface IBeakerQueryErrorEvent extends PartialJSONObject {
     };
 }
 
-type BackgroundCodeContent = Partial<
-    {code: string; execution_count: nbformat.ExecutionCount;}
-    & (messages.IExecuteReply | messages.IReplyErrorContent | messages.IReplyAbortContent)
->;
+export type BeakerToolCallState =
+    | "pending"
+    | "running"
+    | "done"
+    | "error"
+    | "cancelled";
+
+export interface IBeakerToolCall extends PartialJSONObject {
+    tool_call_id: string;
+    tool_name: string;
+    tool_input: any;
+    state: BeakerToolCallState;
+    started_at?: string;
+    ended_at?: string;
+    output_preview?: string;
+    output_truncated?: boolean;
+    error?: {
+        ename: string;
+        evalue: string;
+        traceback?: string[];
+    };
+}
 
 type BeakerQueryThoughtType = "thought";
 export interface IBeakerQueryThoughtEvent extends PartialJSONObject {
     type: BeakerQueryThoughtType;
     content: {
         thought: string;
-        tool_name: string;
-        tool_input: any;
-        background_code_executions: BackgroundCodeContent[];
+        thought_id: string;
+        tool_calls: IBeakerToolCall[];
     };
 }
 
@@ -207,9 +224,6 @@ export class BeakerCodeCell extends BeakerBaseCell implements nbformat.ICodeCell
     constructor(content: Partial<nbformat.ICell>) {
         super({ ...content});
         Object.assign(this, content)
-        if (Array.isArray(this.source)) {
-            this.source = this.source.join("");
-        }
     }
 
     public execute(session: BeakerSession, syntheticFuture?: BeakerCellFuture): IBeakerFuture | null {
@@ -299,9 +313,6 @@ export class BeakerMarkdownCell extends BeakerBaseCell implements nbformat.IMark
     constructor(content: Partial<nbformat.ICell>) {
         super({ ...content});
         Object.assign(this, content)
-        // if (Array.isArray(this.source)) {
-        //     this.source = this.source.join("");
-        // }
     }
 
 
@@ -325,6 +336,7 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     cell_type: "query" = "query";
     events: BeakerQueryEvent[] = [];
     _current_input_request_message?: messages.IInputRequestMsg;
+    _toolCallIndex: Map<string, {eventIndex: number; slot: number}> = new Map();
 
     constructor(content: Partial<nbformat.ICell>) {
         super({cell_type: 'query', ...content});
@@ -334,7 +346,7 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     public execute(session: BeakerSession, includeNotebookState: boolean = true): IBeakerFuture | null {
         this.events.splice(0, this.events.length);
         this.children.splice(0, this.children.length);
-        let current_codeblock: messages.IIOPubMessage["content"] | null = null;
+        this._toolCallIndex.clear();
 
         const handleIOPub = async (msg: IBeakerIOPubMessage) => {
             const msg_type = msg.header.msg_type;
@@ -343,40 +355,55 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
                 this.status = content.execution_state;
             }
             else if (msg_type === "llm_thought") {
-                if (content.thought === "") {
+                const tool_calls: IBeakerToolCall[] = (content.tool_calls || []).map(
+                    (tc: any) => ({
+                        tool_call_id: tc.tool_call_id,
+                        tool_name: tc.tool_name,
+                        tool_input: tc.tool_input,
+                        state: (tc.state as BeakerToolCallState) || "pending",
+                    })
+                );
+                if (!content.thought && tool_calls.length === 0) {
                     return;
                 }
-                this.events.push(
-                    <IBeakerQueryThoughtEvent>{
-                        type: "thought",
-                        content: {
-                            ...content,
-                            background_code_executions: []
-                        }
+                const event: IBeakerQueryThoughtEvent = {
+                    type: "thought",
+                    content: {
+                        thought: content.thought || "",
+                        thought_id: content.thought_id,
+                        tool_calls,
                     }
-                );
-            }
-            else if (msg_type === "beaker__execute_input") {
-                // Ugly to hardcode the one tool here. Should be based on something from the message so it's not so
-                // coupled
-                if (!(content.execution_type === 'tool' && content.execution_item_name == 'run_code')) {
-                    current_codeblock = {...content};
-                }
-            }
-            else if (msg_type === "beaker__execute_reply") {
-                // Ugly to hardcode the one tool here. Should be based on something from the message so it's not so
-                // coupled
-                if (!(content.execution_type === 'tool' && content.execution_item_name == 'run_code')) {
-                    const isThought = (object: any): object is IBeakerQueryThoughtEvent => 'type' in object && object.type === 'thought';
-                    let last_thought: IBeakerQueryThoughtEvent | undefined = this.events.findLast(isThought);
-                    if (last_thought !== undefined) {
-                        last_thought.content.background_code_executions.push({
-                            ...current_codeblock,
-                            ...content,
-                        });
+                };
+                this.events.push(event);
+                // Index by events-array position rather than by raw object reference.
+                // Reactive consumers (Vue) only observe mutations made through the
+                // proxy — i.e. through `this.events[idx]` — so we re-fetch the event
+                // via index when applying updates.
+                const eventIndex = this.events.length - 1;
+                tool_calls.forEach((tc, slot) => {
+                    if (tc.tool_call_id) {
+                        this._toolCallIndex.set(tc.tool_call_id, {eventIndex, slot});
                     }
-                    current_codeblock = null;
+                });
+            }
+            else if (msg_type === "tool_call_update") {
+                const entry = this._toolCallIndex.get(content.tool_call_id);
+                if (entry === undefined) {
+                    return;
                 }
+                const {eventIndex, slot} = entry;
+                const event = this.events[eventIndex] as IBeakerQueryThoughtEvent;
+                if (!event || event.type !== "thought") {
+                    return;
+                }
+                const existing = event.content.tool_calls[slot];
+                const {tool_call_id: _id, ...updateFields} = content;
+                // Mutate via the proxy-wrapped event so Vue picks up the change.
+                event.content.tool_calls = [
+                    ...event.content.tool_calls.slice(0, slot),
+                    {...existing, ...updateFields},
+                    ...event.content.tool_calls.slice(slot + 1),
+                ];
             }
             else if (msg_type === "llm_response" && content.name === "response_text") {
                 this.events.push({
@@ -526,7 +553,7 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
         var metadata: PartialJSONObject = {};
 
         if (includeNotebookState) {
-            const notebookState = truncateNotebookForAgent(session.notebook);
+            const notebookState = session.notebook.toIPynb();
             notebookState.cells = notebookState.cells.filter(
                 // Skip this cell and any children of this cell
                 cell => cell.id !== this.id && cell.metadata?.parent_cell !== this.id
@@ -614,7 +641,23 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
 
         const eventElements: (JoinableMarkdown|IndentedMarkdown|BeakerBaseCell)[] = this.events.map((event) => {
             if (event.type === "thought") {
-                return new AgentMarkdown(`${event.content.thought}  \n`);
+                const lines: string[] = [];
+                if (event.content.thought) {
+                    lines.push(`${event.content.thought}  `);
+                }
+                for (const tc of event.content.tool_calls || []) {
+                    const argsBlob = JSON.stringify(tc.tool_input ?? {});
+                    const stateLabel = tc.state ? ` [${tc.state}]` : "";
+                    lines.push(`- \`${tc.tool_name}\`${stateLabel} — \`${argsBlob}\``);
+                    if (tc.output_preview) {
+                        const previewSuffix = tc.output_truncated ? "…" : "";
+                        lines.push(`  - output: \`${tc.output_preview}${previewSuffix}\``);
+                    }
+                    if (tc.error) {
+                        lines.push(`  - error: \`${tc.error.ename}: ${tc.error.evalue}\``);
+                    }
+                }
+                return new AgentMarkdown(`${lines.join("\n")}\n`);
             }
             else if (event.type === "user_question") {
                 return new AgentMarkdown(`**Agent Question:**  \n> ${event.content}\n`);

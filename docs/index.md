@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Beaker Kernel
+title: Home
 nav_order: 1
 has_toc: true
 ---
@@ -9,7 +9,7 @@ has_toc: true
 
 Beaker is a next generation coding notebook built for the AI era. Beaker seamlessly integrates a Jupyter-like experience with an AI agent that can be used to generate and run code on the user's behalf. The agent has access to the entire notebook environment as its context, allowing it to make smart decisions about the code it generates and run. It can even debug itself and fix errors so that you don't have to. When the agent wants to use a library that isn't installed, it can even install it automatically. 
 
-Beyond that, Beaker solves one of the major challenges presented by coding notebooks--it introduces a true _undo_ mechanism so that the user can roll back to any previous state in the notebook. Beaker also lets you swap effortlessly between a notebook style coding interface and a chat style interface, giving you the best of both worlds. Since everything is interoperable with Jupyter, you can always export your notebook and use it in any other Jupyter-compatible environment.
+Beaker also lets you swap effortlessly between a notebook style coding interface and a chat style interface, giving you the best of both worlds. Since everything is interoperable with Jupyter, you can always export your notebook and use it in any other Jupyter-compatible environment.
 
 Beaker is powered by [Archytas](https://github.com/jataware/archytas), our framework for building AI agents that can interact with code. Advanced users can generate their own custom agents to meet their specific needs. These agents can have custom ReAct toolsets built in and can be extended to support any number of use cases.
 
@@ -62,10 +62,6 @@ generating plotting code. Since the agent has full visibility to the entire note
 high fidelity code that typically works out of the box. When its code fails though, it can automatically read tracebacks
 and fix its errors. 
 
-Additionally, Beaker introduces a true undo mechanism so that the user can roll back to any previous state in the notebook.
-This is a killer feature for coding notebooks since it allows the user to experiment with ideas freely without the fear of breaking
-their environment.
-
-Finally, Beaker lets you swap effortlessly between a notebook style coding interface and a chat style interface, giving you the best of both worlds. 
+Beaker also lets you swap effortlessly between a notebook style coding interface and a chat style interface, giving you the best of both worlds. 
 
 Since everything is interoperable with Jupyter, you can always export your notebook and use it in any other Jupyter-compatible environment.

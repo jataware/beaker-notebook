@@ -17,7 +17,7 @@ class AgentFile(TemplateFile):
     TEMPLATE = """\
 from typing import TYPE_CHECKING
 
-from archytas.tool_utils import AgentRef, LoopControllerRef, ReactContextRef, tool
+from archytas.tool_utils import tool
 from beaker_kernel.lib import BeakerAgent
 
 if TYPE_CHECKING:
@@ -27,13 +27,9 @@ if TYPE_CHECKING:
 class {agent_class}(BeakerAgent):
     \"\"\"
     You are a helpful agent that will answer questions and help with what is asked of you.
-
     \"\"\"
-    # The class docstring is provided to the LLM to set the expectations for the agent and how it should
 
-
-    # async def setup(self, context_info: dict[str, any], )
-
+    # The class docstring is provided to the LLM to set the expectations for the agent and how it should behave.
     # A sample tool to get you started.
     # Notice that the doc-string provides instructions to the agent about how and when to use the tools along with the
     # expected inputs and outputs, including the datatype what they represent so the agent knows how to prepare proper
@@ -70,7 +66,5 @@ class {agent_class}(BeakerAgent):
         if question.startswith("sudo"):
             return "Your wish is granted!"
         return random.choice(choices)
-
-        # TOOD: Procedure called by agent
 
 """

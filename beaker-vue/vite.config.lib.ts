@@ -52,7 +52,7 @@ export const libConfig: UserConfig = {
       entry: entryPoints,
       formats: ["es"],
       fileName: (format, entryName) => {
-        return `${entryName}.js`
+        return `${entryName}.${(entryName.includes('util/build') ? 'mjs' : 'js')}`
       },
 
     },
@@ -72,6 +72,9 @@ export const libConfig: UserConfig = {
         /^@?plutojl/,
         /^@?primevue/,
         /^@?primeuix/,
+        /^@?vitejs/,
+        "vite",
+        "vite-plugin-css-injected-by-js",
         "ansi-html-community",
         "beaker-kernel",
         "buffer",

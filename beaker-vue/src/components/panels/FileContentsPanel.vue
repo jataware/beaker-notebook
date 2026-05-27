@@ -38,7 +38,7 @@
                     v-if="!contents.isLoading"
                 >
                     <div class="pdf-preview" v-if="mimeCategory(mime) === 'pdf'">
-                        <PDFPreview ref="pdfPreviewRef" :url="url"/>
+                        <PDFRenderer ref="pdfPreviewRef" :url="url"/>
                     </div>
                     <div class="text-preview" v-if="mimeCategory(mime) === 'plaintext'">
                         <CodeEditor
@@ -77,7 +77,7 @@
 <script lang="ts" setup>
 import { ref, watch, computed, reactive } from "vue";
 
-import PDFPreview from "../render/pdf/PDFPreview.vue";
+import PDFRenderer from "../render/pdf/PDFRenderer.vue";
 import Toolbar from "primevue/toolbar";
 import Button from "primevue/button";
 import CodeEditor from "../misc/CodeEditor.vue";
@@ -128,9 +128,9 @@ const mimeCategory = (mimetype: string): PreviewCategory => {
     if (mimetype === 'text/tsv') {
         return 'tsv'
     }
-    // todo: is this comprehensive?
     if (mimetype === 'application/vnd.ms-excel' ||
-        mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        mimetype === 'application/vnd.oasis.opendocument.spreadsheet')
     {
         return 'excel'
     }

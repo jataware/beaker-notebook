@@ -1,27 +1,42 @@
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ClassVar, Optional, Generator
 from pathlib import Path
+from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
+from typing_extensions import Self
+from uuid import uuid4
 
-from ..types import Integration, Resource
-from ..autodiscovery import find_resource_dirs
+from beaker_kernel.lib.integrations.types import Integration, Resource
+from beaker_kernel.lib.autodiscovery import find_resource_dirs
 
 class BaseIntegrationProvider(ABC):
 
     provider_type: ClassVar[str]
     mutable: ClassVar[bool] = False
+    display_name: ClassVar[str]
     slug: ClassVar[str]
 
-    display_name: str
+    id: str
+
     prompt_instructions: Optional[str]
 
-    def __init__(self, display_name: str):
-        self.display_name = display_name
+    def __init__(self, display_name: Optional[str] = None, id: Optional[str] = None):
+        if display_name is not None:
+            self.__class__.display_name = display_name
+        self.id = id if id is not None else str(uuid4())
         self.prompt_instructions = None
 
     @classmethod
     def get_cls_data(cls) -> dict[str, os.PathLike]:
         return {}
+
+    async def system_preamble(self) -> Optional[str]:
+        """Contribution to the cacheable system_preamble layer.
+
+        Default delegates to the deprecated ``prompt`` property so existing
+        providers keep working unchanged. New providers should override this
+        method directly.
+        """
+        return self.prompt
 
     @property
     def prompt(self):
@@ -43,13 +58,39 @@ class BaseIntegrationProvider(ABC):
             parts.append(str(integration))
         return "\n".join(parts)
 
-    def iter_data(self, data_types: Optional[list[str] | str]=None) -> Generator[Path, None, None]:
+    @classmethod
+    def _merge(cls, a: Self, b: Self) -> Self:
+        raise NotImplementedError(
+            f"{cls.__name__} does not support merging; registering two "
+            f"instances in the same context is ambiguous."
+        )
+
+    @classmethod
+    def merge(cls, a: Self, b: Self) -> Self:
+        """Combine two providers of this class into one. Default refuses; override to opt in."""
+        if type(a) is not cls or type(b) is not cls:
+            raise TypeError(
+                f"{cls.__name__}.merge requires both arguments to be {cls.__name__} "
+                f"instances (got {type(a).__name__}, {type(b).__name__})"
+            )
+        if a is b:
+            # It's the same object, so just return either of them
+            return a
+        return cls._merge(a, b)
+
+    @classmethod
+    @abstractmethod
+    def discover_integrations(cls, **kwargs) -> Mapping[str, Integration]:
+        ...
+
+    @classmethod
+    def iter_data(cls, data_types: Optional[list[str] | str]=None) -> Generator[Path, None, None]:
         seen: set[tuple[str, str]] = set()
         if data_types is None:
-            data_types = self.get_cls_data().keys()
+            data_types = cls.get_cls_data().keys()
         elif isinstance(data_types, str):
             data_types = [data_types]
-        for data_path_base in self.data_basedirs:
+        for data_path_base in cls.get_data_basedirs():
             for data_type in data_types:
                 type_path = Path(data_path_base) / data_type
                 # Skip if generated path is not a directory
@@ -84,11 +125,13 @@ class BaseIntegrationProvider(ABC):
                 return file_path
         return None
 
-    @property
-    def data_basedirs(self):
+    @classmethod
+    def get_data_basedirs(cls, slug: Optional[str] = None) -> list[os.PathLike]:
         data_dirs = []
+        if slug is None:
+            slug = cls.slug
         for data_dir in find_resource_dirs("data"):
-            base_dir = os.path.join(data_dir, self.slug)
+            base_dir = os.path.join(data_dir, slug)
             if os.path.isdir(base_dir):
                 data_dirs.append(base_dir)
         alt_integration_dir = os.environ.get("INTEGRATION_PATH", "./integrations")
@@ -98,6 +141,10 @@ class BaseIntegrationProvider(ABC):
         # This allows user to overwrite defaults
         data_dirs.reverse()
         return data_dirs
+
+    @property
+    def data_basedirs(self):
+        return self.get_data_basedirs(self.slug)
 
     @abstractmethod
     def list_integrations(self) -> list[Integration]:
@@ -130,8 +177,6 @@ class BaseIntegrationProvider(ABC):
 
 class MutableBaseIntegrationProvider(BaseIntegrationProvider):
     mutable = True
-    def __init__(self, display_name: str):
-        super().__init__(display_name)
 
     @abstractmethod
     def add_integration(self, **payload) -> Integration:

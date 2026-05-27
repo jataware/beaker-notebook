@@ -44,13 +44,19 @@
 
             <!-- Modals, popups and globals -->
             <slot name="context-selection-popup">
-                <BeakerContextSelection
-                    :isOpen="contextSelectionOpen"
-                    :toggleOpen="toggleContextSelection"
-                    :contextProcessing="contextProcessing"
-                    @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
-                    @close-context-selection="contextSelectionOpen = false"
-                />
+                <Dialog
+                    ref="contextSelectionDialogRef"
+                    v-model:visible="contextSelectionOpen"
+                    modal
+                    :draggable="true"
+                    :maximizable="true"
+                    header="Configure Context"
+                >
+                    <BeakerContextSelection
+                        @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
+                        @close-context-selection="contextSelectionOpen = false"
+                    />
+                </Dialog>
             </slot>
             <slot name="toast">
                 <Toast position="bottom-right" />
@@ -171,7 +177,6 @@ const loginDialogRef = ref();
 const overlayRef = ref<DynamicDialogInstance>();
 
 const contextSelectionOpen = ref(false);
-const contextProcessing = ref(false);
 
 const toggleContextSelection = () => {
     contextSelectionOpen.value = !contextSelectionOpen.value;
@@ -308,10 +313,14 @@ const saveSnapshot = async (ignoreSession: boolean = false) => {
     const session: Session = beakerSession.value?.session;
     const sessionId = session?.sessionId ;
 
-    // TODO: Check session id matches
     const notebookData: {[key: string]: any} = {
         ...(notebookInfo.value || {}),
     };
+    if (notebookData.session_id && sessionId && notebookData.session_id !== sessionId) {
+        console.warn(`saveSnapshot: session id mismatch (expected ${notebookData.session_id}, got ${sessionId}); skipping save.`);
+        return;
+    }
+    notebookData.session_id = sessionId;
 
     // Only save state if there is state to save
     if (session.notebook) {

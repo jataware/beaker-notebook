@@ -91,6 +91,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
 
     const activeContext = ref();
     const notebookComponent = ref();
+    const customRendererMimetypes = ref<Set<string>>(new Set());
 
     const sessionName = props.sessionName ?? props.sessionId;
     const rawSession: BeakerSession = new BeakerSession(
@@ -114,12 +115,50 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
     })
 
     const setSignalHandlers = async (session) => {
-        session.iopubMessage.connect((session, msg) => {
+        session.iopubMessage.connect(async (session, msg) => {
           emit("iopub-msg", msg);
           if (messages.isStatusMsg(msg)) {
             const newStatus = msg?.content?.execution_state || 'unknown';
             status.value = rawSession.status;
             emit("session-status-changed", newStatus);
+          }
+          if (msg.header.msg_type === "context_info_response") {
+            // Remove any renderers loaded for the prior context so they don't shadow
+            // standard renderers after a context switch.
+            const rendererStore = (rawSession.renderer as any)._renderers;
+            if (rendererStore) {
+              for (const mimetype of customRendererMimetypes.value) {
+                delete rendererStore[mimetype];
+              }
+            }
+            customRendererMimetypes.value = new Set();
+
+            if (msg.content.info?.custom_renderers) {
+              console.debug("Custom Renderers", msg.content.info.custom_renderers);
+              // Group by URL to avoid re-importing the same module multiple times
+              const byUrl = new Map<string, Array<{mimetype: string, name: string}>>();
+              for (const [mimetype, config] of Object.entries(msg.content.info.custom_renderers) as [string, any][]) {
+                const list = byUrl.get(config.url) ?? [];
+                list.push({ mimetype, name: config.name });
+                byUrl.set(config.url, list);
+              }
+              for (const [url, entries] of byUrl) {
+                try {
+                  const mod = await import(/* @vite-ignore */ url);
+                  for (const { mimetype, name } of entries) {
+                    const renderer = mod[name] ?? mod.default;
+                    if (renderer) {
+                      rawSession.renderer.addRenderer(renderer);
+                      customRendererMimetypes.value.add(mimetype);
+                    } else {
+                      console.warn(`Custom renderer export "${name}" for ${mimetype} not found in ${url}`);
+                    }
+                  }
+                } catch (err) {
+                  console.error(`Failed to load custom renderer module from ${url}:`, err);
+                }
+              }
+            }
           }
         });
         session.session.anyMessage.connect((_: unknown, {msg, direction}) => {
@@ -175,8 +214,7 @@ export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComp
 
     setContext(contextPayload: any) {
         const showToast: (...args) => void = inject('show_toast');
-        // TODO: Figure out a better way set context to "loading" state
-        this.activeContext = {};
+        this.activeContext = { loading: true };
 
         const future = this.session.setContext(contextPayload);
         future.then((result: any) => {

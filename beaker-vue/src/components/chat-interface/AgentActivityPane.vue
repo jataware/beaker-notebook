@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineEmits, inject, defineProps } from 'vue';
+import { computed, inject } from 'vue';
 import ProgressBar from 'primevue/progressbar';
 import Button from 'primevue/button';
 import ChatQueryCellEvent from './ChatQueryCellEvent.vue';

@@ -5,7 +5,8 @@ export { default as ContainedTextArea } from './ContainedTextArea.vue';
 export { default as DebugLogMessage } from './DebugLogMessage.vue';
 export { default as FooterDrawer } from './FooterDrawer.vue';
 export { default as InlineInput } from './InlineInput.vue';
-export { default as IntegrationEditor } from './IntegrationEditor.vue';
+/** @deprecated Use AdhocIntegrationEditor from components/integrations instead */
+export { default as IntegrationEditor } from '../integrations/DeprecatedIntegrationEditor.vue';
 export { default as JSONMessage } from './JSONMessage.vue';
 export { default as OpenNotebookButton } from './OpenNotebookButton.vue';
 export { default as ProviderSelector } from './ProviderSelector.vue';

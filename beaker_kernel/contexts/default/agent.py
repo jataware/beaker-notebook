@@ -3,6 +3,7 @@ import logging
 import re
 
 from archytas.tool_utils import AgentRef, LoopControllerRef, tool
+from archytas.multimodal import MultiModalResponse
 
 from beaker_kernel.lib.agent import BeakerAgent
 from beaker_kernel.lib.context import BeakerContext
@@ -52,3 +53,39 @@ formatted_joke
             joke = """Have you ever seen an elephant hiding in a tree? Me neither. They must be VERY good at it!"""
 
         return joke
+
+    # Tools defined below are examples of how to return multi-modal content from tools.
+    # Commented out as I don't currently have a set of good images to pull from.
+
+    # @tool()
+    # async def random_image(self) -> MultiModalResponse:
+    #     """
+    #     Returns a random image.
+
+    #     Returns:
+    #         MultiModalResponse: A random image.
+    #     """
+    #     import random
+    #     options = [
+    #     ]
+    #     filepath = random.choice(options)
+    #     result = MultiModalResponse.from_file(filepath)
+    #     return result
+
+    # @tool()
+    # async def random_images(self, count: int) -> MultiModalResponse:
+    #     """
+    #     Returns 3 random images. Images may be repeated.
+
+    #     Args:
+    #         count: (int) An integer between 1 and 4 inclusive indicating how many images that are sent.
+
+    #     Returns:
+    #         MultiModalResponse: 3 images as content blocks
+    #     """
+    #     if not isinstance(count, int) or count < 1 or count > 4:
+    #         raise ValueError("Invalid argument: count. Argument must be an integer between 1 and 4 inclusive.")
+    #     options = [
+    #     ]
+    #     result = MultiModalResponse.from_files(options[:count])
+    #     return result

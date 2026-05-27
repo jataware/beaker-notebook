@@ -111,6 +111,63 @@ def new_context(name, class_base_name):
             raise click.ClickException("There was an error setting up your new Beaker project. Please check the output above.")
 
 
+@context.command(name="dump")
+@click.option(
+    "--output", "-o",
+    type=click.Path(),
+    default=None,
+    help="Output file path. Defaults to stdout.",
+)
+@click.option(
+    "--context-slug", "-c", "context_slug",
+    type=str,
+    default=None,
+    help="Filter to a specific context by slug.",
+)
+@click.option(
+    "--package", "-p",
+    type=str,
+    default=None,
+    help="Filter to a specific package by name.",
+)
+@click.option(
+    "--compact",
+    is_flag=True,
+    default=False,
+    help="Output compact JSON (no indentation).",
+)
+def dump_contexts(output, context_slug, package, compact):
+    """
+    Dump context metadata as JSON in the interchange format.
+
+    Discovers installed contexts and extracts their integrations, workflows,
+    and metadata into a JSON structure suitable for ingestion into BeakerHub.
+    """
+    from beaker_kernel.lib.context_dump import generate_context_dumps, dumps_to_json
+
+    dumps = generate_context_dumps(
+        context_filter=context_slug,
+        package_filter=package,
+    )
+
+    if not dumps:
+        raise click.ClickException(
+            "No contexts found matching the given filters."
+            if (context_slug or package)
+            else "No contexts were found. Please check that you are running in the correct environment."
+        )
+
+    json_output = dumps_to_json(dumps, pretty=not compact)
+
+    if output:
+        with open(output, "w") as f:
+            f.write(json_output)
+            f.write("\n")
+        click.echo(f"Wrote {len(dumps)} package dump(s) to {output}")
+    else:
+        click.echo(json_output)
+
+
 @context.command(name="list")
 def list_contexts():
     """

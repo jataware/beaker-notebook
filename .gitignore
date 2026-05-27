@@ -69,5 +69,6 @@ shell.nix
 **/.jekyll-cache
 
 .beaker.conf
-beaker_kernel/server/ui/*
-beaker_kernel/service/ui/*
+beaker_config.py
+beaker_*_config.py
+beaker_kernel/**/ui/*

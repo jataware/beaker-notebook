@@ -5,11 +5,10 @@ import { ServiceManager } from '@jupyterlab/services';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
 import { JSONObject } from '@lumino/coreutils';
 import { v4 as uuidv4 } from 'uuid';
-import fetch from 'node-fetch';
 import { Slot, Signal } from '@lumino/signaling';
 import { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
 
-import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo, truncateNotebookForAgent } from './util';
+import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo } from './util';
 import { BeakerNotebook, IBeakerShellMessage, IBeakerAnyMessage, BeakerRawCell, BeakerCodeCell, BeakerMarkdownCell, BeakerQueryCell, IBeakerIOPubMessage } from './notebook';
 import { BeakerHistory } from './history';
 import { BeakerRenderer, IBeakerRendererOptions } from './render';
@@ -188,7 +187,7 @@ export class BeakerSession {
                 session: kernel.clientId,
                 channel: "shell",
                 msgType: "notebook_state_response",
-                content: truncateNotebookForAgent(this.notebook),
+                content: this.notebook.toIPynb(),
                 msgId: msg.header.msg_id + "_reply",
                 metadata: {},
             });
@@ -215,7 +214,7 @@ export class BeakerSession {
         return new Promise(async (resolve) => {
             const url = `${this._serverSettings.baseUrl}contexts`;
             const response = await fetch(`${this._serverSettings.baseUrl}contexts`);
-            const data = await response.json();
+            const data = <IBeakerAvailableContexts>(await response.json());
             resolve(data);
         });
     }
@@ -389,17 +388,6 @@ export class BeakerSession {
         this.notebook.addCell(cell);
         return cell;
     };
-
-    // public toJSON(): string {
-    //     return JSON.stringify({
-    //         notebook: this.notebook?.toJSON()
-    //     });
-    // }
-
-    // public fromJSON(): BeakerSession {
-    //     // TODO
-    //     return new BeakerSession();
-    // }
 
     /**
      * Populates the sessions notebook with the provided notebook json

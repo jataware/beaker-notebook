@@ -20,6 +20,8 @@ class BeakerCli(click.Group):
 
         # Register commands from extensions
         for group_name, entry in autodiscover("commands").items():
+            if entry is None:
+                continue
             group = entry.as_group()
             self.subcommands[group_name] = group
 

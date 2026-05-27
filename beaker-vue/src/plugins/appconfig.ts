@@ -1,5 +1,4 @@
-import { capitalize } from '@/util';
-import { ref } from 'vue';
+import { ref, capitalize } from 'vue';
 import type { Plugin, App, Ref } from 'vue';
 
 declare module 'vue' {

@@ -7,7 +7,7 @@ import click
 import webbrowser
 
 if TYPE_CHECKING:
-    from beaker_kernel.service.notebook import BeakerNotebookApp
+    from beaker_kernel.app.notebook_app import BeakerNotebookApp
 
 
 @click.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
@@ -17,7 +17,7 @@ def notebook(ctx, extra_args, beakerapp_cls=None):
     """
     Start Beaker in local mode and opens a notebook.
     """
-    from beaker_kernel.service.notebook import BeakerNotebookApp
+    from beaker_kernel.app.notebook_app import BeakerNotebookApp
     from beaker_kernel.lib.config import config
     from jupyter_core.utils import ensure_event_loop
     app = None
@@ -56,7 +56,7 @@ def dev(ctx: click.Context, no_open_notebook):
 @click.option("--open-notebook", "-n", is_flag=True, default=False, type=bool, help="Open a notebook in a webbrowser.")
 def serve(open_notebook, extra_args):
     from jupyter_core.utils import ensure_event_loop
-    from beaker_kernel.service.dev import BeakerNotebookApp
+    from beaker_kernel.app.dev_app import BeakerNotebookApp
 
     loop = ensure_event_loop()
     try:
@@ -75,7 +75,7 @@ def serve(open_notebook, extra_args):
 @click.option("--open-notebook", "-n", is_flag=True, default=False, type=bool, help="Open a notebook in a webbrowser.")
 @click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
 def watch(extra_dir=None, open_notebook=None, extra_args=None):
-    from beaker_kernel.service.dev import create_observer
+    from beaker_kernel.app.dev_app import create_observer
     app_subprocess = None
     extra_args = extra_args or []
 

@@ -53,6 +53,7 @@
                     {{ title ?? "Beaker Notebook" }}
                 </h4>
                 <span v-if="titleExtra" class="title-extra">{{ titleExtra }}</span>
+                <span v-else-if="!showContextSelection && beakerSession.activeContext" class="title-extra">{{ beakerSession.activeContext?.name }}</span>
             </div>
         </template>
 
@@ -119,6 +120,7 @@ const emit = defineEmits(["selectKernel"]);
 const { theme, toggleDarkMode } = inject<IBeakerTheme>('theme');
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const beakerApp = inject<any>("beakerAppConfig");
+const siteConfig = inject<any>("siteConfig", {});
 
 const navItems = computed(() => {
     if (props.nav) {
@@ -157,6 +159,7 @@ function selectKernel() {
 const dialog = useDialog()
 
 const loading = computed(() => {
+    console.log(beakerSession.activeContext);
     return !(beakerSession.activeContext?.slug);
 })
 
@@ -170,6 +173,10 @@ const showWorkflowDropdown = computed(() => {
 })
 
 const showContextSelection = computed(() => {
+    // Hide if env flag is set
+    if (siteConfig?.env?.BEAKER_UI_HIDE_CONTEXT_SELECTOR === "true") {
+        return false;
+    }
     // Always show on dev page
     if (beakerApp?.currentPage?.value === "dev") {
         return true;

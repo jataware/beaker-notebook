@@ -1,27 +1,32 @@
 import asyncio
+import base64
 import dataclasses
 import inspect
+import itertools
 import json
 import logging
+import os
 import os.path
-from pathlib import Path
-import urllib.parse
-from uuid import uuid4
+import re
 import requests
-import itertools
+import urllib.parse
 from dataclasses import asdict
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias, Collection
+from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
+from nbformat import NotebookNode
 import yaml
 
 from beaker_kernel.lib.autodiscovery import autodiscover
-from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async
+from beaker_kernel.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook
 from beaker_kernel.lib.config import config as beaker_config
 from beaker_kernel.lib.integrations.base import BaseIntegrationProvider
-from beaker_kernel.lib.types import Integration
-from beaker_kernel.lib.workflow import Workflow, WorkflowState, WorkflowStageProgress, create_available_workflows_prompt
+from beaker_kernel.lib.integrations.registry import IntegrationProviderRegistry
+from beaker_kernel.lib.integrations.types import Integration
+from beaker_kernel.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
 
 
 from .jupyter_kernel_proxy import InterceptionFilter, JupyterMessage
@@ -38,19 +43,31 @@ logger = logging.getLogger(__name__)
 
 TOOL_TOGGLE_PREFIX = "TOOL_ENABLED_"
 
+
 class LinterCodeCellPayload(TypedDict):
     cell_id: str
     content: str
+
 
 class LinterCodeCellsPayload(TypedDict):
     notebook_id: str
     cells: list[LinterCodeCellPayload]
 
+
 class BeakerContext:
+    SLUG: ClassVar[str]
+    SHORT_NAME: ClassVar[str]
+    FULL_NAME: ClassVar[str]
+    WEIGHT: ClassVar[int] = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+    AGENT_CLS: "ClassVar[type[BeakerAgent]]"
+    ASSET_DIR: ClassVar[Optional[os.PathLike|str]] = None
+    RENDERERS: ClassVar[Optional[Dict[str, Dict[str, str]]]] = None
+    INTEGRATION_PROVIDERS: ClassVar[list[tuple[type[BaseIntegrationProvider], tuple, dict[str, Any]]]] = []
+
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
     config: Dict[str, Any]
-    agent: "ReActAgent"
+    agent: "BeakerAgent"
     current_llm_query: str | None
     compatible_subkernels: ClassVar[list[str] | None] = None
 
@@ -58,41 +75,52 @@ class BeakerContext:
     jinja_env: Optional[Environment]
     templates: Dict[str, Template]
 
-    workflows: Dict[str, Workflow]
+    workflows: WorkflowRegistry
     current_workflow_state: Optional[WorkflowState]
 
     preview_function_name: str = "generate_preview"
     kernel_state_function_name: str = "send_kernel_state"
 
-    notebook_state: Optional[dict]
-    kernel_state: Optional[dict]
-    integrations: list[BaseIntegrationProvider]
+    integrations: IntegrationProviderRegistry
 
-    SLUG: Optional[str]
-    WEIGHT: int = 50  # Used for auto-sorting in drop-downs, etc. Lower weights are listed earlier.
+    procedure_location: ClassVar[Optional[os.PathLike|str]]
 
-    def __init__(self, beaker_kernel: "BeakerKernel", agent_cls: "BeakerAgent", config: Dict[str, Any],
-                 integrations: list[BaseIntegrationProvider] = None):
+    def __init__(
+        self,
+        beaker_kernel: "BeakerKernel",
+        agent_cls: "Optional[type[BeakerAgent]]" = None,
+        config: Optional[Dict[str, Any]] = None,
+        integrations: Optional[list[BaseIntegrationProvider]] = None
+    ):
+        tools = []
+        if integrations is None:
+            integrations = []
+        if agent_cls is None:
+            agent_cls = self.AGENT_CLS
+        integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
+
+
         self.intercepts = []
-        self.integrations = integrations if integrations is not None else []
+        self.integrations = IntegrationProviderRegistry(integrations)
         self.jinja_env = None
         self.templates = {}
-        self.workflows = {}
+        self.workflows = WorkflowRegistry(self.discover_workflows())
+        if self.workflows:
+            tools.append(self.workflows)
         self.current_workflow_state = None
         self.beaker_kernel = beaker_kernel
-        self.config = config
+        self.config = config or {}
         self.subkernel = self.get_subkernel()
+        if self.subkernel.tools:
+            tools.extend(self.subkernel.tools)
 
         self.agent = agent_cls(
             context=self,
-            tools=self.subkernel.tools,
+            tools=tools,
         )
-        if TYPE_CHECKING and self.__annotations__:
-            self.__annotations__["agent"] = agent_cls
 
         self.current_llm_query = None
-        self.notebook_state = None
-        # self.kernel_state = None
+        self._notebook_state = None
 
         self.disable_tools()
 
@@ -104,17 +132,37 @@ class BeakerContext:
         if getattr(self, "auto_context", None) is not None:
             self.agent.set_auto_context("Default context", self.auto_context)
 
+        # Merge procedure directories from the context (highest precedence) and
+        # the subkernel (default). FileSystemLoader resolves in list order, so
+        # context-level files override subkernel-level files of the same name.
         class_dir = inspect.getfile(self.__class__)
-        code_dir = os.path.join(os.path.dirname(class_dir), "procedures", self.subkernel.SLUG)
-        if os.path.exists(code_dir):
+        loader_dirs: list[str] = []
+        context_proc_dir = os.path.join(
+            os.path.dirname(class_dir), "procedures", self.subkernel.SLUG
+        )
+        if os.path.isdir(context_proc_dir):
+            loader_dirs.append(context_proc_dir)
+        loader_dirs.extend(self.subkernel._resolve_procedure_dirs())
+
+        if loader_dirs:
             self.jinja_env = Environment(
-                loader=FileSystemLoader(code_dir),
+                loader=FileSystemLoader(loader_dirs),
                 autoescape=select_autoescape()
             )
 
+            seen: set[str] = set()
             for template_file in self.jinja_env.list_templates():
-                if template_file.startswith('__'):
+                basename = os.path.basename(template_file)
+                if basename.startswith('__') or basename.startswith('.'):
                     continue
+                # Reflector templates are registered into the subkernel's
+                # ReflectorRegistry rather than the flat templates dict, so
+                # they are not addressable via get_code(name).
+                if template_file.startswith("reflectors/"):
+                    continue
+                if template_file in seen:
+                    continue
+                seen.add(template_file)
                 try:
                     template_name, _ = os.path.splitext(template_file)
                     template = self.jinja_env.get_template(template_file)
@@ -123,15 +171,16 @@ class BeakerContext:
                     # For templates, this indicates a binary file which can't be a template, so throw a warning and skip.
                     logger.warning(f"File '{template_name}' in context '{self.__class__.__name__}' is not a valid template file as it cannot be decoded to a unicode string.")
 
-        workflows_dir = os.path.join(os.path.dirname(class_dir), "workflows")
-        if os.path.exists(workflows_dir):
-            for workflow_yaml in Path(workflows_dir).glob("*.yaml"):
-                workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
-                # lives as long as the session does
-                workflow_id = str(uuid4())
-                self.workflows[workflow_id] = workflow
-                if workflow.is_context_default:
-                    self.attach_workflow(workflow_id)
+            # Build the subkernel's reflector registry from the merged Jinja
+            # environment. Context-level reflectors are registered first (so
+            # they win on duplicate names) by virtue of FileSystemLoader's
+            # in-order resolution.
+            from beaker_kernel.lib.reflector import ReflectorRegistry
+            self.subkernel.reflectors = ReflectorRegistry.from_jinja_env(self.jinja_env)
+
+        for workflow_id, workflow in self.workflows.items():
+            if workflow.is_context_default:
+                self.attach_workflow(workflow_id)
         if not self.workflows:
             logger.warning("Context has no workflows: disabling tools.")
             workflow_tools = [
@@ -143,15 +192,76 @@ class BeakerContext:
                 self.agent.disable(workflow_tool)
 
     def __init_subclass__(cls):
+        mod = inspect.getmodule(cls)
+        # Initialize default values for class variables if not already set
+        if not hasattr(cls, "AGENT_CLS") and hasattr(cls, "agent_cls"):
+            cls.AGENT_CLS = cls.agent_cls
+        if not hasattr(cls, "SLUG"):
+            package_str = mod.__package__
+            if package_str:
+                cls.SLUG = package_str.split(".")[-1]
+            else:
+                cls.SLUG = cls.__name__.upper()
+        if not hasattr(cls, "SHORT_NAME"):
+            cls.SHORT_NAME = cls.SLUG.title()
+        full_name = getattr(cls, "FULL_NAME", None)
+        if full_name is not None:
+            # Check if full name is inherited from parent. If so, it should be recreated based on this class.
+            parents = cls.mro()
+            if full_name == getattr(parents[0], "FULL_NAME", None) == getattr(parents[1], "FULL_NAME", None):
+                full_name = None
+        if full_name is None:
+            full_name = cls.__name__
+            full_name = re.sub(r'Context$', '', full_name)
+            full_name = re.sub(r'([A-Z])([A-Z][a-z])', r'\1 \2', full_name)
+            cls.FULL_NAME = full_name
+
+        if (asset_dir := getattr(cls, "ASSET_DIR", None)):
+            # If the path is absolute, assume that it is still relative to the directory which contains the context file.
+            # e.g. if it's set to "/static" assume it should be "/path/to/package/my_context/static"
+            if os.path.isabs(asset_dir):
+                asset_dir = f".{asset_dir}"
+            mod_path = Path(inspect.getabsfile(cls)).parent
+            asset_path = mod_path / asset_dir
+            if asset_path.exists() and asset_path.is_dir():
+                setattr(cls, "ASSET_DIR", str(asset_path))
+
+            renderers = getattr(cls, "RENDERERS", None)
+            if renderers and asset_path.is_dir():
+                for mimetype, config in renderers.items():
+                    renderer_file = config.get("file", "renderers.js")
+                    renderer_path = asset_path / renderer_file
+                    if not (renderer_path.exists() and renderer_path.is_file()):
+                        logger.warning(
+                            f"Renderer file '{renderer_file}' for mime type '{mimetype}' "
+                            f"not found in asset dir for context '{cls.__name__}'."
+                        )
+
+        # If a subclass has an auto_context, it should be used instead of the parent's.
         subclass_autocontext = getattr(cls, "auto_context", None)
         if not (subclass_autocontext is None or subclass_autocontext is BeakerContext.auto_context):
             cls._auto_context = subclass_autocontext
             cls.auto_context = BeakerContext.auto_context
 
+        # Backwards-compat: if a subclass overrode the deprecated `default_preamble`
+        # but not `default_user_preamble`, route the legacy override to the new name
+        # so its content still lands in the user_preamble slot.
+        own_default_preamble = cls.__dict__.get("default_preamble")
+        own_default_user_preamble = cls.__dict__.get("default_user_preamble")
+        if own_default_preamble is not None and own_default_user_preamble is None:
+            import warnings
+            warnings.warn(
+                f"{cls.__name__} overrides BeakerContext.default_preamble(); "
+                f"this is deprecated. Rename to default_user_preamble().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            cls.default_user_preamble = own_default_preamble
+
     @property
     def preview(self) -> Callable[[], Awaitable[Any]] | None:
         preview_func = getattr(self, self.preview_function_name, None)
-        if callable(preview_func) and not inspect.iscoroutinefunction:
+        if callable(preview_func) and not inspect.iscoroutinefunction(preview_func):
             raise ValueError(f"Preview function '{self.preview_function_name}' must be a coroutine (awaitable) if defined.")
         if preview_func and inspect.iscoroutinefunction(preview_func):
             return preview_func
@@ -159,10 +269,130 @@ class BeakerContext:
     @property
     def kernel_state(self) -> Callable[[], Awaitable[Any]] | None:
         state_func = getattr(self, self.kernel_state_function_name, None)
-        if callable(state_func) and not inspect.iscoroutinefunction:
-            raise ValueError(f"Kernel state fetching function '{self.preview_function_name}' must be a coroutine (awaitable) if defined.")
+        if callable(state_func) and not inspect.iscoroutinefunction(state_func):
+            raise ValueError(f"Kernel state fetching function '{self.kernel_state_function_name}' must be a coroutine (awaitable) if defined.")
         if state_func and inspect.iscoroutinefunction(state_func):
             return state_func
+
+    @property
+    def notebook_state(self) -> NotebookNode|None:
+        return self._notebook_state
+
+    @notebook_state.setter
+    def notebook_state(self, value: dict|NotebookNode|None):
+        if value is not None:
+            self._notebook_state =  normalize_notebook(value)
+        else:
+            self._notebook_state = None
+
+    @property
+    def default_integration_providers(self) -> set[BaseIntegrationProvider]:
+        from beaker_kernel.lib.integrations.skill import SkillIntegrationProvider
+
+        # Load global default skills
+        default_providers = { SkillIntegrationProvider("Default Skills"), }
+
+        # Check for a skills.json file a the same level as the context.py and load it if it exists.
+        context_dir_path = Path(inspect.getabsfile(self.__class__)).parent
+        context_skills = []
+        skill_file = context_dir_path / "skills.json"
+        skill_dir = context_dir_path / "skills"
+        if skill_file.is_file():
+            context_skills.append(str(skill_file))
+        if skill_dir.is_dir() and any((child.is_dir() for child in skill_dir.iterdir())):
+            context_skills.append(str(skill_dir))
+
+        if context_skills:
+            context_skill_integration = SkillIntegrationProvider(f"{self.__class__.__name__} Skills", skill_paths=context_skills)
+            default_providers.add(context_skill_integration)
+
+        return default_providers
+
+
+    @classmethod
+    def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
+        integrations = set()
+        for integration_cls, args, kwargs in cls.INTEGRATION_PROVIDERS:
+            integrations.add(integration_cls(*args, **kwargs))
+        return integrations
+
+    async def system_preamble(self) -> Optional[str]:
+        """Context's own contribution to the cacheable system_preamble layer.
+
+        Default returns ``None``. Subclasses override to add domain framing
+        (e.g. "you are working with X dataset / API / domain") that should be
+        cached for the lifetime of the session.
+        """
+        return None
+
+    async def default_user_preamble(self) -> Optional[str]:
+        """Context's own contribution to the user_preamble slot.
+
+        Default returns ``None``. Subclasses override to inject a user-side
+        preamble at session start.
+        """
+        return None
+
+    async def default_preamble(self) -> Optional[str]:
+        """Deprecated. Use ``default_user_preamble`` instead."""
+        import warnings
+        warnings.warn(
+            "BeakerContext.default_preamble() is deprecated; "
+            "override default_user_preamble() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.default_user_preamble()
+
+    def extra_system_preamble_contributors(self) -> list:
+        """Override to return additional contributor objects (any duck-type
+        with an async ``system_preamble()`` method) to be included in the
+        assembled system_preamble. Default returns an empty list.
+        """
+        return []
+
+    async def assemble_system_preamble(self) -> Optional[str]:
+        """Iterate all contributors and compose their ``system_preamble()``
+        outputs into a single block for the cacheable system_preamble slot.
+
+        Overridable but rarely should be — the iteration is the iteration.
+        Subclasses wanting to add their own framing should override
+        ``system_preamble()`` (their own contribution) or
+        ``extra_system_preamble_contributors()`` (additional contributors).
+        """
+        contributors = [
+            self,
+            self.subkernel,
+            self.integrations,
+            self.workflows,
+            self.agent,
+            *self.extra_system_preamble_contributors(),
+        ]
+        parts: list[str] = []
+        for contributor in contributors:
+            sp = getattr(contributor, "system_preamble", None)
+            if sp is None:
+                continue
+            result = await ensure_async(sp())
+            if result:
+                parts.append(result)
+        if not parts:
+            return None
+        return "\n\n".join(parts)
+
+    async def refresh_system_preamble(self) -> None:
+        """Re-assemble the system_preamble and push it to the agent's chat
+        history. Call after any mutation known to change a contributor's
+        output (e.g. an integration is added mid-session).
+
+        The call itself is the cache-invalidation signal — there is no
+        per-turn re-render or hash check.
+        """
+        text = await self.assemble_system_preamble()
+        chat_history = getattr(self.agent, "chat_history", None)
+        setter = getattr(chat_history, "set_system_preamble_text", None) if chat_history else None
+        if setter is not None:
+            setter(text or "")
 
     def disable_tools(self):
         # TODO: Identical toolnames don't work
@@ -188,9 +418,11 @@ class BeakerContext:
         if callable(getattr(self.agent, 'setup', None)):
             await self.agent.setup(self.config["context_info"], parent_header=parent_header)
 
-        preamble = await self.default_preamble()
-        if preamble:
-            self.agent.chat_history.set_user_preamble_text(preamble)
+        await self.refresh_system_preamble()
+
+        user_preamble = await self.default_user_preamble()
+        if user_preamble:
+            self.agent.chat_history.set_user_preamble_text(user_preamble)
 
     def cleanup(self):
         self.subkernel.cleanup()
@@ -211,121 +443,112 @@ class BeakerContext:
         parts = []
         if hasattr(self, "_auto_context"):
             result = await ensure_async(self._auto_context())
-            parts.append(
-                result
-            )
-        if beaker_config.send_kernel_state:
-            kernel_state = await self.get_subkernel_state()
-            if kernel_state:
-                parts.append(f"""\
-## Kernel state
-```application/json
-{json.dumps(kernel_state)}
-```\
-""")
-        if beaker_config.send_notebook_state:
-            if self.notebook_state:
-                parts.append(f"""\
-## Current notebook
-```application/x-ipynb+json
-{json.dumps(self.notebook_state)}
-```
-Note: In the notebook representation above, communication with the agent is encoded as Markdown cells with metadata
-field "beaker_cell_type" = "query". If a cell has metadata field "parent_cell", then the agent generated this cell as
-part of the ReAct loop associated with that query. As such, cells that follow a query may have occured while the ReAact
-loop was running and chronologically fit "inside" the query cell, as opposed to having been run afterwards.\
-""")
+            if result not in (None, ""):
+                parts.append(
+                    result
+                )
+#         if beaker_config.send_notebook_state:
+#             if self.notebook_state:
+#                 parts.append(f"""\
+# ## Current notebook
+# ```application/x-ipynb+json
+# {json.dumps(self.notebook_state)}
+# ```
+# Note: In the notebook representation above, communication with the agent is encoded as Markdown cells with metadata
+# field "beaker_cell_type" = "query". If a cell has metadata field "parent_cell", then the agent generated this cell as
+# part of the ReAct loop associated with that query. As such, cells that follow a query may have occured while the ReAact
+# loop was running and chronologically fit "inside" the query cell, as opposed to having been run afterwards.\
+# """)
 
-        if self.workflows:
-            parts.append(create_available_workflows_prompt(
-                list(self.workflows.values()),
-                self.attached_workflow)
-            )
+        # Workflows and integrations blocks have moved to system_preamble
+        # (WorkflowRegistry.system_preamble and IntegrationProviderRegistry.system_preamble).
 
-        if self.integrations:
-            parts.append("Here are integrations that you have access to:")
-            integration_prompts = [
-                integration.prompt for integration in self.integrations
-            ]
-            parts.append("---".join(integration_prompts))
-        content = "\n\n".join(parts)
-        return content
+        if parts:
+            return "\n\n".join(parts)
+        else:
+            return None
 
     def get_subkernel(self):
-        language = self.config.get("language", None)
         subkernel_slug = self.config.get("subkernel", None)
+        language = self.config.get("language", None)
 
-        self.beaker_kernel.debug("new_kernel", f"Setting new kernel of `{subkernel_slug}`")
-        if not subkernel_slug and language:
-            kernel_opts = {
-                subkernel.KERNEL_NAME: subkernel
-                for subkernel in autodiscover("subkernels").values()
-            }
-            subkernel_opts = {
-                subkernel.SLUG: subkernel
-                for subkernel in autodiscover("subkernels").values()
-            }
-            if language not in kernel_opts and language in subkernel_opts:
-                language = subkernel_opts[language].KERNEL_NAME
-            subkernel_slug = language
+        # Step 1: Discover available BeakerSubkernel classes
+        subkernels = autodiscover("subkernels")  # slug -> class
 
-        subkernels = autodiscover("subkernels")
-        subkernel_by_lang = {
-           sub.JUPYTER_LANGUAGE: sub for sub in subkernels.values()
-        }
+        # Step 2: Resolve which BeakerSubkernel class to use
+        subkernel_cls: type[BeakerSubkernel] | None = None
+        if subkernel_slug and subkernel_slug in subkernels:
+            subkernel_cls = subkernels[subkernel_slug]
+        elif language:
+            by_lang = {s.JUPYTER_LANGUAGE: s for s in subkernels.values()}
+            subkernel_cls = by_lang.get(language)
+        if subkernel_cls is None:
+            raise ValueError(
+                f"No subkernel found for subkernel={subkernel_slug!r}, language={language!r}. "
+                f"Available subkernels: {list(subkernels.keys())}"
+            )
 
+        # Step 3: Fetch kernel specs from the (potentially remote) KSM
         urlbase = self.beaker_kernel.jupyter_server
-
-        kernelspec_req = requests.get(
-            urllib.parse.urljoin(urlbase, f"/api/kernelspecs/{subkernel_slug}"),
-            headers={
-                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
-            },
+        kernelspecs_res = requests.get(
+            urllib.parse.urljoin(urlbase, "/api/kernelspecs"),
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
-        if kernelspec_req.status_code == 400:
-            raise ValueError(f"Can't find kernelspec for {subkernel_slug}")
-        elif kernelspec_req.status_code >= 500:
-            raise RuntimeError(f"Error fetching kernelspec for {subkernel_slug}: {kernelspec_req.json()}")
+        if kernelspecs_res.status_code >= 400:
+            raise RuntimeError(
+                f"Error fetching kernel specs (status {kernelspecs_res.status_code}): "
+                f"{kernelspecs_res.text}"
+            )
+        kernelspecs = kernelspecs_res.json().get("kernelspecs", {})
 
-        kernelspec = kernelspec_req.json()
-        kernel_lang = kernelspec.get('spec', {}).get("language", None)
-        subkernel_cls = kernel_lang and subkernel_by_lang.get(kernel_lang)
+        # Step 4: Resolve which kernel spec name to use for kernel creation
+        kernel_spec_name = subkernel_cls.resolve_kernelspec(kernelspecs)
+        if not kernel_spec_name:
+            available_languages = {
+                info.get("spec", {}).get("language") for info in kernelspecs.values()
+            }
+            raise ValueError(
+                f"No installed kernel spec matches subkernel '{subkernel_cls.SLUG}' "
+                f"(language='{subkernel_cls.JUPYTER_LANGUAGE}'). "
+                f"Available kernel spec languages: {available_languages}"
+            )
 
-        # url = urllib.parse.urljoin(self.beaker_kernel.jupyter_server, "/api/kernels")
-        url = urllib.parse.urljoin(urlbase, "/api/kernels")
+        # Step 5: Create the kernel via the Jupyter API
         path = self.beaker_kernel.session_config.get("beaker_session", None)
         if path is None:
             path = self.beaker_kernel.session_config.get("jupyter_session", "")
-        res = requests.post(
-            url,
-            json={"name": subkernel_slug, "path": path},
-            headers={
-                "X-AUTH-BEAKER": self.beaker_kernel.api_auth()
-            },
-        )
-        kernel_info = res.json()
-        self.beaker_kernel.update_running_kernels()
-        kernels = self.beaker_kernel.kernels
-        subkernel_id = kernel_info["id"]
-        # NOTE: MODIFIED `connect_to`
-        # TODO: Refactor this into `lib/kernel_proxy_manager.py`
-        matching = next((n for n in kernels if subkernel_id in n), None)
-        if matching is None:
-            raise ValueError("Unknown kernel " + subkernel_id)
-        if kernels[matching] == self.beaker_kernel.server.config:
-            raise ValueError("Refusing loopback connection")
 
-        # subkernel = kernel_opts[language](subkernel_id, kernels[matching], self)
-        subkernel = subkernel_cls(subkernel_id, kernels[matching], self)
+        kernel_creation_res = requests.post(
+            url=urllib.parse.urljoin(urlbase, "/api/kernels"),
+            json={"name": kernel_spec_name, "path": path},
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
+        )
+        kernel_info = kernel_creation_res.json()
+
+        try:
+            subkernel_id: str = kernel_info["id"]
+        except Exception as err:
+            logger.error(json.dumps(kernel_info), exc_info=err)
+            raise
+
+        connection_info_res = requests.get(
+            url=urllib.parse.urljoin(urlbase, f"/beaker/subkernels/{subkernel_id}"),
+            headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
+        )
+        connection_info = connection_info_res.json()
+        connection_info["key"] = base64.b64decode(connection_info.get("key", b""))
+
+        # Step 6: Instantiate the BeakerSubkernel
+        subkernel: BeakerSubkernel = subkernel_cls(subkernel_id, connection_info, self)
         self.beaker_kernel.server.set_proxy_target(subkernel.connected_kernel)
         return subkernel
 
     @classmethod
-    def available_subkernels(cls) -> List["BeakerSubkernel"]:
+    def available_subkernels(cls) -> dict["str", "BeakerSubkernel"]:
         subkernels: Dict[str, BeakerSubkernel] = autodiscover("subkernels")
 
         if cls.compatible_subkernels:
-            return [subkernel for subkernel in cls.compatible_subkernels if subkernel in subkernels]
+            return {slug: subkernels[slug] for slug in cls.compatible_subkernels if slug in subkernels}
 
         class_dir = inspect.getfile(cls)
         proc_dir = os.path.join(os.path.dirname(class_dir), "procedures")
@@ -336,10 +559,10 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         subkernel_list = sorted(subkernels.values(), key=lambda subkernel: (subkernel.WEIGHT, subkernel.SLUG))
 
         if proc_slugs and subkernel_list:
-            result = [subkernel.SLUG for subkernel in subkernel_list if subkernel.SLUG in proc_slugs]
+            result = {subkernel.SLUG: subkernel for subkernel in subkernel_list if subkernel.SLUG in proc_slugs}
             return result
         else:
-            return []
+            return {}
 
     @classmethod
     def default_payload(cls) -> str:
@@ -387,11 +610,20 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 for uuid, workflow in self.workflows.items()
             }
         }
+        custom_renderers = {}
+        if self.RENDERERS:
+            for mimetype, config in self.RENDERERS.items():
+                renderer_file = config.get("file", "renderers.js")
+                export_name = config.get("export", "default")
+                custom_renderers[mimetype] = {
+                    "url": f"/assets/context/{self.SLUG}/{renderer_file}",
+                    "name": export_name,
+                }
 
         payload = {
-            "language": self.subkernel.DISPLAY_NAME,
-            "subkernel": self.subkernel.KERNEL_NAME,
-            "subkernel_kernel": self.config.get("subkernel", None),
+            "language": self.subkernel.JUPYTER_LANGUAGE,
+            "subkernel": self.subkernel.SLUG,
+            "config": self.config,
             "actions": action_details,
             "custom_messages": custom_messages,
             "procedures": list(self.templates.keys()),
@@ -399,6 +631,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             "agent": agent_details,
             "debug": self.beaker_kernel.debug_enabled,
             "verbose": self.beaker_kernel.verbose,
+            "custom_renderers": custom_renderers,
         }
 
         return payload
@@ -450,17 +683,17 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 if target_id is None:
                     msg = "Provider targets must specify desired provider: e.g. `provider:my_provider`"
                     raise ValueError(msg)
-                _provider_type, provider_slug = target_id.split(":", maxsplit=1)
+                _provider_type, provider_id = target_id.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.slug == provider_slug
+                        if provider.id == provider_id
                     )
                     function = getattr(provider, content.get("function"))
                     result = await ensure_async(function(*args, **kwargs))
                     result = self._call_message_result_wrapper(result)
                 except StopIteration as e:
-                    msg = f"Provider not found in integrations. `{provider_slug}` not in {[p.slug for p in self.integrations]}"
+                    msg = f"Provider not found in integrations. `{provider_id}` not in {[p.slug for p in self.integrations]}"
                     raise KeyError(msg) from e
             # mapping from an integration uuid to its parent provider, to call a method on that parent
             case "integration":
@@ -475,14 +708,14 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
                 except StopIteration as e:
                     msg = f"Integration `{target_id}` not found in {[i.slug for i in all_integrations]}"
                     raise KeyError(msg) from e
-                _provider_type, provider_slug = integration.provider.split(":", maxsplit=1)
+                _provider_type, provider_id = integration.provider.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.slug == provider_slug
+                        if provider.slug == provider_id
                     )
                 except StopIteration as e:
-                    msg = f"Provider not found: `{provider_slug}` in {[provider.slug for provider in self.integrations]}"
+                    msg = f"Provider not found: `{provider_id}` in {[provider.slug for provider in self.integrations]}"
                     raise KeyError(msg) from e
                 function = getattr(provider, content.get("function"))
                 result = await ensure_async(function(*args, **kwargs))
@@ -492,7 +725,12 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
         return result
 
     async def get_subkernel_state(self):
-        fetch_state_code = self.subkernel.FETCH_STATE_CODE
+        # Prefer the procedure-backed fetch_state path; fall back to the
+        # deprecated FETCH_STATE_CODE class attribute via the subkernel's
+        # own resolver so legacy subkernels keep working.
+        fetch_state_code = self.subkernel._render_fetch_state_code()
+        if not fetch_state_code:
+            return {}
         state = await self.evaluate(fetch_state_code)
         for warning in state["stderr_list"]:
             logger.warning(warning)
@@ -572,6 +810,7 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
             # ensure hashes don't align and content updates
             self.agent.chat_history.auto_context_message.content = ""
             await self.agent.chat_history.auto_context_message.update_content()
+        await self.refresh_system_preamble()
         await self.agent.chat_history.token_estimate(model=self.agent.model)
         await self.beaker_kernel.send_chat_history(parent_header=message.header)
 
@@ -677,24 +916,59 @@ loop was running and chronologically fit "inside" the query cell, as opposed to 
     def send_response(self, stream, msg_or_type, content=None, channel=None, parent_header={}, parent_identities=None):
         return self.beaker_kernel.send_response(stream, msg_or_type, content, channel, parent_header, parent_identities)
 
+    @classmethod
+    def discover_procedures(cls) -> dict:
+        proc_dir = getattr(cls, "procedure_location", None)
+        result = {}
+        if proc_dir is None:
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            proc_dir = os.path.join(class_dir, "procedures")
+        if not proc_dir or not os.path.isdir(proc_dir):
+            return {}
+
+        langdirs = os.listdir(proc_dir)
+        for lang in langdirs:
+            proc_lang_dir = os.path.join(proc_dir, lang)
+            if os.path.exists(proc_lang_dir):
+                for proc_file in os.listdir(proc_lang_dir):
+                    proc_name, _ = os.path.splitext(proc_file)
+                    if proc_name.startswith('.'):
+                        continue
+                    file_path = os.path.join(lang, proc_file)
+                    if proc_name not in result:
+                        result[proc_name] = {
+                            "name": proc_name,
+                            "languages": {lang: file_path}
+                        }
+                    else:
+                        result[proc_name]["languages"][lang] = file_path
+        return result
+
+    @classmethod
+    def discover_workflows(cls) -> dict:
+        workflow_dir = getattr(cls, "workflow_location", None)
+        result = {}
+
+        if workflow_dir is None:
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            workflow_dir = os.path.join(class_dir, "workflows")
+        if workflow_dir and not os.path.isabs(workflow_dir):
+            class_dir = os.path.dirname(inspect.getfile(cls))
+            workflow_dir = os.path.normpath(os.path.join(class_dir, workflow_dir))
+        if os.path.isdir(workflow_dir):
+            for workflow_yaml in Path(workflow_dir).glob("*.yaml"):
+                workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
+                # lives as long as the session does
+                workflow_id = str(uuid4())
+                result[workflow_id] = workflow
+        return result
 
     @property
     def slug(self) -> Optional[str]:
         """
         A short, white-space-free label used to identify the context programatically.
-
-        If it is not defined on the context class as cls.SLUG, default to look at the name of the package that contains
-        the context.
-        E.g. For "beaker_kernel.contexts.pandas" the slug would be "pandas"
         """
-        if hasattr(self, "SLUG"):
-            return self.SLUG
-
-        package_str = inspect.getmodule(self).__package__
-        if package_str:
-            return package_str.split(".")[-1]
-        else:
-            return None
+        return self.SLUG
 
     @property
     def lang(self):

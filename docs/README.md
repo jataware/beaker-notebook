@@ -21,3 +21,13 @@ cd docs
 docker compose down
 ```
 
+## Adding a new page
+
+The documentation is organized into four top-level sections — **Getting Started**, **Key Concepts**, **Development**, and **CLI Reference** — plus the home page. To add a new page, copy the template file and edit it:
+
+```bash
+cp _base.md my_new_page.md
+```
+
+The template (`_base.md`) is annotated with comments explaining each front-matter field, including how to place the page in the navigation hierarchy. Because the filename starts with an underscore, Jekyll skips the template itself during site generation.
+

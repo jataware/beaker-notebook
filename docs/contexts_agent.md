@@ -1,8 +1,9 @@
 ---
 layout: default
 title: LLM Agent
-parent: Contexts
-nav_order: 4
+parent: Context Development
+grand_parent: Development
+nav_order: 5
 has_toc: true
 ---
 
@@ -18,5 +19,3 @@ interact with both the subkernel environment and the front-end using the
 [Archytas ReAct framework](https://github.com/jataware/archytas). Details for
 how toolsets work and should be defined can be found in the
 [Archytas documentation](https://github.com/jataware/archytas).
-
-## Coming soon

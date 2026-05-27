@@ -225,7 +225,13 @@ class ConfigClass:
         save_default_value=True,
     )
     enable_checkpoints: bool = configfield(
-        "Flag as to whether checkpoints are enabled or not.",
+        # NOTE: Checkpointing is temporarily disabled in code (see
+        # beaker_kernel.lib.subkernel.is_checkpointing_enabled) due to a performance issue where
+        # serializing kernel state can take several minutes in some cases. This flag is currently
+        # a no-op and is retained so the configuration surface does not change when checkpointing
+        # is revisited in a future update.
+        "Flag as to whether checkpoints are enabled or not. Currently disabled regardless of this "
+        "setting pending a fix for slow kernel-state serialization.",
         "ENABLE_CHECKPOINTS",
         default=True,
         sensitive=False,
@@ -253,6 +259,20 @@ class ConfigClass:
         sensitive=False,
         normalize_function=normalize_bool,
         label="Send kernel state on query?"
+    )
+    kernel_state_sample_budget: int = configfield(
+        description="Maximum total characters of variable-sample content included in kernel_state payloads. 0 disables samples.",
+        env_var="KERNEL_STATE_SAMPLE_BUDGET",
+        default=0,
+        sensitive=False,
+        label="Kernel state sample budget (0 = use subkernel default)"
+    )
+    describe_variables_sample_budget: int = configfield(
+        description="Maximum total characters of variable-sample content included in describe_variables payloads. 0 = use subkernel default.",
+        env_var="DESCRIBE_VARIABLES_SAMPLE_BUDGET",
+        default=0,
+        sensitive=False,
+        label="describe_variables sample budget (0 = use subkernel default)"
     )
 
     @property

@@ -16,13 +16,56 @@
     >
         <div class="integration-container">
             <div class="beaker-notebook">
-                <IntegrationEditor
-                    v-model="integrations"
-                    :deleteResource="deleteResourceOnSelectedIntegration"
-                    :modifyResource="modifyResourceForSelectedIntegration"
-                    :modifyIntegration="modifySelectedIntegration"
-                    :fetchResources="fetchResourcesForSelectedIntegration"
-                />
+                <div class="integration-loading" v-if="beakerSession?.status === 'connecting'">
+                    <ProgressSpinner></ProgressSpinner>
+                    Loading integrations...
+                </div>
+                <div class="integration-page-content" v-else>
+                    <div class="integration-content-header">
+                        <Select
+                            :options="sortedIntegrations.map(integration => ({
+                                label: integration.name,
+                                value: integration.uuid
+                            }))"
+                            :option-label="(option) => option?.label ?? 'Select integration...'"
+                            option-value="value"
+                            placeholder="Select an integration..."
+                            @click="(event) => {
+                                if (!confirmUnsavedChanges()) {
+                                    event.preventDefault;
+                                } else {
+                                    integrations.unsavedChanges = false;
+                                }
+                            }"
+                            v-model="integrations.selected"
+                        />
+
+                        <Button
+                            v-if="!readOnly"
+                            @click="() => {
+                                if (confirmUnsavedChanges()) {
+                                    newIntegration();
+                                }
+                            }"
+                            label="New Integration"
+                        />
+                    </div>
+
+                    <div v-if="!integrations.selected" class="no-selection-placeholder" style="flex: 1">
+                        <i class="pi pi-info-circle" style="font-size: 1.5rem;"></i>
+                        <p>Select an integration to view or edit, or create a new one to get started.</p>
+                    </div>
+
+                    <component
+                        v-else
+                        :is="centerComponent"
+                        v-model="integrations"
+                        :deleteResource="deleteResourceOnSelectedIntegration"
+                        :modifyResource="modifyResourceForSelectedIntegration"
+                        :modifyIntegration="modifySelectedIntegration"
+                        :fetchResources="fetchResourcesForSelectedIntegration"
+                    />
+                </div>
             </div>
         </div>
 
@@ -50,6 +93,7 @@
                 >
                     <IntegrationPanel
                         v-model="integrations.integrations"
+                        :read-only="readOnly"
                     ></IntegrationPanel>
                 </SideMenuPanel>
                 <SideMenuPanel
@@ -89,16 +133,22 @@
                 </SideMenuPanel>
                 <SideMenuPanel
                     id="examples"
-                    label="Example Editor"
-                    icon="pi pi-list-check"
+                    :label="rightPanelLabel"
+                    :icon="rightPanelIcon"
                     no-overflow
                 >
-                <ExamplesPanel
-                    v-model="integrations"
-                    :disabled="!integrations.selected || integrations.selected === 'new'"
-                    :deleteResource="deleteResourceOnSelectedIntegration"
-                    :modifyResource="modifyResourceForSelectedIntegration"
-                />
+                    <component
+                        v-if="integrations.selected"
+                        :is="rightPanelComponent"
+                        v-model="integrations"
+                        :disabled="!integrations.selected || integrations.selected === 'new'"
+                        :deleteResource="deleteResourceOnSelectedIntegration"
+                        :modifyResource="modifyResourceForSelectedIntegration"
+                        :sessionId="sessionId"
+                    />
+                    <div v-else class="no-selection-placeholder" style="padding: 1rem;">
+                        <i>Select an integration to view its resources.</i>
+                    </div>
                 </SideMenuPanel>
                 <SideMenuPanel id="kernel-logs" label="Logs" icon="pi pi-list" position="bottom">
                     <DebugPanel :entries="debugLogs" @clear-logs="debugLogs.splice(0, debugLogs.length)" v-autoscroll />
@@ -108,8 +158,8 @@
     </BaseInterface>
 </template>
 
-<script setup lang="ts">
-import { ref, watch, computed, nextTick, onMounted, inject } from 'vue';
+<script setup lang="tsx">
+import { ref, watch, computed, nextTick, onMounted, inject, h, type Component } from 'vue';
 import { JupyterMimeRenderer, type IMimeRenderer } from 'beaker-kernel';
 import type { BeakerNotebookComponentType } from '../components/notebook/BeakerNotebook.vue';
 import type { BeakerSessionComponentType } from '../components/session/BeakerSession.vue';
@@ -128,10 +178,29 @@ import NotebookSvg from '../assets/icon-components/NotebookSvg.vue';
 import type { IBeakerTheme } from '../plugins/theme';
 import DebugPanel from '../components/panels/DebugPanel.vue'
 
-import IntegrationEditor from '../components/misc/IntegrationEditor.vue';
-import IntegrationPanel from '../components/panels/IntegrationPanel.vue';
-import { listResources, listIntegrations, type IntegrationInterfaceState, updateResource, addResource, updateIntegration, addIntegration, deleteResource } from '@/util/integration';
-import ExamplesPanel from '../components/panels/ExamplesPanel.vue';
+import Select from 'primevue/select';
+import Button from "primevue/button";
+import ProgressSpinner from 'primevue/progressspinner';
+
+import AdhocIntegrationEditor from '../components/integrations/AdhocIntegrationEditor.vue';
+import SkillIntegrationViewer from '../components/integrations/SkillIntegrationViewer.vue';
+import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
+import ExamplesPanel from '../components/integrations/ExamplesPanel.vue';
+import ResourceViewer from '../components/integrations/ResourceViewer.vue';
+import {
+    listResources,
+    listIntegrations,
+    type IntegrationInterfaceState,
+    type IntegrationMap,
+    type Integration,
+    getIntegrationProviderType,
+    updateResource,
+    addResource,
+    updateIntegration,
+    addIntegration,
+    deleteResource,
+} from '@/util/integration';
+import { useRoute } from 'vue-router';
 
 const beakerNotebookRef = ref<BeakerNotebookComponentType>();
 const beakerInterfaceRef = ref();
@@ -179,9 +248,6 @@ const kernelStateInfo = ref();
 
 const hasOpenedPanelOnce = ref(false);
 
-const selectedIntegration = ref();
-const unsavedChanges = ref<boolean>(false);
-
 type FilePreview = {
     url: string,
     mimetype?: string
@@ -189,8 +255,6 @@ type FilePreview = {
 const previewedFile = ref<FilePreview>();
 
 onMounted(() => {
-    // sideMenuRef.value.hidePanel()
-    // rightSideMenuRef.value.hidePanel()
     if (!hasOpenedPanelOnce.value) {
         nextTick(() => sideMenuRef.value.selectPanel('integrations'));
         nextTick(() => rightSideMenuRef.value.selectPanel('examples'));
@@ -204,12 +268,126 @@ const beakerSession = computed<BeakerSessionComponentType>(() => {
     return beakerInterfaceRef?.value?.beakerSession;
 });
 
+const integrationMapping: {[integrationType: string]: any} = {
+    'agent-skill': {
+        readOnly: true,
+        centerComponent: SkillIntegrationViewer,
+        rightPanelComponent: ResourceViewer,
+        rightPanelLabel: 'Resources',
+        rightPanelIcon: 'pi pi-folder-open',
+    },
+    adhoc: {
+        readOnly: false,
+        centerComponent: AdhocIntegrationEditor,
+        rightPanelComponent: ExamplesPanel,
+        rightPanelLabel: 'Example Editor',
+        rightPanelIcon: 'pi pi-list-check',
+    },
+    default: {
+        readOnly: false,
+        centerComponent: null,
+        rightPanelComponent: null,
+        rightPanelLabel: 'Resources',
+        rightPanelIcon: 'pi pi-folder-check',
+    },
+}
+
 const integrations = ref<IntegrationInterfaceState>({
     selected: selectedParam,
     integrations: {},
     unsavedChanges: false,
     finishedInitialLoad: false,
+});
+
+// --- Integration type detection ---
+
+const selectedIntegrationType = computed<string | undefined>(() => {
+    const selected = integrations.value.integrations?.[integrations.value?.selected];
+    if (!selected) return undefined;
+    return getIntegrationProviderType(selected);
+});
+
+// --- Dynamic component switching ---
+
+const centerComponent = computed<Component>(() => {
+    return integrationMapping[selectedIntegrationType.value]?.centerComponent || integrationMapping.default?.centerComponent;
+});
+
+const rightPanelComponent = computed<Component>(() => {
+    return integrationMapping[selectedIntegrationType.value]?.rightPanelComponent || integrationMapping.default?.rightPanelComponent;
+});
+
+const rightPanelLabel = computed<string>(() => {
+    return integrationMapping[selectedIntegrationType.value]?.rightPanelLabel || integrationMapping.default?.rightPanelLabel;
+});
+
+const rightPanelIcon = computed<string>(() => {
+    return integrationMapping[selectedIntegrationType.value]?.rightPanelIcon || integrationMapping.default?.rightPanelIcon;
+});
+
+const readOnly = computed<boolean>(() => {
+    return integrationMapping[selectedIntegrationType.value]?.readOnly || integrationMapping.default?.readOnly;
 })
+
+// --- Integration selector logic (moved from IntegrationEditor) ---
+
+const sortIntegrations = (integrations: IntegrationMap): Integration[] =>
+    Object.values(integrations).toSorted((a, b) => a?.name.localeCompare(b?.name));
+
+const sortedIntegrations = computed<Integration[]>(() =>
+    sortIntegrations(integrations.value.integrations ?? {}));
+
+const confirmUnsavedChanges = () => {
+    if (integrations.value.unsavedChanges) {
+        return confirm("You currently have unsaved changes that would be lost with this change. Are you sure?");
+    }
+    return true;
+};
+
+const newIntegration = () => {
+    const defaultProvider = (Object.keys(integrations.value?.integrations).length
+        ? Object.values(integrations.value.integrations).find(i => getIntegrationProviderType(i) === 'adhoc')?.provider
+        : "adhoc:specialist_agents") ?? "adhoc:specialist_agents";
+    const integration: Integration = {
+        name: "New Integration",
+        source: "This is the prompt information that the agent will consult when using the integration. Include API details or how to find datasets here.",
+        description: "This is the description that the agent will use to determine when this integration should be used.",
+        provider: defaultProvider,
+        slug: "new_integration",
+        uuid: "new",
+        url: ""
+    };
+    integrations.value.integrations["new"] = integration;
+    integrations.value.selected = "new";
+    integrations.value.unsavedChanges = true;
+};
+
+const delayUntil = (condition, retryInterval) => {
+    const poll = resolve => {
+        if (condition()) {
+            resolve();
+        } else {
+            setTimeout(() => poll(resolve), retryInterval);
+        }
+    };
+    return new Promise(poll);
+};
+
+const route = useRoute();
+watch(() => route, (newRoute) => {
+    if (newRoute.query?.selected === "new") {
+        if (integrations.value.finishedInitialLoad) {
+            newIntegration();
+        } else {
+            delayUntil(() => integrations.value.finishedInitialLoad, 100)
+                .then(() => newIntegration());
+        }
+    } else {
+        integrations.value.selected = newRoute.query?.selected as string | undefined ?? integrations.value.selected;
+    }
+}, {immediate: true, deep: true});
+
+// --- API operations ---
 
 const fetchResourcesForSelectedIntegration = async () => {
     const selectedIntegration = integrations.value.integrations?.[integrations.value?.selected];
@@ -217,7 +395,6 @@ const fetchResourcesForSelectedIntegration = async () => {
         return;
     }
     if (integrations.value?.selected === "new") {
-        // in the case of first-load opening a new, local-only integration, assume an empty resources object
         if (selectedIntegration?.resources === undefined || selectedIntegration?.resources === null ) {
             selectedIntegration.resources = {};
         }
@@ -244,7 +421,7 @@ const modifySelectedIntegration = async (body: object, integrationId?: string) =
             sessionId,
             integrationId,
             body
-        )
+        );
     } else {
         const newIntegration = await addIntegration(sessionId, body);
         integrations.value.integrations[newIntegration.uuid] = newIntegration;
@@ -272,11 +449,12 @@ const modifyResourceForSelectedIntegration = async (body: object, resourceId?: s
 }
 
 const deleteResourceOnSelectedIntegration = async (resourceId: string) => {
-    await deleteResource(sessionId, integrations.value.selected, resourceId)
+    await deleteResource(sessionId, integrations.value.selected, resourceId);
 }
 
-// on connection, send message with retries: see integrations.py:call_in_context()
 watch(beakerSession, async () => fetchIntegrations());
+
+// --- Header nav ---
 
 const headerNav = computed((): NavOption[] => {
     const nav = [];
@@ -335,7 +513,6 @@ const headerNav = computed((): NavOption[] => {
     return nav;
 });
 
-// Ensure we always have at least one cell
 watch(
     () => beakerNotebookRef?.value?.notebook.cells,
     (cells) => {
@@ -435,9 +612,6 @@ const restartSession = async () => {
                 max-width: 100%;
                 padding: 0.5rem;
                 margin-bottom: 0.5rem;
-                // &:nth-child(1) {
-                //     margin-bottom: 0rem;
-                // }
                 .p-toolbar-group-start {
                     button {
                         margin-right: 0.5rem
@@ -452,6 +626,53 @@ const restartSession = async () => {
             }
         }
     }
+}
+
+.integration-page-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0 0.4rem;
+}
+
+.integration-content-header {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 100%;
+    flex-shrink: 0;
+    margin-bottom: 0.5rem;
+
+    > div.p-select {
+        flex: 1 1 auto;
+        width: 100px;
+        span.p-select-label {
+            flex-shrink: 2;
+            display: block;
+            min-width: 0;
+        }
+    }
+}
+
+.integration-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 1rem;
+}
+
+.no-selection-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 1rem;
+    color: var(--p-text-muted-color);
+    text-align: center;
 }
 
 .spacer {

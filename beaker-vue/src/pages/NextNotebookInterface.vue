@@ -196,7 +196,7 @@ import SideMenu from "../components/sidemenu/SideMenu.vue";
 import SideMenuPanel from "../components/sidemenu/SideMenuPanel.vue";
 import FileContentsPanel from '../components/panels/FileContentsPanel.vue';
 import { ChatHistoryPanel, type IChatHistory } from '../components/panels/ChatHistoryPanel';
-import IntegrationPanel from '../components/panels/IntegrationPanel.vue';
+import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
 import PreviewPanel from '../components/panels/PreviewPanel.vue';
 import BeakerNotebook from '../components/notebook/BeakerNotebook.vue';
 import BeakerNotebookToolbar from '../components/notebook/BeakerNotebookToolbar.vue';
@@ -218,6 +218,8 @@ import { listIntegrations, type IntegrationMap } from '../util/integration';
 import WorkflowStepPanel from '@/components/panels/WorkflowStepPanel.vue';
 import WorkflowOutputPanel from '@/components/panels/WorkflowOutputPanel.vue';
 import { useWorkflows } from '@/composables/useWorkflows';
+
+import { contextService } from '@/services/context';
 
 const props = defineProps([
     "config",
@@ -346,7 +348,7 @@ const { setupQueryCellFlattening, resetProcessedEvents } = useQueryCellFlattenin
 setupQueryCellFlattening(() => beakerSession.value?.session?.notebook?.cells);
 
 const handleLoadNotebook = (notebookJSON: any, filename: string) => {
-    console.log("Loading notebook:", notebookJSON, filename);
+    console.log("Loading notebook:", filename);
     resetProcessedEvents();
     loadNotebook(notebookJSON, filename);
 };

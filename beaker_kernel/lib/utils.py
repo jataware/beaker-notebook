@@ -23,6 +23,11 @@ from archytas.exceptions import AuthenticationError
 from .jupyter_kernel_proxy import ( KERNEL_SOCKETS, KERNEL_SOCKETS_NAMES,
                                    JupyterMessage, JupyterMessageTuple)
 
+if TYPE_CHECKING:
+    from beaker_kernel.lib.agent import BeakerAgent
+    from archytas.chat_history import ToolMessage, ChatHistory
+    from nbformat import NotebookNode
+
 
 BeakerEntryPoint = namedtuple("BeakerEntryPoint", ("type", "import_string"))
 
@@ -39,6 +44,11 @@ def env_enabled(env_var: str):
 def get_socket(stream_name: str):
     socket = KERNEL_SOCKETS[KERNEL_SOCKETS_NAMES.index(stream_name)]
     return socket
+
+def to_import_string(target: type|object) -> str:
+    if not isinstance(target, type):
+        target = target.__class__
+    return f"{target.__module__}.{target.__name__}"
 
 def import_dotted_class(import_string: str):
     try:
@@ -216,8 +226,8 @@ def action(action_name: str|None=None, docs: str|None=None, default_payload=None
                 raise RuntimeError("This action is disabled.")
             return disabled_message
         return disable
-    def register_method(fn):
 
+    def register_method(fn):
         action_nm = action_name or fn.__name__  # Default msg_type value to be the name of the function if undefined/falsey
         if action_nm.lower().endswith("request"):
             logger.error("Beaker action names should not include the `_request` suffix.")
@@ -347,3 +357,44 @@ async def ensure_async(fn: Coroutine|Callable):
 def slugify(name: str):
     slug = "_".join(re.split(r"\W", name.lower().strip()))
     return slug
+
+
+def succinct_tool_summarizer(
+    max_length: int=300
+):
+    async def succinct_tool_summarizer(
+        message: "ToolMessage",
+        chat_history: "ChatHistory",
+        agent: "BeakerAgent",
+        model: "BaseArchytasModel" = None
+    ):
+        message_length = len(message.content)
+        if message_length < max_length:
+            # Message is already short enough
+            return
+
+        all_messages = await chat_history.messages(auto_update_context=False)
+        last_message = all_messages[-1]
+        last_message_id = last_message.id
+
+        _, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+
+        message.content = f"""\
+## Auto-summarized tool call output (summarized after processing message `{last_message_id}`)
+Tool `{tool_call.get("name")}` called with {len(tool_call.get("args", []))} arguments.
+Status: {message.status}
+Output:
+    `{message.content[:max_length]}<... {message_length - max_length} characters truncated ...>`
+"""
+        message.artifact["summarized"] = True
+    return succinct_tool_summarizer
+
+
+def normalize_notebook(nb: "dict|NotebookNode") -> "NotebookNode":
+    from nbformat import versions
+    from nbformat.reader import get_version
+
+    # Convert and validate notebook dictionary
+    (nbmajor, nbminor) = get_version(nb)
+    nbnode: NotebookNode = versions[nbmajor].to_notebook_json(nb, minor=nbminor)
+    return nbnode

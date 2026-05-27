@@ -9,25 +9,25 @@
         </div>
         <div class="mime-payload">
             <component
-                v-if="renderedBundle[selectedMimeType]?.component"
-                :is="renderedBundle[selectedMimeType].component"
-                v-bind="renderedBundle[selectedMimeType].bindMapping"
-                :class="`rendered-output ${selectedMimeType.replace('/', '-')}`"
+                v-if="renderedComponent"
+                :is="renderedComponent"
+                v-bind="renderedData"
+                :class="`rendered-output ${(selectedMimeType ?? '').replace('/', '-')}`"
                 @click="handleImageClick"
             />
         </div>
-
     </div>
 
 </template>
 
 <script lang="ts" setup>
-import { ref, inject, computed, watch } from "vue";
+import { ref, inject, computed, watch, reactive, render, onMounted, onBeforeMount } from "vue";
 import { useDialog } from "primevue";
 import SelectButton from "primevue/selectbutton";
 import { BeakerSession } from "beaker-kernel";
 import type { BeakerRenderOutput } from "../../renderers";
 import ImageZoomDialog from "./ImageZoomDialog.vue";
+import { merge } from "lodash";
 
 const props = defineProps([
     "mimeBundle",
@@ -39,28 +39,45 @@ const session = inject<BeakerSession>('session');
 const dialog = useDialog();
 const overlay = ref();
 
-const renderedBundle = computed<{[key: string]: BeakerRenderOutput}>(
-    () => {
-        return session.renderer.renderMimeBundle(props.mimeBundle) as any as {[key: string]: BeakerRenderOutput}
-    }
-);
+const renderedBundle = ref<{[key: string]: BeakerRenderOutput} | any>({});
+const selectedMimeType = ref<string>();
+
+const updateDisplay = () => {
+    const bundle = session.renderer.renderMimeBundle(props.mimeBundle);
+    merge(renderedBundle.value, bundle);
+}
+
+const renderedComponent = computed(() => {
+    return renderedBundle.value[selectedMimeType.value]?.component;
+});
+
+const renderedData = computed(() => {
+    return renderedBundle.value[selectedMimeType.value]?.bindMapping;
+});
+watch(() => props.mimeBundle, () => {
+    updateDisplay();
+}, {deep: true});
+
 const sortedMimetypes = computed(() => {
     // Only display mimetypes in list that have a valid rendered payload
     return session.renderer.rankedMimetypesInBundle(props.mimeBundle).filter((obj) => {
-        return Boolean(renderedBundle.value[obj]);
+        return Boolean(renderedBundle.value?.[obj]);
     })
 });
 
-const selectedMimeType = ref<string>(sortedMimetypes.value[0]);
 
-// selectedMimeType needs to fulfill two things:
-//   - user-selectable and not constantly computed
-//   - but pick the most-relevant sorted mimetype when the bundle changes
-// given that it's a ref the user can pick that needs to recompute on changed bundle,
-// without this watcher, BeakerMimeBundles that don't unmount will ignore sorted types
 watch(sortedMimetypes, (newSortedTypes, _) => {
     selectedMimeType.value = newSortedTypes[0];
 })
+
+onBeforeMount(() => {
+    selectedMimeType.value = selectedMimeType.value ?? sortedMimetypes.value[0];
+});
+
+onMounted(() => {
+    updateDisplay();
+});
+
 
 // click-to-zoom for img tags
 const handleImageClick = (event: MouseEvent) => {

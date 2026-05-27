@@ -44,10 +44,17 @@ const props = defineProps([
 ])
 
 const session: BeakerSession = inject("session");
+const showToast: (...args: any[]) => void = inject("show_toast");
 const handleQuery = (e: any) => {
     const notebook = session.notebook;
     if (!query.value.trim()) {
-        return; // TODO notify user that they're missing the agent query?
+        showToast?.({
+            title: "Empty query",
+            detail: "Please enter a question or instruction before submitting.",
+            severity: "warn",
+            life: 4000,
+        });
+        return;
     }
     // Remove the top cell if it is blank/not used.
     if (notebook.cells.length === 1) {

@@ -17,6 +17,7 @@ from tornado import ioloop
 
 from beaker_kernel.lib.config import reset_config, config
 from beaker_kernel.lib.context import BeakerContext, autodiscover_contexts
+from beaker_kernel.lib.subkernel import BeakerSubkernel
 from beaker_kernel.lib.jupyter_kernel_proxy import InterceptionFilter, JupyterMessage, KernelProxyManager
 from beaker_kernel.lib.utils import (message_handler, LogMessageEncoder, magic,
                         handle_message, get_socket, execution_context, parent_message_context,
@@ -34,7 +35,7 @@ MESSAGE_STREAMS = {
     "stream": "iopub",
 }
 
-AVAILABLE_CONTEXTS = autodiscover_contexts()
+AVAILABLE_CONTEXTS = {k: v for k, v in autodiscover_contexts().items() if v is not None}
 
 
 class BeakerKernel(KernelProxyManager):
@@ -82,10 +83,12 @@ class BeakerKernel(KernelProxyManager):
         self.user_responses = dict()
         # Initialize context (Using the event loop to simulate `await`ing the async func in non-async setup)
         event_loop = asyncio.get_event_loop()
+        logger.debug(f"About to start default context: {context_args}")
         context_task = event_loop.create_task(self.start_default_context(**context_args))
         context_task.add_done_callback(lambda task: None)
 
     async def start_default_context(self, default_context=None, default_context_payload=None, **options):
+        logger.debug("starting default context!")
         default_context = default_context or os.environ.get('BEAKER_DEFAULT_CONTEXT')
         default_context_payload = default_context_payload or os.environ.get('BEAKER_DEFAULT_CONTEXT_PAYLOAD', "{}")
 
@@ -96,7 +99,8 @@ class BeakerKernel(KernelProxyManager):
             optional_args["language"] = language
 
         # Set context specific options
-        debug = options.get("debug", None) or os.environ.get('BEAKER_DEFAULT_CONTEXT_DEBUG', None)
+        if (debug := (options.get("debug", None))) is None:
+            debug = str(os.environ.get('BEAKER_DEFAULT_CONTEXT_DEBUG', "false")).lower() in ("true", "t", "y", "yes", "debug")
         verbose = options.get("verbose", None) or os.environ.get('BEAKER_DEFAULT_CONTEXT_VERBOSE', None)
         if debug is not None:
             self.debug_enabled = debug
@@ -109,7 +113,10 @@ class BeakerKernel(KernelProxyManager):
             except json.JSONDecodeError:
                 default_context_payload = {}
         if not default_context:
-            sorted_contexts = sorted(autodiscover_contexts().items(), key=lambda item: item[1].WEIGHT)
+            sorted_contexts = sorted(
+                ((k, v) for k, v in autodiscover_contexts().items() if v is not None),
+                key=lambda item: item[1].WEIGHT
+            )
             first_context = sorted_contexts[0]
             default_context, context_cls = first_context
             default_context_payload = context_cls.default_payload()
@@ -163,7 +170,7 @@ class BeakerKernel(KernelProxyManager):
         key = self.session_config.get("key")
 
         hash_source = f"{kernel_id}{nonce}{key}".encode()
-        hash_value = hashlib.md5(hash_source).hexdigest()
+        hash_value = hashlib.sha256(hash_source).hexdigest()
 
         return f"{preamble}:{kernel_id}:{nonce}:{hash_value}"
 
@@ -237,17 +244,60 @@ class BeakerKernel(KernelProxyManager):
             self.stderr(f"Unable to find an action with name `{action_name}`.")
         return result_data
 
-    def handle_thoughts(
-        self, thought: str, tool_name: str, tool_input: str, parent_header: dict = {}
+    def handle_react_step(
+        self,
+        thought: str,
+        thought_id: str,
+        tool_calls: list[dict],
+        parent_header: dict = {},
     ):
+        """Publish a single ``llm_thought`` IOPub message for a ReAct step.
+
+        Each ``tool_calls`` entry is augmented with ``state="pending"`` so the
+        UI can render the row before the corresponding ``running`` /
+        ``done`` updates arrive.
+        """
         content = {
             "thought": thought,
-            "tool_name": tool_name,
-            "tool_input": tool_input,
+            "thought_id": thought_id,
+            "tool_calls": [
+                {
+                    "tool_call_id": tc["tool_call_id"],
+                    "tool_name": tc["tool_name"],
+                    "tool_input": tc["tool_input"],
+                    "state": "pending",
+                }
+                for tc in tool_calls
+            ],
         }
         self.send_response(
             stream="iopub",
             msg_or_type="llm_thought",
+            content=content,
+            parent_header=parent_header,
+        )
+
+    def handle_tool_call_update(
+        self,
+        tool_call_id: str,
+        state: str,
+        parent_header: dict = {},
+        **fields,
+    ):
+        """Publish a ``tool_call_update`` IOPub message for a single tool's
+        lifecycle transition.
+
+        ``fields`` may include ``started_at``, ``ended_at``, ``output_preview``,
+        ``output_truncated``, ``error``.
+        """
+        content = {
+            "tool_call_id": tool_call_id,
+            "state": state,
+            **fields,
+        }
+        self.send_response(
+            stream="iopub",
+            msg_or_type="tool_call_update",
             content=content,
             parent_header=parent_header,
         )
@@ -335,9 +385,16 @@ class BeakerKernel(KernelProxyManager):
         with open(self.connection_file, "w") as connection_file:
             json.dump(run_info, connection_file, indent=2)
 
-    async def set_context(self, context_name, context_info, language="python3", subkernel=None, parent_header={}):
-
-        context_cls = AVAILABLE_CONTEXTS.get(context_name, None)
+    async def set_context(
+            self,
+            context_name: str,
+            context_info: dict|None,
+            subkernel: BeakerSubkernel|str|type[BeakerSubkernel]|None = None,
+            language: str = "python",
+            parent_header: dict = {}
+        ):
+        subkernel_ref = subkernel
+        context_cls: type[BeakerContext]|None = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
             # TODO: Should we return an error if the requested context isn't available?
             return False
@@ -352,9 +409,19 @@ class BeakerKernel(KernelProxyManager):
                 default_payload = json.loads(default_payload)
             context_info = default_payload
 
+        match subkernel:
+            case str():
+                subkernel = context_cls.available_subkernels().get(subkernel)
+            case None:
+                if language:
+                    subkernel = next((subkernel for subkernel in context_cls.available_subkernels().values() if subkernel.JUPYTER_LANGUAGE == language), None)
+
+        if not subkernel:
+            raise ModuleNotFoundError(f"Unable to locate subkernel {repr(subkernel_ref)}")
+
         context_config = {
-            "language": language,
-            "subkernel": subkernel,
+            "subkernel": subkernel.SLUG,
+            "language": subkernel.JUPYTER_LANGUAGE,
             "context_info": context_info
         }
         self.context = context_cls(beaker_kernel=self, config=context_config)
@@ -562,10 +629,15 @@ class BeakerKernel(KernelProxyManager):
         request_key = f"llm_query:{message.header['msg_id']}"
         try:
             try:
-                # Before starting ReAct loop, replace thought handler with partial func with parent_header so we can track
-                # thoughts
+                # Before starting ReAct loop, install ReAct/tool-call handlers bound to the
+                # incoming request's parent header so IOPub traffic is correlated correctly.
                 if self.context.agent:
-                    self.context.agent.thought_handler = partial(self.handle_thoughts, parent_header=message.header)
+                    self.context.agent.on_react_step = partial(
+                        self.handle_react_step, parent_header=message.header
+                    )
+                    self.context.agent.on_tool_call_update = partial(
+                        self.handle_tool_call_update, parent_header=message.header
+                    )
                 self.debug("llm_query", request, parent_header=message.header)
                 task = asyncio.create_task(self.context.agent.react_async(request, react_context={"message": message}))
                 self.running_actions[request_key] = task
@@ -630,8 +702,10 @@ class BeakerKernel(KernelProxyManager):
                     "iopub", "llm_response", stream_content, parent_header=message.header
                 )
             finally:
-                # When done, put thought handler back to default to not potentially cause confused thoughts.
-                self.context.agent.thought_handler = self.handle_thoughts
+                # When done, restore the unbound handlers (no parent_header) so any
+                # background activity isn't attributed to this request's parent.
+                self.context.agent.on_react_step = self.handle_react_step
+                self.context.agent.on_tool_call_update = self.handle_tool_call_update
                 setattr(self.context, "current_llm_query", None)
         finally:
             if request_key in self.running_actions:
@@ -643,6 +717,7 @@ class BeakerKernel(KernelProxyManager):
         if self.context is not None:
             context_slugs_by_class = dict((cls, slug) for slug, cls in AVAILABLE_CONTEXTS.items())
             context_class = self.context.__class__
+            context_name = context_class.FULL_NAME
             context_slug = context_slugs_by_class.get(context_class, "Not Found")
             full_context_class = f"{context_class.__module__}.{context_class.__name__}"
             context_config = getattr(self.context, "config", {}).get("context_info", None)
@@ -651,6 +726,7 @@ class BeakerKernel(KernelProxyManager):
             subkernel_name = self.context.subkernel.KERNEL_NAME
         else:
             context_slug = "NONE"
+            context_name = None
             full_context_class = "None"
             context_config = None
             language_slug = "Not set"
@@ -669,6 +745,7 @@ class BeakerKernel(KernelProxyManager):
                     "subkernel": subkernel_name,
                 },
                 "info": context_info,
+                "name": context_name,
             },
             parent_header=message.header,
         )
@@ -680,8 +757,8 @@ class BeakerKernel(KernelProxyManager):
         content = message.content
         context_name = content.get("context")
         context_info = content.get("context_info", {})
-        language = content.get("language", "python3")
-        subkernel = content.get("subkernel", None)
+        subkernel = content.get("subkernel", "python3")
+        language = content.get("language", None)
         enable_debug = content.get("debug", None)
         verbose = content.get("verbose", None)
 
@@ -738,7 +815,7 @@ class BeakerKernel(KernelProxyManager):
         await self.set_context(
             self.context.SLUG,
             self.context.config,
-            language=self.context.subkernel.SLUG,
+            subkernel=self.context.subkernel.SLUG,
             parent_header=message.header
         )
         await self.send_chat_history(message.header)

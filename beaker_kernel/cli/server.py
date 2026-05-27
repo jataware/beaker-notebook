@@ -9,8 +9,8 @@ from pathlib import Path
 import click
 import psutil
 
-from beaker_kernel import service
-from beaker_kernel.service.base import BaseBeakerApp
+from beaker_kernel import app
+from beaker_kernel.app.base import BaseBeakerApp
 
 
 TEMP_DIR = Path(tempfile.gettempdir())
@@ -29,19 +29,19 @@ def list_types():
     """
     List all available Beaker server types.
     """
-    service_types = []
+    app_types = []
 
-    # Find all modules in beaker_kernel.service package
-    for finder, name, ispkg in pkgutil.iter_modules(service.__path__, service.__name__ + "."):
+    # Find all modules in beaker_kernel.app package
+    for finder, name, ispkg in pkgutil.iter_modules(app.__path__, app.__name__ + "."):
         if not ispkg:  # Only include modules, not subpackages
             module_name = name.split('.')[-1]  # Get just the module name
             # Skip internal modules
             if not module_name.startswith('_') and module_name not in ['handlers', 'admin_utils']:
-                service_types.append(module_name)
+                app_types.append(module_name)
 
     click.echo("Available Beaker server types:")
-    for service_type in sorted(service_types):
-        click.echo(f"  {service_type}")
+    for app_type in sorted(app_types):
+        click.echo(f"  {app_type}")
 
 
 @server.command(context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
@@ -63,7 +63,7 @@ def start(ctx, server_type, force, port, daemon):
                 pid = int(f.read().strip())
             if psutil.pid_exists(pid):
                 proc = psutil.Process(pid)
-                if any('beaker_kernel.service' in ' '.join(cmd) for cmd in [proc.cmdline()]):
+                if any('beaker_kernel.app' in ' '.join(cmd) for cmd in [proc.cmdline()]):
                     click.echo(f"Beaker {server_type} server is already running on port {port} (PID: {pid})")
                     click.echo("Use --force to start anyway")
                     return
@@ -72,7 +72,7 @@ def start(ctx, server_type, force, port, daemon):
             pidfile.unlink(missing_ok=True)
 
     # Build command
-    cmd = [sys.executable, "-m", f"beaker_kernel.service.{server_type}", "--port", str(port)]
+    cmd = [sys.executable, "-m", f"beaker_kernel.app.{server_type}_app", "--port", str(port)]
 
     # Add any extra arguments from ctx.args
     if ctx.args:
@@ -129,7 +129,7 @@ def stop(ctx, server_type, port, stop_all):
 
                 if psutil.pid_exists(pid):
                     proc = psutil.Process(pid)
-                    if any('beaker_kernel.service' in ' '.join(cmd) for cmd in [proc.cmdline()]):
+                    if any('beaker_kernel.app' in ' '.join(cmd) for cmd in [proc.cmdline()]):
                         click.echo(f"Stopping Beaker server (PID: {pid})...")
                         proc.terminate()
                         try:
@@ -161,7 +161,7 @@ def stop(ctx, server_type, port, stop_all):
 
         if psutil.pid_exists(pid):
             proc = psutil.Process(pid)
-            if any('beaker_kernel.service' in ' '.join(cmd) for cmd in [proc.cmdline()]):
+            if any('beaker_kernel.app' in ' '.join(cmd) for cmd in [proc.cmdline()]):
                 click.echo(f"Stopping Beaker {server_type} server (PID: {pid})...")
                 proc.terminate()
                 try:
@@ -191,7 +191,7 @@ def generate_config(server_type=None, config_file=None):
     """
     app_class: type[BaseBeakerApp]
     if server_type:
-        app_mod_str: str = f"beaker_kernel.service.{server_type}"
+        app_mod_str: str = f"beaker_kernel.app.{server_type}_app"
         app_module = importlib.import_module(app_mod_str)
         app_classes = inspect.getmembers(app_module, lambda obj: isinstance(obj, type) and issubclass(obj, BaseBeakerApp) and obj != BaseBeakerApp)
         if app_classes:
