@@ -36,6 +36,8 @@ jobs:
     build-python:
         name: Build & Publish
         runs-on: ubuntu-22.04
+        env:
+          UV_PRERELEASE: allow
         permissions:
             id-token: write
         needs: sanity-check
