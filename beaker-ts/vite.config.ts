@@ -12,10 +12,9 @@ export default defineConfig({
   ],
   build: {
     lib: {
-      name: "beaker-kernel",
+      name: "@jataware/beaker-client",
       "entry": "src/index.ts",
       formats: ["es"],
-      fileName: "beaker-kernel"
     },
     target: 'esnext',
     minify: false,
