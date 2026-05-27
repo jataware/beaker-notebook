@@ -40,6 +40,7 @@ jobs:
         runs-on: ubuntu-22.04
         env:
           UV_PRERELEASE: allow
+          PIP_PRE: 1
         permissions:
             id-token: write
         needs: sanity-check
@@ -49,7 +50,7 @@ jobs:
               run: |
                   sudo apt update || true
                   sudo apt install -y nodejs npm python3-pip || true
-                  pip install hatch
+                  pip install uv
             - name: Checkout
               uses: actions/checkout@v4
               with:
@@ -70,14 +71,20 @@ jobs:
         permissions:
             id-token: write
         steps:
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v5
               with:
-                node-version: '20.x'
+                node-version: '24.x'
                 registry-url: 'https://registry.npmjs.org'
             - name: Checkout
               uses: actions/checkout@v4
               with:
                 ref: ${{ github.event.workflow_run.head_branch }}
+
+            - name: Check if prerelease
+              id: prerelease_tag
+              run: |
+                  PRERELEASE_TAG=$(echo "${{ github.ref }}" | grep -oE 'v.*[^a-zA-Z][ab][0-9][0-9.-]*$' >/dev/null 2>/dev/null && echo " --tag next" || echo "" )
+                  echo prerelease_tag=$PRERELEASE_TAG >> $GITHUB_OUTPUT
 
             - name: npm build beaker-ts
               working-directory: beaker-ts
@@ -85,9 +92,7 @@ jobs:
               run: |
                 npm ci
                 npm run build
-                npm publish --provenance --access public
-#               env:
-#                 NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+                npm publish --provenance --access public ${{ steps.prerelease_tag.outputs.prerelease_tag }}
 
             - name: npm build beaker-vue
               working-directory: beaker-vue
@@ -95,6 +100,4 @@ jobs:
               run: |
                 npm ci
                 npm run build
-                npm publish --provenance --access public
-#               env:
-#                 NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+                npm publish --provenance --access public ${{ steps.prerelease_tag.outputs.prerelease_tag }}

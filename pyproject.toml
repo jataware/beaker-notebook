@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatch", "hatchling"]
+requires = ["hatch<1.16", "hatchling"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,7 +7,7 @@ name = "beaker-notebook"
 version = "2.0.0b2"
 description = "Beaker Notebook is a general-purpose, computational notebook with embedded agentic AI designed . It provides a flexible context system that enables domain-specific customization for domains such as data science, research, and computational workflows through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 keywords = []
 authors = [
@@ -18,7 +18,6 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -73,9 +72,6 @@ packages = [
 
 [tool.hatch.build.targets.sdist]
 only-include = ["src"]
-
-[tool.hatch.envs.hatch-build]
-system-packages = true
 
 # Beaker builder, loaded as a custom hook since it's not yet registered.
 [tool.hatch.build.targets.wheel.hooks.custom]
@@ -173,7 +169,7 @@ bump = [
 ]
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.10", "3.11"]
+python = ["3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.lint]
 detached = true

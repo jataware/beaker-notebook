@@ -39,7 +39,7 @@
     "./tsconfig.renderers.json": "./tsconfig.renderers.json"
   },
   "repository": {
-    "url": "git+https://github.com/jataware/beaker-kernel.git"
+    "url": "git+https://github.com/jataware/beaker-notebook.git"
   },
   "bundleDependencies": [
     "xlsx"
