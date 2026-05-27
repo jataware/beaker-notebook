@@ -1,5 +1,5 @@
 """
-Tests for beaker_notebook.lib.kernel_state.
+Tests for beaker_kernel.lib.kernel_state.
 
 Covers:
 - apply_sample_budget: under, exact, over, multi-variable spillover, zero
@@ -8,7 +8,7 @@ Covers:
 
 import json
 
-from beaker_notebook.lib.kernel_state import (
+from beaker_kernel.lib.kernel_state import (
     apply_sample_budget,
     render_agent_payload,
 )

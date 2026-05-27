@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from beaker_notebook.lib.code_analysis.analysis_agent import (
+from beaker_kernel.lib.code_analysis.analysis_agent import (
     AnalysisAgent,
     AnalysisResult,
 )

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from beaker_notebook.lib.workflow import (
+from beaker_kernel.lib.workflow import (
     Workflow,
     WorkflowRegistry,
     WorkflowStage,

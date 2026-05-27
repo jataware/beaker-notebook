@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from beaker_notebook.lib.subkernel import BeakerSubkernel
+from beaker_kernel.lib.subkernel import BeakerSubkernel
 
 
 class _ConcreteSubkernel(BeakerSubkernel):

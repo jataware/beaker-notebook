@@ -1,10 +1,10 @@
 import tree_sitter_python as tspython
 from tree_sitter import Language
 
-from beaker_notebook.lib.code_analysis.analyzer import AnalysisEngine
-# from beaker_notebook.lib.code_analysis.rules.trust.categories import trust_assumptions_category, trust_grounding_category
-from beaker_notebook.lib.code_analysis.rules.trust.rules import all_rules, ast_rules, llm_rules
-from beaker_notebook.lib.code_analysis.analysis_types import AnalysisCodeCell, AnalysisCodeCells
+from beaker_kernel.lib.code_analysis.analyzer import AnalysisEngine
+# from beaker_kernel.lib.code_analysis.rules.trust.categories import trust_assumptions_category, trust_grounding_category
+from beaker_kernel.lib.code_analysis.rules.trust.rules import all_rules, ast_rules, llm_rules
+from beaker_kernel.lib.code_analysis.analysis_types import AnalysisCodeCell, AnalysisCodeCells
 
 
 hercules_nb: AnalysisCodeCells = AnalysisCodeCells([
@@ -85,9 +85,9 @@ evaluate(oncogene_mutations)
         notebook_id='test',
         content=code
     )
-    from beaker_notebook.lib.code_analysis import AnalysisASTRule
-    from beaker_notebook.lib.code_analysis.rules.trust.categories import literal_value_issue
-    from beaker_notebook.lib.code_analysis.rules.trust.rules import trust_literal_check_filter
+    from beaker_kernel.lib.code_analysis import AnalysisASTRule
+    from beaker_kernel.lib.code_analysis.rules.trust.categories import literal_value_issue
+    from beaker_kernel.lib.code_analysis.rules.trust.rules import trust_literal_check_filter
 
     rule = AnalysisASTRule(
         id="trust_literal_check",

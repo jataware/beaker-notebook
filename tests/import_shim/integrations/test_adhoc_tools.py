@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from beaker_notebook.lib.integrations.adhoc import AdhocIntegrationProvider
+from beaker_kernel.lib.integrations.adhoc import AdhocIntegrationProvider
 
 
 def _provider(specifications=None, adhoc_api=None) -> AdhocIntegrationProvider:

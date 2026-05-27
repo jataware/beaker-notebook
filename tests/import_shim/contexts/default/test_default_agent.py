@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from beaker_notebook.contexts.default.agent import DefaultAgent
-from beaker_notebook.lib.utils import ExecutionError
+from beaker_kernel.contexts.default.agent import DefaultAgent
+from beaker_kernel.lib.utils import ExecutionError
 
 
 def _agent_instance() -> DefaultAgent:
