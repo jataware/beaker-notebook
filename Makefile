@@ -11,7 +11,7 @@ endef
 
 .PHONY:init
 init:
-	make .env beaker-vue/node_modules
+	make .env src/beaker_notebook/app/ui/index.html
 
 .PHONY:build
 build:
@@ -42,8 +42,8 @@ dev:src/beaker_notebook/app/ui/index.html
 .env:
 	@if [[ ! -e ./.env ]]; then \
 		cp env.example .env; \
-		echo "Don't forget to set your OPENAI key in the .env file!"; \
-	fi
+	fi \
+	# echo "Don't forget to set your OPENAI key in the .env file!"; \
 
 beaker-ts/node_modules:beaker-ts/package*.json
 	(cd beaker-ts/ && npm install --include=dev && npm link) && \

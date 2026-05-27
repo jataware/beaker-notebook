@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "beaker-notebook"
-version = "2.0.0b1"
+version = "2.0.0b2"
 description = "Beaker Notebook is a general-purpose, computational notebook with embedded agentic AI designed . It provides a flexible context system that enables domain-specific customization for domains such as data science, research, and computational workflows through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -86,7 +86,7 @@ path = "src/beaker_notebook/builder/beaker.py"
 
 
 [tool.bumpversion]
-current_version="2.0.0b1"
+current_version="2.0.0b2"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)((?P<release>[ab])(?P<revision>\\d+))?"
 serialize = [
   "{major}.{minor}.{patch}{release}{revision}",
@@ -124,8 +124,8 @@ serialize = [
   "{major}.{minor}.{patch}-{release}.{revision}",
   "{major}.{minor}.{patch}"
 ]
-search = """beaker-kernel": "^{current_version}"""
-replace = """beaker-kernel": "^{new_version}"""
+search = """@jataware/beaker-client": "^{current_version}"""
+replace = """@jataware/beaker-client": "^{new_version}"""
 
 [[tool.bumpversion.files]]
 glob = "beaker-*/package*.json"
@@ -136,7 +136,7 @@ serialize = [
 ]
 regex = true
 search = """
-([^\\n]*"[^\\n"]*beaker-(?:kernel|ts|vue)"[^\\n]*)
+([^\\n]*"[^\\n"]*@jataware/beaker-(?:kernel|ts|vue|client)"[^\\n]*)
 ([\\s]*)"version": "{current_version}"([^\\n]*)"""
 replace = """
 \\1
@@ -276,6 +276,7 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
 
 
 
