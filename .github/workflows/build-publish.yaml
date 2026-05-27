@@ -86,8 +86,8 @@ jobs:
                 npm ci
                 npm run build
                 npm publish --provenance --access public
-              env:
-                NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+#               env:
+#                 NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
             - name: npm build beaker-vue
               working-directory: beaker-vue
@@ -96,5 +96,5 @@ jobs:
                 npm ci
                 npm run build
                 npm publish --provenance --access public
-              env:
-                NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+#               env:
+#                 NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
