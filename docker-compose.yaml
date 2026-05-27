@@ -40,9 +40,9 @@ services:
         RUN apt update && apt install -y vim
         RUN npm install -g npm@11.3.0
         RUN echo 'prefix = "/home/node"' > /home/node/.npmrc
-        RUN mkdir -p /home/node/beaker-vue/node_modules /home/node/beaker-ts/node_modules /home/node/beaker-vue/dist/html /home/node/node_modules
+        RUN mkdir -p /home/node/beaker-vue/node_modules /home/node/beaker-ts/node_modules /home/node/beaker-vue/html /home/node/node_modules
         RUN chown -R node:node /home/node
-        VOLUME /home/node/node_modules /home/node/beaker-vue /home/node/beaker-vue/node_modules /home/node/beaker-ts /home/node/beaker-ts/node_modules /home/node/beaker-vue/dist/html
+        VOLUME /home/node/node_modules /home/node/beaker-vue /home/node/beaker-vue/node_modules /home/node/beaker-ts /home/node/beaker-ts/node_modules /home/node/beaker-vue/html
         USER node:node
         RUN echo '{\n\
             "workspaces": [ "beaker-ts", "beaker-vue" ]\n\
@@ -54,10 +54,10 @@ services:
       - vue-modules:/home/node/beaker-vue/node_modules
       - ./beaker-ts:/home/node/beaker-ts
       - ts-modules:/home/node/beaker-ts/node_modules
-      - ui-html:/home/node/beaker-vue/dist/html
+      - ui-html:/home/node/beaker-vue/html
     working_dir: "/home/node"
     healthcheck:
-      test: [ "CMD", "ls", "/home/node/beaker-vue/dist/html/routes.json"]
+      test: [ "CMD", "ls", "/home/node/beaker-vue/html/routes.json"]
       interval: 5s
       timeout: 10s
       retries: 36  # 3 minutes

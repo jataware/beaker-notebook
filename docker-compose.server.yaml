@@ -4,7 +4,7 @@
 version: '3'
 services:
   # Server-mode service
-  beaker-server:
+  beaker-notebook:
     user: root
     build:
       dockerfile: ${DOCKERFILE:-Dockerfile}
@@ -12,7 +12,7 @@ services:
     ports:
       - "8080:8888"
     environment:
-      - JUPYTER_SERVER=http://beaker-server:8888
+      - JUPYTER_SERVER=http://beaker-notebook:8888
       - JUPYTER_BASE_URL=${JUPYTER_BASE_URL:-http://localhost:8080}
       - JUPYTER_TOKEN  # Only set in container if set in running environment
       - PYTHONPATH=/jupyter
@@ -24,6 +24,6 @@ services:
       - LLM_SERVICE_MODEL=gpt-4o
       - LLM_SERVICE_TOKEN=${OPENAI_API_KEY}
     volumes:
-      - ./beaker_kernel:/usr/local/share/jupyter/kernels/beaker_kernel
+      - ./beaker_notebook:/usr/local/share/jupyter/kernels/beaker_notebook
       - .:/jupyter
-    command: [ "python3.10", "-m", "beaker_kernel.service.server", "--ip", "0.0.0.0" ]
+    command: [ "python3.10", "-m", "beaker_notebook.app.server_app", "--ip", "0.0.0.0" ]
