@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from beaker_kernel.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def fake_subkernel_factory(tmp_path, monkeypatch):
         )
 
         # Inject this fake into autodiscover_subkernels' returned mapping.
-        from beaker_kernel.lib import subkernel as subkernel_mod
+        from beaker_notebook.lib import subkernel as subkernel_mod
 
         original = subkernel_mod.autodiscover_subkernels
 
@@ -64,7 +64,7 @@ def fake_subkernel_factory(tmp_path, monkeypatch):
         monkeypatch.setattr(
             subkernel_mod, "autodiscover_subkernels", patched_autodiscover
         )
-        # The CLI imports `from beaker_kernel.lib.subkernel import autodiscover_subkernels`
+        # The CLI imports `from beaker_notebook.lib.subkernel import autodiscover_subkernels`
         # at function-call time, so the monkeypatch on the module attr is sufficient.
         return cls, proc_root
 
@@ -72,7 +72,7 @@ def fake_subkernel_factory(tmp_path, monkeypatch):
 
 
 def _run_verify(slug: str | None = None) -> tuple[int, str]:
-    from beaker_kernel.cli.subkernel import verify_subkernel
+    from beaker_notebook.cli.subkernel import verify_subkernel
 
     runner = CliRunner()
     args = [slug] if slug else []

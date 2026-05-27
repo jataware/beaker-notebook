@@ -3,15 +3,17 @@ requires = ["hatch", "hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "beaker-kernel"
+name = "beaker-notebook"
 version = "2.0.0b1"
-description = "Beaker is a general-purpose, AI-powered Jupyter kernel framework designed for data science, research, and computational workflows. It provides a flexible context system that enables domain-specific customization through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
+description = "Beaker Notebook is a general-purpose, computational notebook with embedded agentic AI designed . It provides a flexible context system that enables domain-specific customization for domains such as data science, research, and computational workflows through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 keywords = []
 authors = [
   { name = "Matthew Printz", email = "matt@jataware.com" },
+  { name = "Brandon Rose", email = "brandon@jataware.com" },
+  { name = "Five Grant", email = "five@jataware.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -49,35 +51,38 @@ dependencies = [
 ]
 
 [project.entry-points.hatch]
-beaker = "beaker_kernel.builder.hooks"
+beaker = "beaker_notebook.builder.hooks"
 
 [project.scripts]
-beaker = "beaker_kernel.cli.main:cli"
+beaker = "beaker_notebook.cli.main:cli"
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.build]
 require-runtime-dependencies = true
-packages = [
-  "beaker_kernel",
-]
-include = [
-  "beaker_kernel/app/ui",
-]
 artifacts = [
-  "beaker_kernel/app/ui",
+  "src/beaker_notebook/app/ui",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "src/beaker_notebook",
+  "src/beaker_kernel",
+]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src"]
 
 [tool.hatch.envs.hatch-build]
 system-packages = true
 
 # Beaker builder, loaded as a custom hook since it's not yet registered.
 [tool.hatch.build.targets.wheel.hooks.custom]
-path = "beaker_kernel/builder/beaker.py"
+path = "src/beaker_notebook/builder/beaker.py"
 
 [tool.hatch.build.targets.wheel.shared-data]
-"beaker_kernel/kernel.json" = "share/jupyter/kernels/beaker_kernel/kernel.json"
+"src/beaker_notebook/kernel.json" = "share/jupyter/kernels/beaker_kernel/kernel.json"
 
 
 [tool.bumpversion]
@@ -143,7 +148,7 @@ Issues = "https://github.com/jataware/beaker-kernel/issues"
 Source = "https://github.com/jataware/beaker-kernel"
 
 [tool.hatch.version]
-path = "beaker_kernel/__about__.py"
+path = "src/beaker_notebook/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -178,7 +183,7 @@ dependencies = [
   "ruff>=0.0.243",
 ]
 [tool.hatch.envs.lint.scripts]
-typing = "mypy --install-types --non-interactive {args:beaker_kernel tests}"
+typing = "mypy --install-types --non-interactive {args:beaker_notebook tests}"
 style = [
   "ruff {args:.}",
   "black --check --diff {args:.}",
@@ -244,7 +249,7 @@ unfixable = [
 ]
 
 [tool.ruff.isort]
-known-first-party = ["beaker_kernel"]
+known-first-party = ["beaker_notebook"]
 
 [tool.ruff.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -254,15 +259,15 @@ ban-relative-imports = "all"
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 
 [tool.coverage.run]
-source_pkgs = ["beaker_kernel", "tests"]
+source_pkgs = ["beaker_notebook", "tests"]
 branch = true
 parallel = true
 omit = [
-  "beaker_kernel/__about__.py",
+  "src/beaker_notebook/__about__.py",
 ]
 
 [tool.coverage.paths]
-beaker_kernel = ["beaker_kernel"]
+beaker_notebook = ["beaker_notebook"]
 tests = ["tests"]
 
 [tool.coverage.report]
@@ -288,9 +293,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [project.entry-points."nbconvert.exporters"]
-streamline = "beaker_kernel.lib.exporters.streamline:StreamlineExporter"
-full_context_notebook = "beaker_kernel.lib.exporters.full_context_notebook:FullContextNotebookExporter"
-chat = "beaker_kernel.lib.exporters.chat:ChatExporter"
+streamline = "beaker_notebook.lib.exporters.streamline:StreamlineExporter"
+full_context_notebook = "beaker_notebook.lib.exporters.full_context_notebook:FullContextNotebookExporter"
+chat = "beaker_notebook.lib.exporters.chat:ChatExporter"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]
-beaker-local-provisioner = "beaker_kernel.services.kernel.provisioner:BeakerLocalProvisioner"
+beaker-local-provisioner = "beaker_notebook.services.kernel.provisioner:BeakerLocalProvisioner"

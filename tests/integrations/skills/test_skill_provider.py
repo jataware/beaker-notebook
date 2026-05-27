@@ -8,13 +8,13 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from beaker_kernel.lib.integrations.skill import (
+from beaker_notebook.lib.integrations.skill import (
     SkillIntegrationProvider,
     parse_skill_md,
     parse_example_md,
     extract_file_references,
 )
-from beaker_kernel.lib.integrations.types import (
+from beaker_notebook.lib.integrations.types import (
     SkillExampleResource,
     SkillFileResource,
     SkillInstructionsResource,
@@ -130,7 +130,7 @@ def _make_provider(search_roots: list[Path | str]) -> SkillIntegrationProvider:
     """
     roots = [Path(r) for r in search_roots]
     with patch(
-        "beaker_kernel.lib.integrations.skill.find_resource_dirs",
+        "beaker_notebook.lib.integrations.skill.find_resource_dirs",
         return_value=[],
     ), patch.object(
         SkillIntegrationProvider,
@@ -350,7 +350,7 @@ class TestDiscoveryPaths:
         beaker_root.mkdir()
 
         with patch(
-            "beaker_kernel.lib.integrations.skill.find_resource_dirs",
+            "beaker_notebook.lib.integrations.skill.find_resource_dirs",
             return_value=[],
         ), patch.object(Path, "home", return_value=tmp_path / "_nohome"):
             roots = SkillIntegrationProvider._get_skill_search_roots()
@@ -369,7 +369,7 @@ class TestDiscoveryPaths:
         beaker_root.mkdir()
 
         with patch(
-            "beaker_kernel.lib.integrations.skill.find_resource_dirs",
+            "beaker_notebook.lib.integrations.skill.find_resource_dirs",
             return_value=[],
         ), patch.object(Path, "home", return_value=tmp_path / "_nohome"):
             roots = SkillIntegrationProvider._get_skill_search_roots()
@@ -532,7 +532,7 @@ class TestFileFetching:
             base_url="https://example.com/skills/my-skill/",
         )
 
-        with patch("beaker_kernel.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
             content = provider._fetch_file_content(skill, "references/guide.md")
             mock_get.assert_called_once_with(
                 "https://example.com/skills/my-skill/references/guide.md",
@@ -587,7 +587,7 @@ class TestRemoteUrlResolution:
         mock_response.text = MINIMAL_SKILL_MD
         mock_response.raise_for_status = MagicMock()
 
-        with patch("beaker_kernel.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
             skill = SkillIntegrationProvider._load_remote_skill("https://example.com/repo/main/SKILL.md")
             mock_get.assert_called_once_with("https://example.com/repo/main/SKILL.md", timeout=30)
 
@@ -599,7 +599,7 @@ class TestRemoteUrlResolution:
         mock_response.text = MINIMAL_SKILL_MD
         mock_response.raise_for_status = MagicMock()
 
-        with patch("beaker_kernel.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
             skill = SkillIntegrationProvider._load_remote_skill("https://example.com/repo/main")
             mock_get.assert_called_once_with("https://example.com/repo/main/SKILL.md", timeout=30)
 
@@ -610,7 +610,7 @@ class TestRemoteUrlResolution:
         mock_response.text = MINIMAL_SKILL_MD
         mock_response.raise_for_status = MagicMock()
 
-        with patch("beaker_kernel.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
             SkillIntegrationProvider._load_remote_skill("https://example.com/repo/main/")
             mock_get.assert_called_once_with("https://example.com/repo/main/SKILL.md", timeout=30)
 

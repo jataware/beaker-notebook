@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from beaker_kernel.lib.agent import BeakerAgent
-from beaker_kernel.lib.utils import normalize_notebook
+from beaker_notebook.lib.agent import BeakerAgent
+from beaker_notebook.lib.utils import normalize_notebook
 
 
 def _agent_instance() -> BeakerAgent:
@@ -298,7 +298,7 @@ async def test_get_multimedia_file_from_storage_returns_image_block():
         "content": "PNG_BASE64_DATA",
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response) as mock_get:
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response) as mock_get:
         result = await BeakerAgent.get_multimedia_file_from_storage(agent, "plots/scatter.png")
 
     assert isinstance(result, MultiModalResponse)
@@ -323,7 +323,7 @@ async def test_get_multimedia_file_from_storage_strips_leading_slash_and_url_enc
         "content": "X",
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response) as mock_get:
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response) as mock_get:
         await BeakerAgent.get_multimedia_file_from_storage(agent, "/folder with space/a.png")
 
     url = mock_get.call_args.args[0]
@@ -340,7 +340,7 @@ async def test_get_multimedia_file_from_storage_strips_newlines_from_base64():
         "content": "AAAA\nBBBB\nCCCC\n",
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         result = await BeakerAgent.get_multimedia_file_from_storage(agent, "p.jpg")
 
     assert result == MultiModalResponse([{
@@ -359,7 +359,7 @@ async def test_get_multimedia_file_from_storage_infers_mimetype_when_missing():
     })
 
     from archytas.multimodal import MultiModalResponse
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         result = await BeakerAgent.get_multimedia_file_from_storage(agent, "clip.wav")
 
     assert result == MultiModalResponse([{
@@ -385,7 +385,7 @@ async def test_get_multimedia_file_from_storage_raises_on_404():
     agent = _agent_with_kernel()
     response = _mock_response(status_code=404, text="not found")
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="File not found in user storage"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "missing.png")
 
@@ -394,7 +394,7 @@ async def test_get_multimedia_file_from_storage_raises_on_http_error():
     agent = _agent_with_kernel()
     response = _mock_response(status_code=500, text="boom")
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="status 500"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "p.png")
 
@@ -403,7 +403,7 @@ async def test_get_multimedia_file_from_storage_rejects_directory():
     agent = _agent_with_kernel()
     response = _mock_response(json_data={"type": "directory", "content": None})
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="not a file"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "folder")
 
@@ -416,7 +416,7 @@ async def test_get_multimedia_file_from_storage_rejects_non_multimedia_mimetype(
         "content": "aGVsbG8=",
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="not a supported multimedia type"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "notes.txt")
 
@@ -430,7 +430,7 @@ async def test_get_multimedia_file_from_storage_rejects_unknown_mimetype():
         "content": "DATA",
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="not a supported multimedia type"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "file.unknown-ext-xyz")
 
@@ -443,6 +443,6 @@ async def test_get_multimedia_file_from_storage_raises_when_content_missing():
         "content": None,
     })
 
-    with patch("beaker_kernel.lib.agent.requests.get", return_value=response):
+    with patch("beaker_notebook.lib.agent.requests.get", return_value=response):
         with pytest.raises(ValueError, match="did not return base64 content"):
             await BeakerAgent.get_multimedia_file_from_storage(agent, "p.png")

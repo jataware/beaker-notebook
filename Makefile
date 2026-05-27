@@ -15,13 +15,13 @@ init:
 
 .PHONY:build
 build:
-	$(MAKE) beaker_kernel/app/ui/index.html
+	$(MAKE) src/beaker_notebook/app/ui/index.html
 	$(MAKE) beaker-vue/dist
 	hatch build
 
 .PHONY:clean
 clean:
-	rm -r beaker-ts/dist beaker-vue/dist beaker-vue/html build dist beaker_kernel/app/ui || true
+	rm -r beaker-ts/dist beaker-vue/dist beaker-vue/html build dist src/beaker_notebook/app/ui || true
 
 
 .PHONY:docs-up
@@ -34,7 +34,7 @@ docs-down:
 	(cd docs && docker compose down)
 
 .PHONY:dev
-dev:beaker_kernel/app/ui/index.html
+dev:src/beaker_notebook/app/ui/index.html
 	docker compose up -d --build && \
 	(sleep 1; python -m webbrowser "http://localhost:8888/"); \
 	docker compose logs -f jupyter || true; \
@@ -68,6 +68,6 @@ beaker-vue/html:$(call npm_build_deps,beaker-vue)
 	(cd beaker-vue && npm run build-ui) && \
 	touch beaker-vue/html
 
-beaker_kernel/app/ui/index.html:beaker-vue/node_modules beaker-vue/html
-	rsync -r --exclude="*.map" beaker-vue/html/* beaker_kernel/app/ui/
+src/beaker_notebook/app/ui/index.html:beaker-vue/node_modules beaker-vue/html
+	rsync -r --exclude="*.map" beaker-vue/html/* src/beaker_notebook/app/ui/
 

@@ -1,5 +1,5 @@
 """
-Tests for scaffolding templates in beaker_kernel.lib.templates.
+Tests for scaffolding templates in beaker_notebook.lib.templates.
 
 These tests render each template with sample values and validate:
 - The rendered output is syntactically valid Python
@@ -16,15 +16,15 @@ from typing import Any
 
 import pytest
 
-from beaker_kernel.lib.templates.context_file import ContextFile
-from beaker_kernel.lib.templates.agent_file import AgentFile
-from beaker_kernel.lib.templates.subkernel_file import SubkernelFile
-from beaker_kernel.lib.templates.procedure_file import ProcedureFile
-from beaker_kernel.lib.templates.readme_file import ReadmeFile
+from beaker_notebook.lib.templates.context_file import ContextFile
+from beaker_notebook.lib.templates.agent_file import AgentFile
+from beaker_notebook.lib.templates.subkernel_file import SubkernelFile
+from beaker_notebook.lib.templates.procedure_file import ProcedureFile
+from beaker_notebook.lib.templates.readme_file import ReadmeFile
 
-from beaker_kernel.lib.context import BeakerContext
-from beaker_kernel.lib.agent import BeakerAgent
-from beaker_kernel.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.context import BeakerContext
+from beaker_notebook.lib.agent import BeakerAgent
+from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 
 # -- Fixtures for sample template values --
@@ -341,16 +341,16 @@ class TestSubkernelTemplate:
         ]
         assert "parse_subkernel_return" in method_names
 
-    def test_import_path_uses_beaker_kernel_lib(self):
-        """Verify the template imports BeakerSubkernel from beaker_kernel.lib, not beaker_kernel.lib.base."""
+    def test_import_path_uses_beaker_notebook_lib(self):
+        """Verify the template imports BeakerSubkernel from beaker_notebook.lib, not beaker_notebook.lib.base."""
         source = render_template(SubkernelFile, SUBKERNEL_TEMPLATE_VALUES)
         tree = ast.parse(source)
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     if alias.name == "BeakerSubkernel":
-                        assert node.module == "beaker_kernel.lib", (
-                            f"BeakerSubkernel should be imported from beaker_kernel.lib, "
+                        assert node.module == "beaker_notebook.lib", (
+                            f"BeakerSubkernel should be imported from beaker_notebook.lib, "
                             f"not {node.module}"
                         )
 
@@ -402,10 +402,10 @@ class TestWhiteLabelTemplateRemoved:
 
     def test_whitelabel_file_does_not_exist(self):
         with pytest.raises(ImportError):
-            from beaker_kernel.lib.templates.whitelabel_file import WhiteLabelFile  # noqa: F401
+            from beaker_notebook.lib.templates.whitelabel_file import WhiteLabelFile  # noqa: F401
 
     def test_whitelabel_hook_not_registered(self):
-        from beaker_kernel.builder.hooks import hatch_register_template
+        from beaker_notebook.builder.hooks import hatch_register_template
         hooks = hatch_register_template()
         hook_names = [h.PLUGIN_NAME for h in hooks]
         assert "beaker-new-whitelabel" not in hook_names

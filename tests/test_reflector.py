@@ -1,5 +1,5 @@
 """
-Tests for the reflector registry and discovery in beaker_kernel.lib.reflector.
+Tests for the reflector registry and discovery in beaker_notebook.lib.reflector.
 
 Covers:
 - Header parsing (single block, multi-line block, multiple blocks, missing keys)
@@ -13,7 +13,7 @@ import textwrap
 import pytest
 from jinja2 import DictLoader, Environment
 
-from beaker_kernel.lib.reflector import (
+from beaker_notebook.lib.reflector import (
     DEFAULT_PRIORITY,
     REFLECTOR_SUBDIR,
     Reflector,
