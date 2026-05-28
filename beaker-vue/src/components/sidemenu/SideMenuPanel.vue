@@ -48,6 +48,7 @@ watch(props, (newProps) => {
 
 <style lang="scss">
 .side-panel {
+    position: relative;
     height: 100%;
     display: grid;
     grid:
