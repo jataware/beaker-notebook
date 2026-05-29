@@ -45,7 +45,7 @@ Beaker Kernel is an extensible Jupyter kernel that provides enhanced computation
 ## Directory Structure
 
 ```
-beaker_kernel/
+src/beaker_notebook/
 ├── kernel.py              # Main kernel implementation
 ├── app/                   # Application interface layer
 │   ├── api/              # REST API handlers
@@ -89,6 +89,8 @@ beaker_kernel/
 ├── cli/                 # Command-line interface
 ├── builder/             # Build system integration
 └── util/                # Utility modules (includes import-redirect shim for legacy paths)
+src/beaker_kernel/
+└── __init__.py          # Shim to allow older packages to map to the new beaker_notebook namespace.
 ```
 
 ## Core Components
@@ -223,7 +225,7 @@ Built-in subkernels live in `subkernels/<language>/` as packages rather than sin
 
 ### 5. Backward Compatibility
 
-The `beaker_kernel/service/` (singular) module tree was reorganized in v2.0 into `beaker_kernel/app/`, `beaker_kernel/services/`, and `beaker_kernel/lib/admin.py`. To avoid breaking external code that imports from the old paths, `beaker_kernel/__init__.py` installs an import-redirect map (via `beaker_kernel.util.refactor.redirect_imports`) that transparently forwards legacy `beaker_kernel.service.*` imports to their new locations. New code should import from the new paths; the redirect is provided for transition only.
+The `beaker_kernel/service/` (singular) module tree was reorganized in v2.0 into `beaker_notebook/app/`, `beaker_notebook/services/`, and `beaker_notebook/lib/admin.py`. To avoid breaking external code that imports from the old paths, `beaker_kernel/__init__.py` installs an import-redirect map (via `beaker_noteboook.util.refactor.redirect_imports`) that transparently forwards legacy `beaker_notebook.service.*` imports to their new locations. New code should import from the new paths; the redirect is provided for transition only.
 
 ## Key Design Patterns
 
@@ -295,11 +297,11 @@ Configuration is managed through:
 ### Creating a Context
 
 ```python
-from beaker_kernel.lib.context import BeakerContext
+from beaker_notebook.lib.context import BeakerContext
 
 class MyContext(BeakerContext):
-    def __init__(self, beaker_kernel, config):
-        super().__init__(beaker_kernel, config)
+    def __init__(self, beaker_notebook, config):
+        super().__init__(beaker_notebook, config)
         # Initialize your AI agents, tools, etc.
 
     async def setup(self):
@@ -310,7 +312,7 @@ class MyContext(BeakerContext):
 ### Creating a SubKernel
 
 ```python
-from beaker_kernel.lib.subkernel import BeakerSubkernel
+from beaker_notebook.lib.subkernel import BeakerSubkernel
 
 class MySubkernel(BeakerSubkernel):
     language = "mylang"
@@ -325,10 +327,10 @@ class MySubkernel(BeakerSubkernel):
 Extensions are registered via entry points in `pyproject.toml`:
 
 ```toml
-[project.entry-points."beaker_kernel.contexts"]
+[project.entry-points."beaker_notebook.contexts"]
 my_context = "my_package.context:MyContext"
 
-[project.entry-points."beaker_kernel.subkernels"]
+[project.entry-points."beaker_notebook.subkernels"]
 my_subkernel = "my_package.subkernel:MySubkernel"
 ```
 

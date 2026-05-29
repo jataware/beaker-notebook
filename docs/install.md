@@ -11,7 +11,7 @@ has_toc: true
 Installing Beaker is easy! All you need to do is run:
 
 ```bash
-pip install beaker-kernel
+pip install beaker-notebook
 ```
 
 This installs a CLI tool named `beaker` which allows you to work with and administer your local Beaker environment.

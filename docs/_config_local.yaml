@@ -1,4 +1,4 @@
-title: "Beaker Kernel"
+title: "Beaker Notebook"
 search_enabled: true
 theme: "just-the-docs"
 
@@ -12,4 +12,4 @@ gems:
 
 aux_links:
   "Beaker on Github":
-    - "//github.com/DARPA-ASKEM/beaker-kernel"
+    - "//github.com/jataware/beaker-notebook"

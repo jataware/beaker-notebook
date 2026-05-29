@@ -13,7 +13,7 @@ We like to think of Beaker as a (much better!) drop-in replacement for workflows
 Getting Beaker up and running is easy. Install Beaker with:
 
 ```bash
-pip install beaker-kernel
+pip install beaker-notebook
 ```
 
 Next, run `beaker config update` to set up your configuration. This creates a `beaker.conf` configuration file (you can find its location at any time with `beaker config find`). You can leave most fields at their defaults, but you'll need to set `LLM_SERVICE_TOKEN` to your OpenAI API key — or the API key for whichever LLM provider you've selected.
@@ -40,4 +40,4 @@ Here is a quick demo of using Beaker to interact with a [free weather API](https
 
 ## Want to know more?
 
-There is a lot more to Beaker than what we've covered here. The full [documentation](https://jataware.github.io/beaker-kernel/) covers how to customize and extend Beaker — building your own custom contexts, agents, subkernels, and integrations to make Beaker fit your specific needs. It also covers using the `beaker-ts` TypeScript library to embed Beaker into your own front-end application.
+There is a lot more to Beaker than what we've covered here. The full [documentation](https://jataware.github.io/beaker-notebook/) covers how to customize and extend Beaker — building your own custom contexts, agents, subkernels, and integrations to make Beaker fit your specific needs. It also covers using the `beaker-ts` TypeScript library to embed Beaker into your own front-end application.
