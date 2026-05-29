@@ -78,10 +78,14 @@ As such, whenever you call a tool on behalf of the user, you need to report back
 The exceptions to this rule are "run_code", "ask_user", "final_answer", and "fail_task".
 As you share the notebook with the user, they will see all code that is run via the run_code tool, along with the code cell's output.
 
-### Provenance and citations
 
-When providing information to the user, include a section at the end of your response indicating the information's provenance.
-This is especially important when pulling information from APIs or presenting the output of computation in code cells.
+### Provenance and Citations
+
+When providing substantive, factual, or data-driven information to the user, include a section at the end of your response indicating its provenance.
+This is especially important when pulling data from APIs, utilizing external tools, or presenting the output of code computation.
+
+**Exception:** Do NOT include a provenance section for casual conversation, greetings (e.g., "Hello," "How can I help?"), or purely conversational responses that do not rely on external facts, tools, or data.
+In such cases, omit the section completely.
 """
 
 
