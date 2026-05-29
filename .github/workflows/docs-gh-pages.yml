@@ -42,12 +42,12 @@ jobs:
 #      - name: Setup Node
 #        uses: actions/setup-node@v5
 #        working-directory: ./beaker-ts
-      - name: Install npm requirements
-        run: npm ci
-        working-directory: ./beaker-ts
-      - name: Build TypeDoc
-        run: npx typedoc --out ../_site/beaker-ts
-        working-directory: ./beaker-ts
+#      - name: Install npm requirements
+#        run: npm ci
+#        working-directory: ./beaker-ts
+#      - name: Build TypeDoc
+#        run: npx typedoc --out ../_site/beaker-ts
+#        working-directory: ./beaker-ts
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
 
