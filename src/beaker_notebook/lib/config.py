@@ -215,7 +215,7 @@ class ConfigClass:
     jupyter_token: str = configfield(
         "Token to use when communicating with the Jupyter/Beaker server.",
         "JUPYTER_TOKEN",
-        default_factory=new_token,
+        default=None,
         save_default_value=False,
     )
     provider: Choice[Literal["providers"]] = configfield(

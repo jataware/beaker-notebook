@@ -53,10 +53,13 @@ class BeakerKernelMappingManager(AsyncMappingKernelManager):
         **kwargs
             Additional arguments passed to parent class
         """
+        # If connection_dir is passed in, ignore it in favor of connection_dir value on class.
+        kwargs.pop("connection_dir", None)
+
         # Ensure connection dir exists and is readable
         if not os.path.isdir(self.connection_dir):
             os.makedirs(self.connection_dir, mode=0o0755)
-        else:
+        elif os.stat(self.connection_dir).st_mode & 0o0755 != 0o0755:
             os.chmod(self.connection_dir, 0o0755)
         super().__init__(**kwargs)
         if hasattr(self.kernel_spec_manager, "get_default_kernel_name"):

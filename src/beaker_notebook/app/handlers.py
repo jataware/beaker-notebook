@@ -297,12 +297,13 @@ class ConfigHandler(JupyterHandler):
         ws_url = base_url.replace(base_scheme, ws_scheme)
 
         beaker_app: BeakerApp|None = self.config.get("app", None)
+        token = config.jupyter_token or self.identity_provider.token
 
         config_data = {
             "appUrl": os.environ.get("APP_URL", base_url),
             "baseUrl": base_url,
             "wsUrl": os.environ.get("JUPYTER_WS_URL", ws_url),
-            "token": config.jupyter_token,
+            "token": token,
             "config_type": config.config_type,
             "defaultKernel": self.kernel_spec_manager.get_default_kernel_name(),
             "extra": {}

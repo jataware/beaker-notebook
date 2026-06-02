@@ -141,7 +141,7 @@ class BaseBeakerApp(ServerApp):
         # Apply defaults from defaults classvar
         defaults = getattr(self.__class__, "defaults", None)
 
-        kwarg_keys = set(self.aliases.keys()) | set(self.flags.keys())
+        kwarg_keys = set(self.aliases.keys()) | set(self.flags.keys() | set(self.trait_names()))
 
         if defaults and isinstance(defaults, dict):
             trait_config = Config(**defaults)
