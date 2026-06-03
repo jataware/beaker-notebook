@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatch<1.16", "hatchling"]
+requires = ["hatch<1.16", "hatchling", "virtualenv<21.0.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "beaker-notebook"
-version = "2.0.0b2"
+version = "2.0.0b3"
 description = "Beaker Notebook is a general-purpose, computational notebook with embedded agentic AI designed . It provides a flexible context system that enables domain-specific customization for domains such as data science, research, and computational workflows through specialized AI agents, integrations with external data sources and APIs, and structured workflows."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -82,7 +82,7 @@ path = "src/beaker_notebook/builder/beaker.py"
 
 
 [tool.bumpversion]
-current_version="2.0.0b2"
+current_version="2.0.0b3"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)((?P<release>[ab])(?P<revision>\\d+))?"
 serialize = [
   "{major}.{minor}.{patch}{release}{revision}",
@@ -272,6 +272,7 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
 
 
 
