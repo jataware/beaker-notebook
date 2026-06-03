@@ -44,10 +44,12 @@ docs-down:
 	(cd docs && docker compose down)
 
 .PHONY:dev
-dev:src/beaker_notebook/app/ui/index.html
-	docker compose up -d --build && \
+dev:src/beaker_notebook/app/ui/index.html docker-build
+	export BUILDX_BAKE_ENTITLEMENTS_FS=0; \
+	cd docker && docker buildx bake dev
+	VARIANT="dev" $(MAKE) docker-compose-up; \
 	(sleep 1; python -m webbrowser "http://localhost:8888/"); \
-	docker compose logs -f jupyter || true; \
+	docker compose logs -f beaker || true; \
 
 .env:
 	@if [[ ! -e ./.env ]]; then \
@@ -80,3 +82,16 @@ beaker-vue/html:$(call npm_build_deps,beaker-vue)
 
 src/beaker_notebook/app/ui/index.html:beaker-vue/node_modules beaker-vue/html
 	rsync -r --exclude="*.map" beaker-vue/html/* src/beaker_notebook/app/ui/
+
+.PHONY:docker-build
+docker-build:
+	export BUILDX_BAKE_ENTITLEMENTS_FS=0; \
+	cd docker && docker buildx bake
+
+.PHONY:docker-compose-up
+docker-compose-up:
+	docker compose up -d
+
+.PHONY:docker-compose-down
+docker-compose-down:
+	docker compose down

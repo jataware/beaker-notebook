@@ -1,52 +1,31 @@
----
 services:
-  jupyter:
-    user: root
-    build:
-      dockerfile: ${DOCKERFILE:-Dockerfile}
-      context: .
+  beaker:
+    image: beaker-dev:latest
     ports:
       - "8888:8888"
-    depends_on:
-      ui:
-        condition: service_healthy
-    environment:
-      - UID=1000
-      - GID=1000
-      - DEBUG=1
-      - JUPYTER_SERVER=http://jupyter:8888
-      - JUPYTER_BASE_URL=${JUPYTER_BASE_URL:-http://localhost:8080}
-      - JUPYTER_TOKEN  # Only set in container if set in running environment
-      - PYTHONPATH=/jupyter
-      - ENABLE_CHECKPOINTS=true
-      - TOOL_ENABLED_ASK_USER=true
-      - TOOL_ENABLED_RUN_CODE=true
-      # These veriables are useful when running in server mode
-      # - CONFIG_TYPE=server
-      # - LLM_PROVIDER_IMPORT_PATH=archytas.models.openai.OpenAIModel
-      # - LLM_SERVICE_MODEL=gpt-4o
-      # - LLM_SERVICE_TOKEN=${OPENAI_API_KEY}
     volumes:
-      - ./beaker_kernel:/usr/local/share/jupyter/kernels/beaker_kernel
-      - .:/jupyter
-      - ui-html:/jupyter/beaker_kernel/service/ui
-      - run:/var/run/beaker/
-    command: ["beaker", "dev", "watch", "--ip", "0.0.0.0", "--allow-root"]
+      - "home:/home/user"
+      - ".:/opt/development/packages/beaker-notebook"
+    pull_policy: never
+
   ui:
     build:
+      context: .
       dockerfile_inline: |
-        FROM node:20
+        FROM node:24
         USER root:root
         RUN apt update && apt install -y vim
         RUN npm install -g npm@11.3.0
         RUN echo 'prefix = "/home/node"' > /home/node/.npmrc
-        RUN mkdir -p /home/node/beaker-vue/node_modules /home/node/beaker-ts/node_modules /home/node/beaker-vue/dist/html /home/node/node_modules
+        COPY . /home/node/
         RUN chown -R node:node /home/node
         VOLUME /home/node/node_modules /home/node/beaker-vue /home/node/beaker-vue/node_modules /home/node/beaker-ts /home/node/beaker-ts/node_modules /home/node/beaker-vue/dist/html
         USER node:node
+        WORKDIR /home/node/
         RUN echo '{\n\
             "workspaces": [ "beaker-ts", "beaker-vue" ]\n\
         }' > /home/node/package.json
+        RUN npm i --workspaces
     user: node:node
     volumes:
       - node-modules:/home/node/node_modules
@@ -63,7 +42,7 @@ services:
       retries: 36  # 3 minutes
       start_period: 5s
     environment:
-      - PROXY=http://jupyter:8888
+      - PROXY=http://beaker:8888
       - UID=1000
       - GID=1000
     ports:
@@ -74,9 +53,10 @@ services:
         npm -w beaker-vue run routes;
         npm -w beaker-vue run serve;
       '
+
 volumes:
-  ui-html:
-  run:
+  home:
+  node-modules:
   vue-modules:
   ts-modules:
-  node-modules:
+  ui-html:
