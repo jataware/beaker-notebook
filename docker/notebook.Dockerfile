@@ -9,19 +9,20 @@ ARG JULIA_BASE=julia:latest
 # Julia build stage to keep build size down
 FROM julia:latest AS julia-latest
 ENV JULIA_PATH=/usr/local/julia
-ENV JULIA_DEPOT_PATH=/usr/local/julia/depot
+ENV JULIA_DEPOT_PATH="$JULIA_PATH/depot"
+ENV JULIA_SYSIMAGE_PATH="$JULIA_PATH/sys.so"
+RUN apt update && apt install -y gcc clang
 RUN julia -e ' \
     packages = [ \
         "IJulia", "DataSets", "XLSX", "Plots", "Downloads", "DataFrames", "ImageShow", "FileIO", "JSON3", "CSV", "DisplayAs"  \
     ]; \
-    using Pkg; \
-    Pkg.add(packages); Pkg.precompile()' && \
-    rm -rf /usr/local/julia/share/doc && \
-    rm -rf /usr/local/julia/share/man && \
-    rm -rf /root/.julia/logs && \
-    rm -rf /root/.julia/registries && \
-    julia -e 'using Pkg; Pkg.gc()'
-ENV JULIA_DEPOT_PATH=":/usr/local/julia/depot"
+    using Pkg; Pkg.add(packages); \
+    Pkg.add("PackageCompiler"); \
+    using PackageCompiler; \
+    create_sysimage(packages, sysimage_path="'"$JULIA_SYSIMAGE_PATH"'");'
+RUN cd $JULIA_PATH && find -name '*.so*' -exec strip --strip-unneeded {} \;
+RUN rm -rf $JULIA_PATH/share/doc $JULIA_PATH/share/man $JULIA_DEPOT_PATH/compiled $JULIA_DEPOT_PATH/conda
+ENV JULIA_DEPOT_PATH=":$JULIA_DEPOT_PATH"
 
 # Julia build conditional
 FROM julia-latest AS julia-enabled-true
@@ -38,6 +39,9 @@ ARG JULIA_ENABLED
 ENV JULIA_PATH=/usr/local/julia
 COPY --from=julia-build /usr/local/julia /usr/local/julia
 ENV PATH="$JULIA_PATH/bin:$PATH"
+RUN if [ -x "$JULIA_PATH/bin/julia" ]; then \
+        JULIA_DEPOT_PATH="/usr/local/julia/depot" JUPYTER_DATA_DIR="/usr/local/share/jupyter" julia --sysimage="$JULIA_PATH/sys.so" -e 'using IJulia; installkernel("Julia", "--sysimage='"$JULIA_PATH/sys.so"'")'; \
+    fi
 ENV JULIA_DEPOT_PATH=":/usr/local/julia/depot"
 
 # R install
@@ -48,7 +52,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         apt install -y --no-install-recommends r-base-core r-cran-irkernel; \
     fi
 
-RUN --mount=type=bind,from=packages,source=/dist,target=/dist \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=packages,source=/dist,target=/dist \
     for wheel in `ls -1 /dist/*.whl`; do \
         uv pip install --system $wheel && echo $wheel >> /opt/package_list; \
     done
