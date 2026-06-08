@@ -39,8 +39,8 @@ class {context_class}(BeakerContext):
         super().__init__(beaker_kernel, config=config)
 
     async def setup(self, context_info=None, parent_header=None):
+        await super().setup()
         # Custom setup can be done here
-        pass
 
     @action(default_payload='{{\\n  "question": "Will I find love?"\\n}}')
     async def ask_eight_ball(self, message):
