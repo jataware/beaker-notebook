@@ -1,6 +1,6 @@
 import { createRouter as vueCreateRouter, createWebHistory } from 'vue-router';
 import { defineAsyncComponent } from 'vue';
-import { router as bvRouter } from 'beaker-vue';
+import { router as bvRouter } from '@jataware/beaker-vue';
 const { reformatRoutes } = bvRouter;
 type Pages = bvRouter.Pages;
 type Routes = bvRouter.Routes;

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, shallowRef } from 'vue';
-import { BeakerSession, type IBeakerSessionOptions } from 'beaker-kernel';
+import { BeakerSession, type IBeakerSessionOptions } from '@jataware/beaker-client';
 
 /**
  * Registry of live BeakerSession (kernel connection) instances, keyed by

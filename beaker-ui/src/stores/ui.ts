@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { IBeakerCell } from 'beaker-kernel';
+import type { IBeakerCell } from '@jataware/beaker-client';
 
 /**
  * Cross-workspace UI ephemera. Holds state that is not tied to any

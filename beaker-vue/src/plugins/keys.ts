@@ -1,5 +1,5 @@
 import type { InjectionKey, Ref } from 'vue';
-import type { BeakerSession } from 'beaker-kernel';
+import type { BeakerSession } from '@jataware/beaker-client';
 import type { BeakerWorkspace } from '../types/workspace';
 import type { IFetchClient } from '../types/fetch';
 import type { IBeakerContextService } from '../types/context';

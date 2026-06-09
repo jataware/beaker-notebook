@@ -211,7 +211,7 @@ import { useQueryCellFlattening } from '@/composables/useQueryCellFlattening';
 import { useWorkflows } from '@/composables/useWorkflows';
 import { listIntegrations, type IntegrationMap } from '@/util/integration';
 import { atStartOfInput, atEndOfInput } from '@/util';
-import { defaultRenderers } from 'beaker-vue';
+import { defaultRenderers } from '@jataware/beaker-vue';
 import { useWorkspacesStore, useUIStore } from '@/stores';
 
 import WorkflowStepPanel from '@/components/panels/WorkflowStepPanel.vue';
@@ -219,7 +219,7 @@ import WorkflowOutputPanel from '@/components/panels/WorkflowOutputPanel.vue';
 
 import type { NavOption } from '@/components/misc/BeakerHeader.vue';
 import type { IBeakerTheme } from '@/plugins/theme';
-import type { BeakerSession as BeakerSessionClass } from 'beaker-kernel';
+import type { BeakerSession as BeakerSessionClass } from '@jataware/beaker-client';
 
 import { contextService } from '@/services/context';
 

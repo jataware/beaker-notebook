@@ -1,6 +1,8 @@
 SHELL=/usr/bin/env bash
 BASEDIR = $(shell pwd)
 
+UI_OUTPUT_DIR=src/beaker_notebook/app/ui
+
 # Determine which build command to use
 PYTHON_BUILD_CMD = $(shell python3 -c "import build" >/dev/null 2>/dev/null && echo "python3 -m build")
 UV_CMD = $(shell which uv >/dev/null 2>/dev/null && echo "uv build")
@@ -11,13 +13,12 @@ define npm_build_deps
 	$(shell find $(1)/src/ -name '*.ts' -or -name '*.vue') \
 	$(1)/package*.json \
 	$(1)/tsconfig*.json \
-	$(wildcard $(1)/vite.config*.ts $(1)/vite.config*.json) \
-	$(1)/node_modules
+	$(wildcard $(1)/vite.config*.ts $(1)/vite.config*.json) 
 endef
 
 .PHONY:init
 init:
-	make .env beaker-ui/node_modules
+	$(MAKE) .env 
 
 .PHONY:build
 build:
@@ -31,8 +32,11 @@ build:
 
 .PHONY:clean
 clean:
-	rm -r beaker-ts/dist beaker-vue/dist beaker-ui/html build dist src/beaker_notebook/app/ui || true
+	rm -r dist */dist */html build */build ${UI_OUTPUT_DIR} || true
 
+.PHONY:full-clean
+full-clean:
+	rm -r dist */dist */html build */build ${UI_OUTPUT_DIR} node_modules */node_modules || true
 
 .PHONY:docs-up
 docs-up:
@@ -57,31 +61,13 @@ dev:src/beaker_notebook/app/ui/index.html docker-build
 	fi \
 	# echo "Don't forget to set your OPENAI key in the .env file!"; \
 
-beaker-ts/node_modules:beaker-ts/package*.json
-	(cd beaker-ts/ && npm install --include=dev && npm link) && \
-	touch beaker-ts/node_modules
+node_modules/:
+	npm i && touch node_modules
 
-beaker-ts/dist:$(call npm_build_deps,beaker-ts)
-	(cd beaker-ts/ && npm run build) && \
-	touch beaker-ts/dist
+beaker-ui/html:$(call npm_build_deps,beaker-ui) node_modules/
+	npm run build && touch beaker-ui/html
 
-beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/dist
-	(cd beaker-vue && npm install --include=dev) && \
-	echo touch beaker-vue/node_modules
-
-beaker-vue/dist:$(call npm_build_deps,beaker-vue)
-	(cd beaker-vue && npm run build) && \
-	touch beaker-vue/dist
-
-beaker-ui/node_modules:beaker-ui/package*.json beaker-ts/dist beaker-vue/dist
-	(cd beaker-ui && npm install --include=dev) && \
-	touch beaker-ui/node_modules
-
-beaker-ui/html:$(call npm_build_deps,beaker-ui) beaker-vue/dist
-	(cd beaker-ui && npm run build) && \
-	touch beaker-ui/html
-
-src/beaker_notebook/app/ui/index.html:beaker-ui/node_modules beaker-ui/html
+src/beaker_notebook/app/ui/index.html:beaker-ui/html
 	rsync -r --exclude="*.map" beaker-ui/html/* src/beaker_notebook/app/ui/
 
 .PHONY:docker-build

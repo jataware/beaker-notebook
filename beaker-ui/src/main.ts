@@ -4,7 +4,7 @@ import { createPinia } from 'pinia';
 import { URLExt } from '@jupyterlab/coreutils';
 import { fetch, client } from '@/services/fetch';
 import { contextService } from '@/services/context';
-import { installBeakerHostPlugins } from 'beaker-vue';
+import { installBeakerHostPlugins } from '@jataware/beaker-vue';
 import * as cookie from 'cookie';
 
 import App from '@/App.vue';

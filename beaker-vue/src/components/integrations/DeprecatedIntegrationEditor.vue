@@ -194,7 +194,7 @@
                         v-if="selectedIntegration"
                         language="markdown"
                         :autocompleteEnabled="true"
-                        :autocomplete-options="Object.values(attachedFiles).map((file) => file.name)"
+                        :autocomplete-options="Object.values(attachedFiles).map((file: IntegrationAttachedFile) => file.name)"
                         v-model="selectedIntegration.source"
                         @change="model.unsavedChanges = true"
                         ref="instructionEditor"

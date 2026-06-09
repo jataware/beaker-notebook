@@ -8,7 +8,7 @@ import vueJsx from '@vitejs/plugin-vue-jsx';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import vueDevTools from 'vite-plugin-vue-devtools';
 
-import { sanitizeJupyterEval, outputJsonRoutesPlugin } from 'beaker-vue/builder';
+import { sanitizeJupyterEval, outputJsonRoutesPlugin } from '@jataware/beaker-vue/builder';
 
 const require = createRequire(import.meta.url);
 
@@ -50,8 +50,18 @@ const SHARED_MODULE_CHUNKS: Record<string, RegExp[]> = {
     ],
     'xlsx': [/[\\/]node_modules[\\/]xlsx[\\/]/],
     'pdfjs-dist': [/[\\/]node_modules[\\/]pdfjs-dist[\\/]/],
-    'beaker-kernel': [/[\\/]node_modules[\\/]beaker-kernel[\\/]/, /[\\/]beaker-ts[\\/](src|dist)[\\/]/],
-    'beaker-vue': [/[\\/]node_modules[\\/]beaker-vue[\\/]/, /[\\/]beaker-vue[\\/](src|dist)[\\/]/],
+    '@jataware/beaker-client': [
+        /[\\/]node_modules[\\/]beaker-kernel[\\/]/,
+        /[\\/]beaker-ts[\\/](src|dist)[\\/]/,
+        /[\\/]node_modules[\\/]@jataware\/beaker-client[\\/]/,
+        /[\\/]@jataware\/beaker-client[\\/](src|dist)[\\/]/
+    ],
+    '@jataware/beaker-vue': [
+        /[\\/]node_modules[\\/]beaker-vue[\\/]/,
+        /[\\/]beaker-vue[\\/](src|dist)[\\/]/,
+        /[\\/]node_modules[\\/]@jataware\/beaker-vue[\\/]/,
+        /[\\/]@jataware\/beaker-vue[\\/](src|dist)[\\/]/
+    ],
 };
 
 function matchChunk(id: string): string | undefined {
@@ -124,11 +134,11 @@ export default defineConfig({
             // Allows automatic updating when beaker-ts is updated; uses the dist
             // version when building in production mode.
             {
-                find: 'beaker-kernel',
+                find: '@jataware/beaker-client',
                 replacement: (
                     process.env.NODE_ENV === 'development'
                         ? fileURLToPath(new URL('../beaker-ts/src', import.meta.url))
-                        : 'beaker-kernel'
+                        : '@jataware/beaker-client'
                 ),
             },
         ],

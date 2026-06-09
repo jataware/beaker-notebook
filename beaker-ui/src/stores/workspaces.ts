@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, shallowRef, toRaw, type Ref } from 'vue';
-import type { BeakerSession, BeakerKernelStatus } from 'beaker-kernel';
-import type { BeakerWorkspace } from 'beaker-vue';
+import type { BeakerSession, BeakerKernelStatus } from '@jataware/beaker-client';
+import type { BeakerWorkspace } from '@jataware/beaker-vue';
 import { useUIStore } from './ui';
 
 /**

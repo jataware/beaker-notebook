@@ -143,7 +143,7 @@
                     <CodeEditor
                         language="markdown"
                         :autocompleteEnabled="true"
-                        :autocomplete-options="Object.values(attachedFiles).map((file) => file.name)"
+                        :autocomplete-options="Object.values(attachedFiles).map((file: IntegrationAttachedFile) => file.name)"
                         v-model="selectedIntegration.source"
                         @change="model.unsavedChanges = true"
                         ref="instructionEditor"
@@ -194,7 +194,7 @@ const model = defineModel<IntegrationInterfaceState>();
 const selectedIntegration = computed<Integration>(() =>
     model.value.integrations[model.value.selected]);
 
-const attachedFiles = computed<{[key in string]: IntegrationAttachedFile}>(() =>
+const attachedFiles = computed<{[key: string]: IntegrationAttachedFile}>(() =>
     filterByResourceType<IntegrationAttachedFile>(
         selectedIntegration.value?.resources, "file")
 );

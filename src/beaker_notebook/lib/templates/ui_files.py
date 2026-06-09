@@ -18,8 +18,8 @@ class UIPackageJsonFile(TemplateFile):
     "dev": "vite build --watch"
   }},
   "dependencies": {{
-    "beaker-kernel": "*",
-    "beaker-vue": "*",
+    "@jataware/beaker-client": "*",
+    "@jataware/beaker-vue": "*",
     "vue": "^3.4.0"
   }},
   "devDependencies": {{
@@ -40,7 +40,7 @@ class UIViteConfigFile(TemplateFile):
     ]
 
     TEMPLATE = """\
-import {{ defineBeakerRendererConfig }} from 'beaker-vue/build';
+import {{ defineBeakerRendererConfig }} from '@jataware/beaker-vue/build';
 
 export default defineBeakerRendererConfig({{
     build: {{
@@ -63,7 +63,7 @@ class UITsConfigFile(TemplateFile):
 
     TEMPLATE = """\
 {{
-  "extends": "beaker-vue/tsconfig.renderers.json",
+  "extends": "@jataware/beaker-vue/tsconfig.renderers.json",
   "compilerOptions": {{
     "paths": {{
       "@/*": ["./src/*"]
@@ -86,7 +86,7 @@ class UIRenderersFile(TemplateFile):
     ]
 
     TEMPLATE = """\
-import type {{ BeakerMimeRenderer }} from 'beaker-vue';
+import type {{ BeakerMimeRenderer }} from '@jataware/beaker-vue';
 
 // Example renderer — replace with your own custom renderers.
 // Each renderer handles one or more MIME types and returns a Vue component
@@ -119,7 +119,7 @@ class UIContextRenderersFile(TemplateFile):
     ]
 
     TEMPLATE = """\
-import type {{ BeakerMimeRenderer }} from 'beaker-vue';
+import type {{ BeakerMimeRenderer }} from '@jataware/beaker-vue';
 
 // Context-level renderers for '{context_name}'.
 // Export an array of BeakerMimeRenderer objects.

@@ -264,8 +264,8 @@ def _scaffold_ui_for_context(project_root, project_source_path, context_name: st
     "dev": "vite build --watch"
   }},
   "dependencies": {{
-    "beaker-kernel": "*",
-    "beaker-vue": "*",
+    "@jataware/beaker-client": "*",
+    "@jataware/beaker-vue": "*",
     "vue": "^3.4.0"
   }},
   "devDependencies": {{
@@ -282,7 +282,7 @@ def _scaffold_ui_for_context(project_root, project_source_path, context_name: st
         # Use forward slashes for the path (vite/node convention)
         vite_out_dir = assets_relpath.replace(os.sep, "/") + "/"
         (ui_dir / "vite.config.ts").write_text(f"""\
-import {{ defineBeakerRendererConfig }} from 'beaker-vue/build';
+import {{ defineBeakerRendererConfig }} from '@jataware/beaker-vue/build';
 
 export default defineBeakerRendererConfig({{
     build: {{
@@ -299,7 +299,7 @@ export default defineBeakerRendererConfig({{
         # ui/tsconfig.json
         (ui_dir / "tsconfig.json").write_text("""\
 {
-  "extends": "beaker-vue/tsconfig.renderers.json",
+  "extends": "@jataware/beaker-vue/tsconfig.renderers.json",
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"]
@@ -315,7 +315,7 @@ export default defineBeakerRendererConfig({{
 
         # ui/src/renderers.ts (package-level stub)
         (ui_dir / "src" / "renderers.ts").write_text("""\
-import type { BeakerMimeRenderer } from 'beaker-vue';
+import type { BeakerMimeRenderer } from '@jataware/beaker-vue';
 
 // Package-level renderers.
 // Export an array of BeakerMimeRenderer objects.
@@ -346,7 +346,7 @@ ASSET_DIR = str(Path(__file__).parent / "assets")
         click.echo(f"Creating context-level UI stub for '{context_name}'...")
         context_ui_dir.mkdir(parents=True, exist_ok=True)
         (context_ui_dir / "renderers.ts").write_text(f"""\
-import type {{ BeakerMimeRenderer }} from 'beaker-vue';
+import type {{ BeakerMimeRenderer }} from '@jataware/beaker-vue';
 
 // Context-level renderers for '{context_name}'.
 // Export an array of BeakerMimeRenderer objects.

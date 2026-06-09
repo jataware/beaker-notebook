@@ -1,5 +1,5 @@
 import type { Ref } from 'vue';
-import type { BeakerSession, BeakerKernelStatus } from 'beaker-kernel';
+import type { BeakerSession, BeakerKernelStatus } from '@jataware/beaker-client';
 
 // Interim flat shape — kernel-mirror state lives directly on the workspace
 // (populated by the iopub handler in useWorkspacesStore.getOrCreate). The
