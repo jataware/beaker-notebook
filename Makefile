@@ -62,7 +62,10 @@ dev:src/beaker_notebook/app/ui/index.html docker-build
 	# echo "Don't forget to set your OPENAI key in the .env file!"; \
 
 node_modules/:
-	npm i && touch node_modules
+	npm i && npm i --workspaces && touch node_modules
+
+beaker-vue/dist:$(call npm_build_deps,beaker-ui) node_modules/
+	npm run build:vue
 
 beaker-ui/html:$(call npm_build_deps,beaker-ui) node_modules/
 	npm run build && touch beaker-ui/html

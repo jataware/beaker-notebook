@@ -6,7 +6,7 @@ FROM ${BASE_VERSION} AS ui_build
 
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 RUN apt update -y && apt install -y rsync make nodejs
-COPY --parents --from=src ./Makefile ./beaker-vue ./beaker-ts /build/beaker-ui/
+COPY --parents --from=src ./Makefile ./beaker-vue ./beaker-ts ./beaker-ui ./package*.json /build/beaker-ui/
 WORKDIR /build/beaker-ui
 RUN mkdir -p src/beaker_notebook/app/ui
 RUN make src/beaker_notebook/app/ui/index.html
