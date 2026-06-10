@@ -125,6 +125,14 @@ export const resolveAlias = [
     // Allows automatic updating when beaker-ts is updated; uses the dist
     // version when building in production mode.
     {
+        find: '@jataware/beaker-vue',
+        replacement: (
+            process.env.NODE_ENV === 'development'
+                ? fileURLToPath(new URL('../beaker-vue/src', import.meta.url))
+                : '@jataware/beaker-vue'
+        ),
+    },
+    {
         find: '@jataware/beaker-client',
         replacement: (
             process.env.NODE_ENV === 'development'

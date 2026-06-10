@@ -119,7 +119,7 @@ const availableSubkernels = computed<ISubkernelInfo[]>(() => {
 
 const selectedContextSlug = ref<string>(activeContextSlug.value);
 const selectedSubkernelSlug = ref<string | undefined>(activeSubkernel.value?.slug);
-const contextPayloadData = ref<{[key: string]: string}>({});
+const contextPayloadData = ref<{[key: string]: string}>(Object.fromEntries(contextInfo.value.map(ctx => [ctx.slug, "{}"])));
 
 
 // When selectedContextSlug dropdown changes, the selected
