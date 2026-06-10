@@ -7,7 +7,10 @@ import dts from 'vite-plugin-dts';
 export default defineConfig({
   plugins: [
     dts({
-      tsconfigPath: "tsconfig.json"
+      tsconfigPath: "tsconfig.json",
+      // Keep test files out of the published declarations. They remain in
+      // tsconfig.json's `include` so `tsc --noEmit` still type-checks them.
+      exclude: ["src/**/__tests__/**"]
     })
   ],
   build: {

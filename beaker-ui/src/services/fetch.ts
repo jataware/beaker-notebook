@@ -20,7 +20,7 @@ function isRelativeUrl(url: string) {
   }
 }
 
-class FetchClient {
+export class FetchClient {
   private defaultHeaders: DefaultHeaders;
   private _baseUrl: string;
 

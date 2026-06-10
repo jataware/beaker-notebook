@@ -102,6 +102,38 @@ function staticModulesJsonPlugin(): Plugin {
     };
 }
 
+// Module-resolution aliases, exported so the test config (vitest.config.ts)
+// resolves `@/...` / bridge imports identically to the app build without
+// duplicating — and drifting from — this list.
+export const resolveAlias = [
+    // Bridge aliases — route lib subpath imports into beaker-vue's source.
+    // Pages currently use `@/components/X.vue` style; these resolve them
+    // to beaker-vue's published src. (Transitional: pages will be rewritten
+    // to use the curated `from 'beaker-vue'` barrel imports in a future
+    // cleanup pass. Listed BEFORE the generic '@' alias so they win.)
+    { find: '@/components', replacement: fileURLToPath(new URL('../beaker-vue/src/components', import.meta.url)) },
+    { find: '@/composables', replacement: fileURLToPath(new URL('../beaker-vue/src/composables', import.meta.url)) },
+    { find: '@/renderers', replacement: fileURLToPath(new URL('../beaker-vue/src/renderers', import.meta.url)) },
+    { find: '@/plugins', replacement: fileURLToPath(new URL('../beaker-vue/src/plugins', import.meta.url)) },
+    { find: '@/directives', replacement: fileURLToPath(new URL('../beaker-vue/src/directives', import.meta.url)) },
+    { find: '@/themes', replacement: fileURLToPath(new URL('../beaker-vue/src/themes', import.meta.url)) },
+    { find: /^@\/util$/, replacement: fileURLToPath(new URL('../beaker-vue/src/util/index.ts', import.meta.url)) },
+    { find: '@/util/integration', replacement: fileURLToPath(new URL('../beaker-vue/src/util/integration', import.meta.url)) },
+    // Beaker-ui local paths (must come after the more-specific bridge entries above).
+    { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+    { find: 'path', replacement: path.resolve(require.resolve('path-browserify'), '..') },
+    // Allows automatic updating when beaker-ts is updated; uses the dist
+    // version when building in production mode.
+    {
+        find: '@jataware/beaker-client',
+        replacement: (
+            process.env.NODE_ENV === 'development'
+                ? fileURLToPath(new URL('../beaker-ts/src', import.meta.url))
+                : '@jataware/beaker-client'
+        ),
+    },
+];
+
 export default defineConfig({
     base: './',
     plugins: [
@@ -114,34 +146,7 @@ export default defineConfig({
         staticModulesJsonPlugin(),
     ],
     resolve: {
-        alias: [
-            // Bridge aliases — route lib subpath imports into beaker-vue's source.
-            // Pages currently use `@/components/X.vue` style; these resolve them
-            // to beaker-vue's published src. (Transitional: pages will be rewritten
-            // to use the curated `from 'beaker-vue'` barrel imports in a future
-            // cleanup pass. Listed BEFORE the generic '@' alias so they win.)
-            { find: '@/components', replacement: fileURLToPath(new URL('../beaker-vue/src/components', import.meta.url)) },
-            { find: '@/composables', replacement: fileURLToPath(new URL('../beaker-vue/src/composables', import.meta.url)) },
-            { find: '@/renderers', replacement: fileURLToPath(new URL('../beaker-vue/src/renderers', import.meta.url)) },
-            { find: '@/plugins', replacement: fileURLToPath(new URL('../beaker-vue/src/plugins', import.meta.url)) },
-            { find: '@/directives', replacement: fileURLToPath(new URL('../beaker-vue/src/directives', import.meta.url)) },
-            { find: '@/themes', replacement: fileURLToPath(new URL('../beaker-vue/src/themes', import.meta.url)) },
-            { find: /^@\/util$/, replacement: fileURLToPath(new URL('../beaker-vue/src/util/index.ts', import.meta.url)) },
-            { find: '@/util/integration', replacement: fileURLToPath(new URL('../beaker-vue/src/util/integration', import.meta.url)) },
-            // Beaker-ui local paths (must come after the more-specific bridge entries above).
-            { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
-            { find: 'path', replacement: path.resolve(require.resolve('path-browserify'), '..') },
-            // Allows automatic updating when beaker-ts is updated; uses the dist
-            // version when building in production mode.
-            {
-                find: '@jataware/beaker-client',
-                replacement: (
-                    process.env.NODE_ENV === 'development'
-                        ? fileURLToPath(new URL('../beaker-ts/src', import.meta.url))
-                        : '@jataware/beaker-client'
-                ),
-            },
-        ],
+        alias: resolveAlias,
         dedupe: [
             'vue',
             'primevue',

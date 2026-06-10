@@ -34,3 +34,7 @@ html/
 /playwright/.cache/
 /playwright/.auth/
 test-results/
+
+# Vitest browser-mode failure artifacts
+**/__screenshots__/
+.vitest-attachments/

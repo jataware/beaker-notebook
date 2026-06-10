@@ -17,6 +17,11 @@ coverage
 /cypress/videos/
 /cypress/screenshots/
 
+# Vitest browser-mode failure artifacts
+**/__screenshots__/
+.vitest-attachments/
+test-results/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

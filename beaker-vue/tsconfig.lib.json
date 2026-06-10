@@ -35,6 +35,7 @@
   ],
   "exclude": [
     "src/builder/",
+    "src/**/__tests__/**",
     "node_modules/**"
   ]
 }

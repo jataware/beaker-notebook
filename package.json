@@ -15,6 +15,11 @@
     "build:ui": "npm run build -w beaker-ui",
     "dev": "npm run dev -w beaker-ui",
     "type-check": "npm run type-check -w beaker-ts && npm run type-check -w beaker-vue && npm run type-check -w beaker-ui",
+    "test": "npm run test -w beaker-ts && npm run test -w beaker-vue && npm run test -w beaker-ui",
+    "test:ts": "npm run test -w beaker-ts",
+    "test:vue": "npm run test -w beaker-vue",
+    "test:ui": "npm run test -w beaker-ui",
+    "test:e2e": "npm run test:e2e -w beaker-ui",
     "clean": "rimraf beaker-ts/dist beaker-vue/dist beaker-ui/html"
   }
 }

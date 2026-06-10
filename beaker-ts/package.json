@@ -9,7 +9,9 @@
   "scripts": {
     "build": "run-s type-check build-lib",
     "build-lib": "vite build",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -29,9 +31,13 @@
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
     "@types/uuid": "^11.0.0",
+    "@vitest/browser": "^4.1.8",
+    "@vitest/browser-playwright": "^4.1.8",
     "npm-run-all2": "^8.0.4",
+    "playwright": "^1.60.0",
     "typescript": "^6.0.3",
     "vite": "^7.3.3",
-    "vite-plugin-dts": "^5.0.0"
+    "vite-plugin-dts": "^5.0.0",
+    "vitest": "^4.1.8"
   }
 }
