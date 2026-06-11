@@ -21,7 +21,7 @@ from beaker_notebook.lib.subkernel import BeakerSubkernel
 from beaker_notebook.lib.jupyter_kernel_proxy import InterceptionFilter, JupyterMessage, KernelProxyManager
 from beaker_notebook.lib.utils import (message_handler, LogMessageEncoder, magic,
                         handle_message, get_socket, execution_context, parent_message_context,
-                        ForwardMessage, ensure_async)
+                        ForwardMessage, ensure_async, url_path_join)
 
 USER_RESPONSE_WAIT_TIME_SECONDS = 100
 
@@ -517,7 +517,7 @@ class BeakerKernel(KernelProxyManager):
                 subkernel_id = self.context.subkernel.kernel_id
                 print(f"Interrupting connected subkernel: {subkernel_id}")
                 requests.post(
-                    f"{self.context.beaker_kernel.jupyter_server}/api/kernels/{subkernel_id}/interrupt",
+                    url_path_join(self.context.beaker_kernel.jupyter_server, "/api/kernels/", str(subkernel_id), "/interrupt"),
                     headers={
                         "X-AUTH-BEAKER": self.api_auth()
                     },

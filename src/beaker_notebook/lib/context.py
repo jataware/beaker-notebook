@@ -22,7 +22,7 @@ from nbformat import NotebookNode
 import yaml
 
 from beaker_notebook.lib.autodiscovery import autodiscover
-from beaker_notebook.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook
+from beaker_notebook.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook, url_path_join
 from beaker_notebook.lib.config import config as beaker_config
 from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
 from beaker_notebook.lib.integrations.registry import IntegrationProviderRegistry
@@ -420,7 +420,8 @@ class BeakerContext:
         self.subkernel.cleanup()
         for msg_type, intercept_func, stream in self.intercepts:
             self.beaker_kernel.remove_intercept(msg_type=msg_type, func=intercept_func, stream=stream)
-        del self.agent
+        if hasattr(self, "agent"):
+            del self.agent
 
     def _collect_and_register_intercepts(self, target):
         for _, method in inspect.getmembers(target, lambda member: inspect.ismethod(member) and hasattr(member, "_intercept")):
@@ -483,7 +484,7 @@ class BeakerContext:
         # Step 3: Fetch kernel specs from the (potentially remote) KSM
         urlbase = self.beaker_kernel.jupyter_server
         kernelspecs_res = requests.get(
-            urllib.parse.urljoin(urlbase, "/api/kernelspecs"),
+            url_path_join(urlbase, "/api/kernelspecs"),
             headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
         if kernelspecs_res.status_code >= 400:
@@ -511,7 +512,7 @@ class BeakerContext:
             path = self.beaker_kernel.session_config.get("jupyter_session", "")
 
         kernel_creation_res = requests.post(
-            url=urllib.parse.urljoin(urlbase, "/api/kernels"),
+            url=url_path_join(urlbase, "/api/kernels"),
             json={"name": kernel_spec_name, "path": path},
             headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
@@ -524,7 +525,7 @@ class BeakerContext:
             raise
 
         connection_info_res = requests.get(
-            url=urllib.parse.urljoin(urlbase, f"/beaker/subkernels/{subkernel_id}"),
+            url=url_path_join(urlbase, f"/beaker/subkernels/{subkernel_id}"),
             headers={"X-AUTH-BEAKER": self.beaker_kernel.api_auth()},
         )
         connection_info = connection_info_res.json()

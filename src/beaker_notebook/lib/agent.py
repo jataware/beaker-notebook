@@ -11,7 +11,7 @@ from archytas.react import ReActAgent
 from archytas.tool_utils import AgentRef, LoopControllerRef, ReactContextRef, tool, statetool, MultiModalResponse
 
 from beaker_notebook.lib.config import config
-from beaker_notebook.lib.utils import DefaultModel, set_tool_execution_context, succinct_tool_summarizer
+from beaker_notebook.lib.utils import DefaultModel, set_tool_execution_context, succinct_tool_summarizer, url_path_join
 from beaker_notebook.lib.notebook_state import notebook_state_to_xml, format_cell, is_multimedia_mimetype
 
 if typing.TYPE_CHECKING:
@@ -427,7 +427,7 @@ class BeakerAgent(ReActAgent):
         normalized_path = path.strip().lstrip("/")
         beaker_kernel = self.context.beaker_kernel
         urlbase = beaker_kernel.jupyter_server
-        url = urllib.parse.urljoin(
+        url = url_path_join(
             urlbase,
             f"/api/contents/{urllib.parse.quote(normalized_path)}",
         )
