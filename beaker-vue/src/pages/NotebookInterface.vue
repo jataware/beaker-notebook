@@ -120,7 +120,7 @@
                 ref="rightSideMenuRef"
                 position="right"
                 highlight="line"
-                v-model="uiStore.leftMenuState"
+                v-model="uiStore.rightMenuState"
                 initialWidth="25vi"
                 :maximized="isMaximized"
             >
