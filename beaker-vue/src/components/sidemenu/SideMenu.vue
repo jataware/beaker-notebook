@@ -14,7 +14,7 @@
                             'menu-button',
                             props.highlight,
                             props.position,
-                            (selectedTabIndex === idx ? 'selected' : undefined),
+                            (state.selectedTabIndex === idx ? 'selected' : undefined),
                             (props.showLabel ? 'show-label' : undefined),
                         ]"
                         :icon="panel.props?.icon"
@@ -31,8 +31,8 @@
                     v-for="(panel, index) in panels"
                     :key="`panel-${index}`"
                     :is="panel"
-                    v-show="selectedTabIndex === index"
-                    :selected="selectedTabIndex === index"
+                    v-show="state.selectedTabIndex === index"
+                    :selected="state.selectedTabIndex === index"
                 />
             </div>
             <div v-if="isExpanded && !staticSize"
@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="tsx">
-import { ref, watch, computed, getCurrentInstance, useSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
+import { ref, reactive, watch, computed, getCurrentInstance, useSlots, isVNode, nextTick, onUnmounted, onMounted } from "vue";
 import { type VNode } from "vue";
 
 import Button from 'primevue/button';
@@ -71,7 +71,7 @@ export interface SideMenuProps {
 
 const props = withDefaults(defineProps<SideMenuProps>(), {
     style: () => {return {}},
-    expanded: true,
+    expanded: false,
     highlight: "full",
     position: "right",
     showLabel: false,
@@ -88,6 +88,13 @@ const emit = defineEmits([
     "resize",
 ]);
 
+const state = defineModel<SideMenuState>({
+    default: () => reactive(structuredClone(SideMenuStateDefaults))
+});
+if (props.expanded && state.value.selectedTabIndex === null) {
+    state.value.selectedTabIndex = 0;
+}
+
 const AUTO_CLOSE_MARGIN = 50;
 const MINIMIZE_INDICATION_WIDTH = 8;
 
@@ -95,7 +102,7 @@ const slots = defineSlots<{
     default: () => any,
 }>();
 
-const selectedTabIndex = ref<number|null>(props.expanded ? 0 : null);
+const initialWidth = (state.value.panelWidth ? `${state.value.panelWidth}px` : props.initialWidth);
 const panelWidth = ref<number|null>(null);
 const listeners = ref({
     move: null,
@@ -112,12 +119,13 @@ const resizeObserver = ref<ResizeObserver>();
 const resizeHistory = ref<DOMRectReadOnly>();
 const instance = getCurrentInstance();
 
+
 let minWidth: number;
 let menuWidth: number;
 let closedWidth: number;
 
 const isExpanded = computed(() => {
-    return selectedTabIndex.value !== null;
+    return state.value.selectedTabIndex !== null;
 });
 
 const panels = computed(() => {
@@ -147,7 +155,7 @@ const containerStyle = computed(() => {
             width = `${panelWidth.value}px`;
         }
         else if (props.maximized) {
-            width = props.initialWidth;
+            width = initialWidth;
         }
         else {
             const currWidth = (instance?.vnode?.el as HTMLDivElement)?.clientWidth;
@@ -155,7 +163,7 @@ const containerStyle = computed(() => {
                 width = `${currWidth}px`;
             }
             else {
-                width = props.initialWidth;
+                width = initialWidth;
             }
         }
         return {
@@ -177,6 +185,7 @@ watch(isExpanded, () => {
         if (backoff > 0) {
             panelWidth.value -= backoff;
         }
+        resized();
     });
 });
 
@@ -241,6 +250,7 @@ const moveDragHandle = (evt: MouseEvent) => {
         const backoff = offsetParent.scrollWidth - offsetParent.offsetWidth;
         if (backoff > 0) {
             panelWidth.value -= backoff;
+            resized();
         }
     });
 }
@@ -252,39 +262,39 @@ const endDragHandle = (evt: MouseEvent) => {
     panelWidth.value = Math.round(panelWidth.value);
     // If dragged closed, assume they want the panel to be hidden
     if (panelWidth.value <= minWidth) {
-        selectedTabIndex.value = null;
+        state.value.selectedTabIndex = null;
         panelWidth.value = null;
     }
     dragStartPos.value = null;
     dragDistance.value = null;
     minimizeIndicator.value = false;
-
+    resized();
 };
 
 const handleButtonClick = (index: number) => {
-    if (selectedTabIndex.value !== index) {
-        selectedTabIndex.value = index;
+    if (state.value.selectedTabIndex !== index) {
+        state.value.selectedTabIndex = index;
         emit("panel-show");
     }
     else {
-        selectedTabIndex.value = null;
+        state.value.selectedTabIndex = null;
         emit("panel-hide");
     }
 }
 
-const isPanelSelected = (index: number) => {
-    return Boolean(
-        selectedTabIndex.value !== null &&
-        selectedTabIndex.value === index
-    );
+const resized = () => {
+    nextTick(() => {
+        emit("resize", panelWidth.value);
+        state.value.panelWidth = panelWidth.value;
+    });
 }
 
 const hidePanel = () => {
-    selectedTabIndex.value = null;
+    state.value.selectedTabIndex = null;
 }
 
 const selectPanel = (id_or_label: string) => {
-    selectedTabIndex.value = panels.value.findIndex(
+    state.value.selectedTabIndex = panels.value.findIndex(
         (panel) => (panel.props?.label === id_or_label || panel.props?.id === id_or_label)
     );
     if (minimizeIndicator.value) {
@@ -305,6 +315,7 @@ onMounted(() => {
                 if (panelWidth.value) {
                     const resizeRatio = entry.contentRect.width / resizeHistory.value.width;
                     panelWidth.value = panelWidth.value * resizeRatio;
+                    resized();
                 }
                 resizeHistory.value = entry.contentRect;
             }
@@ -326,16 +337,28 @@ onUnmounted(() => {
 defineExpose({
     selectPanel,
     getSelectedPanelInfo: () => {
-        if (selectedTabIndex.value === null) return null;
-        const panel = panels.value[selectedTabIndex.value];
+        if (state.value.selectedTabIndex === null) return null;
+        const panel = panels.value[state.value.selectedTabIndex];
         return {
-            index: selectedTabIndex.value,
+            index: state.value.selectedTabIndex,
             label: panel?.props?.label,
             id: panel?.props?.id,
         };
     },
     hidePanel
 });
+
+</script>
+
+<script lang="tsx">
+
+export interface SideMenuState {
+    selectedTabIndex: number | null;
+    panelWidth?: number | null;
+}
+export const SideMenuStateDefaults: SideMenuState = {
+    selectedTabIndex: null,
+}
 
 </script>
 
