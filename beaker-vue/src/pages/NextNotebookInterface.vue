@@ -81,7 +81,7 @@
                 ref="sideMenuRef"
                 position="left"
                 highlight="line"
-                :expanded="true"
+                v-model="uiStore.leftMenuState"
                 initialWidth="25vi"
                 :maximized="isMaximized"
             >
@@ -142,7 +142,7 @@
                 ref="rightSideMenuRef"
                 position="right"
                 highlight="line"
-                :expanded="true"
+                v-model="uiStore.rightMenuState"
                 initialWidth="25vi"
                 :maximized="isMaximized"
             >
@@ -215,6 +215,8 @@ import { useNotebookInterface } from '../composables/useNotebookInterface';
 import { useQueryCellFlattening } from '../composables/useQueryCellFlattening';
 import { listIntegrations, type IntegrationMap } from '../util/integration';
 
+import { useUIStore } from '@/stores';
+
 import WorkflowStepPanel from '@/components/panels/WorkflowStepPanel.vue';
 import WorkflowOutputPanel from '@/components/panels/WorkflowOutputPanel.vue';
 import { useWorkflows } from '@/composables/useWorkflows';
@@ -260,6 +262,7 @@ const {
     chatHistory,
 } = useNotebookInterface();
 
+const uiStore = useUIStore();
 beakerApp.setPage("notebook");
 
 const urlParams = new URLSearchParams(window.location.search);

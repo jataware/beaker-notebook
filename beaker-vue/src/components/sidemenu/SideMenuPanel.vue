@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<SideMenuPanelProps>(), {
     "position": "top",
 });
 
-const loaded = ref<boolean>(!props.lazy);
+const loaded = ref<boolean>(!props.lazy || props.selected);
 
 if (props.noOverflow !== undefined) {
     extraClasses.value.push('no-overflow')
@@ -40,7 +40,7 @@ watch(props, (newProps) => {
     if (newProps.selected && !loaded.value) {
         loaded.value = true;
     }
-})
+});
 
 
 </script>

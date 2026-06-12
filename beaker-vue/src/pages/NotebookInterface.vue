@@ -59,7 +59,7 @@
                 ref="sideMenuRef"
                 position="left"
                 highlight="line"
-                :expanded="true"
+                v-model="uiStore.leftMenuState"
                 initialWidth="25vi"
                 :maximized="isMaximized"
             >
@@ -120,7 +120,7 @@
                 ref="rightSideMenuRef"
                 position="right"
                 highlight="line"
-                :expanded="true"
+                v-model="uiStore.rightMenuState"
                 initialWidth="25vi"
                 :maximized="isMaximized"
             >
@@ -205,6 +205,7 @@ import { listIntegrations, type IntegrationMap } from '../util/integration';
 import WorkflowStepPanel from '@/components/panels/WorkflowStepPanel.vue';
 import WorkflowOutputPanel from '@/components/panels/WorkflowOutputPanel.vue';
 import { useWorkflows } from '@/composables/useWorkflows';
+import { useUIStore } from '@/stores';
 
 const beakerNotebookRef = ref<BeakerNotebookComponentType>();
 const beakerInterfaceRef = ref();
@@ -212,6 +213,7 @@ const filePanelRef = ref();
 const configPanelRef = ref();
 const sideMenuRef = ref();
 const rightSideMenuRef = ref();
+const uiStore = useUIStore();
 
 const agentQueryRef = ref();
 const previewVisible = ref<boolean>(false);
