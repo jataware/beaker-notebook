@@ -101,6 +101,7 @@ class Workflow:
     category: Optional[str] = field(default=None)
     metadata: Optional[dict[str, Any]] = field(default_factory=lambda: {})
     output_prompt: Optional[str] = field(default=None, metadata={"terse-action": "truncate"})
+    agent_instructions: Optional[str] = field(default=None)
 
     @staticmethod
     def from_yaml(source: dict[str, Any]) -> "Workflow":
@@ -116,25 +117,26 @@ class Workflow:
             category=source.get("category", None),
             is_context_default=source.get("is_context_default", False),
             metadata=source.get("metadata", {}),
-            output_prompt=source.get("output_prompt", None)
+            output_prompt=source.get("output_prompt", None),
+            agent_instructions=source.get("agent_instructions", None),
         )
 
     # text representation of the prompt itself, fed directly into the agent.
     def to_prompt(self) -> str:
         formatted_stages = []
         for stage in self.stages:
-            parts = [f"<stage name={stage.name!r}>"]
+            stage_parts = [f"<stage name={stage.name!r}>"]
             if stage.description:
                 desc = "\n".join(stage.description) if isinstance(stage.description, list) else stage.description
-                parts.append(f"<description>{desc}</description>")
-            parts.append("<steps>")
-            parts.extend(f"<step>{step.prompt}</step>" for step in stage.steps)
-            parts.append("</steps>")
-            parts.append("</stage>")
-            formatted_stages.append("\n".join(parts))
+                stage_parts.append(f"<description>{desc}</description>")
+            stage_parts.append("<steps>")
+            stage_parts.extend(f"<step>{step.prompt}</step>" for step in stage.steps)
+            stage_parts.append("</steps>")
+            stage_parts.append("</stage>")
+            formatted_stages.append("\n".join(stage_parts))
 
         output_prompt = self.output_prompt or "Format the result as markdown."
-        return "\n".join([
+        prompt_parts = [
             f"<title>{self.title}</title>",
             "<stages>",
             *formatted_stages,
@@ -147,7 +149,16 @@ class Workflow:
             "reader can trace any conclusion to the work that produced it.",
             "</workflow-result-formatting-instructions>",
             "",
-        ])
+        ]
+        if self.agent_instructions:
+            prompt_parts.extend([
+                "<agent-instructions>",
+                self.agent_instructions,
+                "</agent-instructions>",
+                "",
+            ])
+
+        return "\n".join(prompt_parts)
 
 
 class WorkflowStageProgress(TypedDict):
@@ -175,7 +186,6 @@ class WorkflowState(TypedDict):
 
 def create_available_workflows_prompt(
     workflows: list[Workflow],
-    attached_workflow: Optional[Workflow] = None
 ) -> str:
     """
     Create a fully rendered prompt for the context based on a list of workflows and which,

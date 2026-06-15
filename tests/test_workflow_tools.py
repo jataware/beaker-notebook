@@ -11,11 +11,12 @@ from beaker_notebook.lib.workflow import (
     WorkflowStage,
     WorkflowStep,
     WorkflowStageProgress,
+    create_available_workflows_prompt,
     workflow_condition,
 )
 
 
-def _make_workflow(title: str = "Build Pipeline") -> Workflow:
+def _make_workflow(title: str = "Build Pipeline", agent_instructions: str | None = None) -> Workflow:
     return Workflow(
         title=title,
         agent_description="agent desc",
@@ -28,6 +29,7 @@ def _make_workflow(title: str = "Build Pipeline") -> Workflow:
                 steps=[WorkflowStep(prompt="do thing")],
             )
         ],
+        agent_instructions=agent_instructions,
     )
 
 
@@ -150,3 +152,101 @@ def test_workflow_condition_reflects_attachment():
 
     agent_ref_unattached, _, _ = _make_agent_ref(workflows={"u1": wf}, attached=None)
     assert workflow_condition(agent_ref_unattached) is False
+
+
+# --- agent_instructions field ----------------------------------------------
+
+# A sentinel that is unlikely to appear incidentally in any other prompt text,
+# so assertions about its presence/absence are unambiguous.
+AGENT_INSTRUCTIONS = "SECRET-AGENT-GUIDANCE: prefer pandas over polars for this task."
+
+
+def test_from_yaml_parses_agent_instructions():
+    wf = Workflow.from_yaml({
+        "title": "T",
+        "agent_description": "a",
+        "human_description": "h",
+        "example_prompt": "e",
+        "stages": [],
+        "agent_instructions": AGENT_INSTRUCTIONS,
+    })
+    assert wf.agent_instructions == AGENT_INSTRUCTIONS
+
+
+def test_from_yaml_agent_instructions_defaults_to_none():
+    wf = Workflow.from_yaml({
+        "title": "T",
+        "agent_description": "a",
+        "human_description": "h",
+        "example_prompt": "e",
+        "stages": [],
+    })
+    assert wf.agent_instructions is None
+
+
+def test_to_prompt_includes_agent_instructions_when_set():
+    wf = _make_workflow(agent_instructions=AGENT_INSTRUCTIONS)
+    prompt = wf.to_prompt()
+    assert "<agent-instructions>" in prompt
+    assert "</agent-instructions>" in prompt
+    assert AGENT_INSTRUCTIONS in prompt
+
+
+def test_to_prompt_omits_agent_instructions_when_unset():
+    wf = _make_workflow(agent_instructions=None)
+    prompt = wf.to_prompt()
+    assert "<agent-instructions>" not in prompt
+    assert AGENT_INSTRUCTIONS not in prompt
+
+
+# --- agent_instructions are NOT in the system prompt -----------------------
+#
+# The system prompt lists the available workflows via
+# create_available_workflows_prompt / WorkflowRegistry.system_preamble. The
+# agent_instructions must not leak there; they should only become visible once
+# a workflow is actually selected (attached) and rendered via to_prompt().
+
+
+def test_available_workflows_prompt_excludes_agent_instructions():
+    wf = _make_workflow(agent_instructions=AGENT_INSTRUCTIONS)
+    prompt = create_available_workflows_prompt([wf])
+    assert AGENT_INSTRUCTIONS not in prompt
+    assert "<agent-instructions>" not in prompt
+    # the synopsis-level fields are still present
+    assert wf.title in prompt
+    assert wf.agent_description in prompt
+
+
+async def test_system_preamble_excludes_agent_instructions():
+    wf = _make_workflow(agent_instructions=AGENT_INSTRUCTIONS)
+    registry = WorkflowRegistry({"u1": wf})
+    preamble = await registry.system_preamble()
+    assert preamble is not None
+    assert AGENT_INSTRUCTIONS not in preamble
+    assert "<agent-instructions>" not in preamble
+
+
+# --- agent_instructions ARE visible once the workflow is selected ----------
+
+
+def test_attached_workflow_state_exposes_agent_instructions():
+    wf = _make_workflow(agent_instructions=AGENT_INSTRUCTIONS)
+    registry = WorkflowRegistry({"u1": wf})
+    agent_ref, _, _ = _make_agent_ref(workflows={"u1": wf}, attached=wf)
+    result = WorkflowRegistry.attached_workflow_state(registry, agent=agent_ref)
+    assert "<agent-instructions>" in result
+    assert AGENT_INSTRUCTIONS in result
+
+
+def test_agent_instructions_only_appear_after_selection():
+    """End-to-end: instructions are absent from the system preamble but present
+    once the workflow is attached and its state is rendered."""
+    wf = _make_workflow(agent_instructions=AGENT_INSTRUCTIONS)
+    registry = WorkflowRegistry({"u1": wf})
+
+    preamble = create_available_workflows_prompt(list(registry.values()))
+    assert AGENT_INSTRUCTIONS not in preamble
+
+    agent_ref, _, _ = _make_agent_ref(workflows={"u1": wf}, attached=wf)
+    attached_state = WorkflowRegistry.attached_workflow_state(registry, agent=agent_ref)
+    assert AGENT_INSTRUCTIONS in attached_state
