@@ -857,7 +857,7 @@ class BeakerContext:
     async def set_workflow(self, message):
         workflow_id = message.content["workflow"]
 
-        if isinstance(workflow_id, None):
+        if workflow_id is None:
             self.attach_workflow(None)
         elif isinstance(workflow_id, str):
             workflow = self.workflows.get(workflow_id, None)
