@@ -90,6 +90,7 @@ class WorkflowStage:
 
 @dataclass(kw_only=True)
 class Workflow:
+    id: Optional[str] = field(default=None)
     title: str
     agent_description: str = field(metadata={"terse-action": "truncate"})
     human_description: str
@@ -103,6 +104,12 @@ class Workflow:
     output_prompt: Optional[str] = field(default=None, metadata={"terse-action": "truncate"})
     agent_instructions: Optional[str] = field(default=None)
 
+    def __post_init__(self):
+        # Ensure workflows have stable IDs, creating one from the title if not included.
+        self.title = self.title.strip()
+        if not self.id:
+            self.id = slugify(self.title)
+
     @staticmethod
     def from_yaml(source: dict[str, Any]) -> "Workflow":
         stages = [WorkflowStage.from_yaml(stage) for stage in source.get("stages", [])]
@@ -113,6 +120,7 @@ class Workflow:
             example_prompt=source["example_prompt"],
             stages=stages,
 
+            id=source.get("id", None),
             hidden=source.get("hidden", None),
             category=source.get("category", None),
             is_context_default=source.get("is_context_default", False),
@@ -125,7 +133,7 @@ class Workflow:
     def to_prompt(self) -> str:
         formatted_stages = []
         for stage in self.stages:
-            stage_parts = [f"<stage name={stage.name!r}>"]
+            stage_parts = [f'<stage name="{stage.name!r}">']
             if stage.description:
                 desc = "\n".join(stage.description) if isinstance(stage.description, list) else stage.description
                 stage_parts.append(f"<description>{desc}</description>")
@@ -138,6 +146,7 @@ class Workflow:
         output_prompt = self.output_prompt or "Format the result as markdown."
         prompt_parts = [
             f"<title>{self.title}</title>",
+            f"<id>{self.id}</id>",
             "<stages>",
             *formatted_stages,
             "</stages>",
@@ -173,9 +182,9 @@ class WorkflowState(TypedDict):
     final_response: str
 
     @classmethod
-    def from_workflow(cls, workflow_id: str, workflow: Workflow) -> "WorkflowState": # type: ignore
+    def from_workflow(cls, workflow: Workflow) -> "WorkflowState": # type: ignore
         return cls(
-            workflow_id=workflow_id,
+            workflow_id=workflow.id,
             progress={
                 stage.name: None
                 for stage in workflow.stages
@@ -194,6 +203,7 @@ def create_available_workflows_prompt(
     workflow_synopsis = "\n\n".join([
         f"""<workflow>
     <title>{workflow.title}</title>
+    <id>{workflow.id}</id>
     <description>{workflow.agent_description}</description>
 </workflow>"""
         for workflow in workflows
@@ -208,8 +218,8 @@ def workflow_condition(agent: AgentRef) -> bool:
     context: BeakerContext = agent.context
     return bool(context.attached_workflow)
 
-class WorkflowRegistry(Mapping):
-    """Mapping container of workflows keyed by UUID, with a system_preamble
+class WorkflowRegistry(Mapping[str, Workflow]):
+    """Mapping container of workflows keyed by id, with a system_preamble
     contribution that lists the available workflows for the agent.
 
     Mirrors the role of IntegrationProviderRegistry: holds a collection and
@@ -231,13 +241,20 @@ class WorkflowRegistry(Mapping):
     def __bool__(self) -> bool:
         return bool(self._workflows)
 
+    @property
+    def default(self) -> Workflow|None:
+        for workflow in self.values():
+            if workflow.is_context_default:
+                return workflow
+        return None
+
     async def system_preamble(self) -> Optional[str]:
         if not self._workflows:
             return None
         return create_available_workflows_prompt(list(self._workflows.values()))
 
     @tool(internal=True)
-    async def attach_workflow(self, workflow_title: str, agent: AgentRef):
+    async def attach_workflow(self, workflow_id: str|None, agent: AgentRef):
         """
         Chooses a relevant workflow to the user's request and attaches it to the context.
 
@@ -248,27 +265,26 @@ class WorkflowRegistry(Mapping):
         If they describe what they want to do, choose the most relevant workflow based on their query.
 
         Args:
-            workflow_title (str): The title of the workflow that you have access to, most relevant to their query.
-                            This is "none" if the user wants to detach, remove, or unset the workflow.
+            workflow_id (str|None): The id of an available workflow that you wish to attach, or None to detach the workflow.
 
         Returns:
             str: A summary of what was done
         """
         try:
-            if len(agent.context.workflows) == 0:
-                return "No workflows attached to context."
+            if len(self) == 0:
+                return "No workflows in registry."
         except Exception as e:
             return f"Failed to get workflows on context. {e}"
-        desired = slugify(workflow_title)
-        titles = {
-            slugify(workflow.title): uuid
-            for uuid, workflow in agent.context.workflows.items()
-        }
-        if desired not in titles:
-            return f"Failed to find `{desired}` in `{titles}`: invalid tool input."
-        agent.context.attach_workflow(titles[desired])
+        if workflow_id is None:
+            workflow = None
+        else:
+            workflow = self.get(workflow_id, None)
+            if workflow is None:
+                return f"Failed to find workflow with id `{workflow_id}`. Existing workflows: `{(list(self.keys()))!r}`: invalid tool input."
+
+        agent.context.attach_workflow(workflow)
         agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
-        return f"Successfully set the attached workflow to {workflow_title}."
+        return f'Successfully set the attached workflow to "{workflow.title}" ({workflow.id}).'
 
     @tool(internal=True)
     async def update_workflow_stage(self, stage_name: str, state: str, results: str, agent: AgentRef):

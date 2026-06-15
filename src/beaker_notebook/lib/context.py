@@ -14,7 +14,6 @@ from dataclasses import asdict
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, ClassVar, Awaitable, TypedDict, Literal, TypeAlias, Collection
-from uuid import uuid4
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 from nbformat import NotebookNode
@@ -178,18 +177,10 @@ class BeakerContext:
             from beaker_notebook.lib.reflector import ReflectorRegistry
             self.subkernel.reflectors = ReflectorRegistry.from_jinja_env(self.jinja_env)
 
-        for workflow_id, workflow in self.workflows.items():
-            if workflow.is_context_default:
-                self.attach_workflow(workflow_id)
-        if not self.workflows:
-            logger.warning("Context has no workflows: disabling tools.")
-            workflow_tools = [
-                "attach_workflow",
-                "update_workflow_stage",
-                "update_workflow_output"
-            ]
-            for workflow_tool in workflow_tools:
-                self.agent.disable(workflow_tool)
+        # Attach the default workflow if one is defined.
+        if self.workflows.default is not None:
+            self.attach_workflow(self.workflows.default)
+
 
     def __init_subclass__(cls):
         mod = inspect.getmodule(cls)
@@ -448,22 +439,6 @@ class BeakerContext:
                 parts.append(
                     result
                 )
-#         if beaker_config.send_notebook_state:
-#             if self.notebook_state:
-#                 parts.append(f"""\
-# ## Current notebook
-# ```application/x-ipynb+json
-# {json.dumps(self.notebook_state)}
-# ```
-# Note: In the notebook representation above, communication with the agent is encoded as Markdown cells with metadata
-# field "beaker_cell_type" = "query". If a cell has metadata field "parent_cell", then the agent generated this cell as
-# part of the ReAct loop associated with that query. As such, cells that follow a query may have occured while the ReAact
-# loop was running and chronologically fit "inside" the query cell, as opposed to having been run afterwards.\
-# """)
-
-        # Workflows and integrations blocks have moved to system_preamble
-        # (WorkflowRegistry.system_preamble and IntegrationProviderRegistry.system_preamble).
-
         if parts:
             return "\n\n".join(parts)
         else:
@@ -871,19 +846,26 @@ class BeakerContext:
     def attached_workflow(self) -> Workflow | None:
         return self.workflows.get(self.current_workflow_state["workflow_id"], None) if self.current_workflow_state else None
 
-    def attach_workflow(self, workflow_id: str | None):
-        if workflow_id is None:
+    def attach_workflow(self, workflow: Workflow | None):
+        if workflow is None:
             self.current_workflow_state = None
         else:
-            self.current_workflow_state = WorkflowState.from_workflow(
-                workflow_id=workflow_id,
-                workflow=self.workflows[workflow_id]
-            )
+            self.current_workflow_state = WorkflowState.from_workflow(workflow)
         self.send_response("iopub", "update_workflow_state", self.current_workflow_state)
 
     @action()
     async def set_workflow(self, message):
-        self.attach_workflow(message.content["workflow"])
+        workflow_id = message.content["workflow"]
+
+        if isinstance(workflow_id, None):
+            self.attach_workflow(None)
+        elif isinstance(workflow_id, str):
+            workflow = self.workflows.get(workflow_id, None)
+            if workflow is None:
+                raise ValueError(f"Workflow with id `{workflow_id}` not found.")
+            self.attach_workflow(workflow)
+        else:
+            raise TypeError("Type of 'workflow' is expected to be a string of the workflow id or None/null to remove an active workflow.")
 
     @action(default_payload=LinterCodeCellsPayload(notebook_id='nb1', cells=[LinterCodeCellPayload(cell_id='cell1', content='import os\nos.exit(0)')]))
     async def lint_code(self, message):
@@ -948,7 +930,7 @@ class BeakerContext:
     @classmethod
     def discover_workflows(cls) -> dict:
         workflow_dir = getattr(cls, "workflow_location", None)
-        result = {}
+        workflows = {}
 
         if workflow_dir is None:
             class_dir = os.path.dirname(inspect.getfile(cls))
@@ -958,11 +940,19 @@ class BeakerContext:
             workflow_dir = os.path.normpath(os.path.join(class_dir, workflow_dir))
         if os.path.isdir(workflow_dir):
             for workflow_yaml in Path(workflow_dir).glob("*.yaml"):
-                workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
-                # lives as long as the session does
-                workflow_id = str(uuid4())
-                result[workflow_id] = workflow
-        return result
+                try:
+                    workflow = Workflow.from_yaml(yaml.safe_load(workflow_yaml.read_text()))
+                except Exception as e:
+                    logger.warning("Skipping malformed workflow file %s: %s", workflow_yaml.name, e)
+                    continue
+                if workflow.id in workflows:
+                    logger.warning(
+                        "Duplicate workflow id %r from %s collides with existing workflow %r; skipping.",
+                        workflow.id, workflow_yaml.name, workflows[workflow.id].title,
+                    )
+                    continue
+                workflows[workflow.id] = workflow
+        return workflows
 
     @property
     def slug(self) -> Optional[str]:
