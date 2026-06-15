@@ -370,6 +370,7 @@ def _extract_workflows(
                 "agent_description": workflow.agent_description,
                 "example_prompt": workflow.example_prompt,
                 "category_slug": workflow.category,
+                "agent_instructions": workflow.agent_instructions,
                 "hidden": workflow.hidden or False,
                 "metadata": workflow.metadata or {},
                 "stages": [
