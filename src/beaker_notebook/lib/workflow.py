@@ -186,7 +186,6 @@ class WorkflowState(TypedDict):
 
 def create_available_workflows_prompt(
     workflows: list[Workflow],
-    attached_workflow: Optional[Workflow] = None
 ) -> str:
     """
     Create a fully rendered prompt for the context based on a list of workflows and which,
