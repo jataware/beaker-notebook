@@ -354,8 +354,9 @@ async def ensure_async(fn: Coroutine|Callable):
     else:
         return fn
 
-def slugify(name: str):
-    slug = "_".join(re.split(r"\W", name.lower().strip()))
+def slugify(name: str, collapse: bool = False):
+    pattern = r"[\W_]+" if collapse else r"\W"
+    slug = "_".join(re.split(pattern, name.lower().strip()))
     return slug
 
 def url_path_join(*pieces: str) -> str:

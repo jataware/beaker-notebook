@@ -302,7 +302,8 @@ class WorkflowRegistry(Mapping[str, Workflow]):
 
         Args:
             stage_name (str): The name of the stage to mark as completed to the user.
-                            IMPORTANT: This must be the exact name of the stage.
+                            This is matched leniently (case/punctuation/whitespace
+                            insensitive) against the workflow's stage names.
             state (str): State will always either one of 'in_progress' or 'finished'.
                         If finished, results must not be blank.
                         If the stage is now in progress, results should be blank.
@@ -315,16 +316,103 @@ class WorkflowRegistry(Mapping[str, Workflow]):
         """
         if state != 'in_progress' and state != 'finished':
             return "State must be one of `in_progress` or `finished`."
-        if stage_name not in agent.context.current_workflow_state["progress"]:
-            return f"Stage name not found. Must be one of: {agent.context.current_workflow_state['progress'].keys()}"
-        agent.context.current_workflow_state["progress"][stage_name] = WorkflowStageProgress(
-                code_cell_id='',
-                state=state,
-                results_markdown=results,
+
+        # Resolve the agent's input to the canonical stored stage key via slugify on both sides.
+        progress = agent.context.current_workflow_state["progress"]
+        resolved_key = None
+        desired = slugify(stage_name, collapse=True)
+        for key in progress:
+            if slugify(key, collapse=True) == desired:
+                resolved_key = key
+                break
+        if resolved_key is None:
+            stage_list = ", ".join(progress.keys())
+            return f"Stage name not found. Must be one of: {stage_list}"
+
+        results_blank = not results.strip()
+        if state == 'finished' and results_blank:
+            return (
+                f"Stage '{resolved_key}' was not modified. When marking a stage "
+                "'finished', you must supply the stage's results in markdown."
+            )
+        if state == 'in_progress' and not results_blank:
+            return (
+                f"Stage '{resolved_key}' was not modified. When marking a stage "
+                "'in_progress', results must be blank."
             )
 
+        # Collect skipped stages (earlier stages that have not yet been started) so we can warn the agent.
+        skipped_stages: list[str] = []
+        if state == 'finished':
+            for key, value in progress.items():
+                if key == resolved_key:
+                    break
+                if value is None:
+                    skipped_stages.append(key)
+
+        progress[resolved_key] = WorkflowStageProgress(
+            code_cell_id='',
+            state=state,
+            results_markdown=results,
+        )
+
         agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
-        return "Successfully marked stage."
+
+        return self._build_stage_response(agent, resolved_key, state, skipped_stages)
+
+    def _build_stage_response(
+        self,
+        agent: AgentRef,
+        resolved_key: str,
+        state: str,
+        skipped_stages: list[str],
+    ) -> str:
+        """Build the instructive return string for `update_workflow_stage`.
+
+        Re-grounds the agent at every transition: its position (`N of M`), and,
+        when finishing a non-final stage, the next stage's name and steps.
+        """
+        progress_keys = list(agent.context.current_workflow_state["progress"].keys())
+        total = len(progress_keys)
+        index = progress_keys.index(resolved_key)  # zero-based
+        position = f"Stage {index + 1} of {total}"
+
+        next_key: Optional[str] = (
+            progress_keys[index + 1] if index + 1 < total else None
+        )
+
+        workflow = agent.context.attached_workflow
+        stages_by_name: dict[str, WorkflowStage] = {}
+        if workflow is not None:
+            stages_by_name = {stage.name: stage for stage in workflow.stages}
+
+        lines: list[str] = []
+        if state == 'in_progress':
+            lines.append(f'{position} ("{resolved_key}") is now in progress.')
+        else:
+            lines.append(f'{position} ("{resolved_key}") marked finished.')
+            if next_key is None:
+                lines.append(
+                    "The workflow is now complete. Call `update_workflow_output` "
+                    "with the cumulative results for the entire workflow."
+                )
+            else:
+                next_position = f"Stage {index + 2} of {total}"
+                lines.append(f'Next stage: "{next_key}" ({next_position}) — steps:')
+                next_stage = stages_by_name.get(next_key)
+                if next_stage is not None and next_stage.steps:
+                    for i, step in enumerate(next_stage.steps, start=1):
+                        lines.append(f"  {i}. {step.prompt}")
+
+        if skipped_stages:
+            skipped_list = ", ".join(f'"{name}"' for name in skipped_stages)
+            lines.append(
+                f"Warning: the following earlier stage(s) are still unstarted: "
+                f"{skipped_list}. If this was intentional (e.g. redoing work), "
+                "you may continue; otherwise make sure no stages were skipped."
+            )
+
+        return "\n".join(lines)
 
     @tool(internal=True)
     async def update_workflow_output(self, results: str, agent: AgentRef):
