@@ -16,9 +16,10 @@ from beaker_notebook.lib.workflow import (
 )
 
 
-def _make_workflow(title: str = "Build Pipeline", agent_instructions: str | None = None) -> Workflow:
+def _make_workflow(title: str = "Build Pipeline", id: str = None, agent_instructions: str | None = None) -> Workflow:
     return Workflow(
         title=title,
+        id=id,
         agent_description="agent desc",
         human_description="human desc",
         example_prompt="example",
@@ -67,15 +68,33 @@ async def test_attach_workflow_unknown_title():
     assert "Failed to find" in result
 
 
-async def test_attach_workflow_success_calls_context_attach():
+async def test_attach_workflow_success_calls_context_attach_no_id():
     wf = _make_workflow("Build Pipeline")
-    registry = WorkflowRegistry({"u1": wf})
-    agent_ref, _, ctx = _make_agent_ref(workflows={"u1": wf})
+    workflow_id = wf.id
+    registry = WorkflowRegistry({workflow_id: wf})
+    agent_ref, _, ctx = _make_agent_ref(workflows=registry)
 
-    result = await WorkflowRegistry.attach_workflow(registry, "Build Pipeline", agent=agent_ref)
+    result = await WorkflowRegistry.attach_workflow.run(args={"workflow_id": workflow_id, "agent": agent_ref}, tool_context={"agent": agent_ref}, self_ref=registry)
+
+    assert isinstance(workflow_id, str)
+    assert len(workflow_id) > 0
+    assert "Successfully" in result
+    assert workflow_id in result
+    ctx.attach_workflow.assert_called_once_with(wf)
+    ctx.send_response.assert_called_once()
+
+
+async def test_attach_workflow_success_calls_context_attach_with_id():
+    workflow_id = "build_pipeline_id"
+    wf = _make_workflow("Build Pipeline", id=workflow_id)
+    registry = WorkflowRegistry({workflow_id: wf})
+    agent_ref, _, ctx = _make_agent_ref(workflows=registry)
+
+    result = await WorkflowRegistry.attach_workflow.run(args={"workflow_id": workflow_id, "agent": agent_ref}, tool_context={"agent": agent_ref}, self_ref=registry)
 
     assert "Successfully" in result
-    ctx.attach_workflow.assert_called_once_with("u1")
+    assert workflow_id in result
+    ctx.attach_workflow.assert_called_once_with(wf)
     ctx.send_response.assert_called_once()
 
 
