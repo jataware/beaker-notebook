@@ -151,9 +151,9 @@ class BaseBeakerApp(ServerApp):
         super().__init__(**kwargs)
         self.handlers = []
 
-    def init_configurables(self):
+    def init_configurables(self, **kwargs):
         # Initialize configurables first to ensure config is loaded before other initializations
-        super().init_configurables()
+        super().init_configurables(**kwargs)
 
         self.notebook_manager = self.notebook_manager_class(
             parent=self,
@@ -161,11 +161,11 @@ class BaseBeakerApp(ServerApp):
         from beaker_notebook.services.context.manager import BeakerContextManager
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
-    def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None):
+    def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None, **kwargs):
         url_prefix = os.environ.get("BEAKER_SERVER_PREFIX", "").rstrip("/")
         self.base_url = url_prefix
 
-        super().initialize(argv, find_extensions, new_httpserver, starter_extension)
+        super().initialize(argv, find_extensions, new_httpserver, starter_extension, **kwargs)
 
         self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")
         if config.jupyter_token:
@@ -265,9 +265,9 @@ class BaseBeakerApp(ServerApp):
     def _default_root_dir(self):
         return self.working_dir or super()._default_root_dir()
 
-    def stop(self, from_signal = False):
+    def stop(self, from_signal = False, **kwargs):
         print("Shutting down Beaker server...")
-        return super().stop(from_signal)
+        return super().stop(from_signal, **kwargs)
 
     @property
     def beaker_config(self):
@@ -285,9 +285,9 @@ class BaseBeakerApp(ServerApp):
     def display_url(self):
         return f"    {self.public_url}"
 
-    def _get_urlparts(self, path: str | None = None, include_token: bool = False) -> urllib.parse.ParseResult:
+    def _get_urlparts(self, path: str | None = None, include_token: bool = False, **kwargs) -> urllib.parse.ParseResult:
         # Always return urls without tokens
-        return super()._get_urlparts(path, False)
+        return super()._get_urlparts(path, False, **kwargs)
 
     def generate_config_file(self, classes: ClassesType | None = None) -> str:
         """Generate default config file from Configurables"""
