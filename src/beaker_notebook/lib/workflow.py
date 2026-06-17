@@ -19,20 +19,28 @@ is ACTIVE at a time.
 For each stage, in order:
 1. Perform every step in sequence. Never substitute assumed or example data
    for missing data — stop and ask the user.
-2. Call `update_workflow_output` with the cumulative results so far, formatted
-   per the active workflow's `<workflow-result-formatting-instructions>`.
-3. Call `ask_user` (format: `workflow-confirmation`) to confirm before continuing.
-4. Resolve the response:
+2. Call `ask_user` (format: `workflow-confirmation`) to confirm before continuing.
+3. Resolve the response:
    - "continue" or `ask_user` times out: call `update_workflow_stage` with
-     state="finished" and the stage's results in markdown. If the user
-     confirmed, call `update_workflow_stage` for the next stage with
+     state="finished" and the stage's results in markdown. Emit each stage's
+     results exactly once, here — do not re-emit earlier stages' results. If the
+     user confirmed, call `update_workflow_stage` for the next stage with
      state="in_progress" and begin its steps. If `ask_user` timed out, stop
      and wait for the user to message to resume.
    - "cancel": stop. The workflow may be resumed later.
    - anything else: treat as a normal user request; it takes precedence over
      advancing the workflow. If handling it changes a stage's results, redo
-     the affected work and call `update_workflow_stage` and
-     `update_workflow_output` again with the new values.
+     the affected work and call `update_workflow_stage` again with the new
+     values. Only call `update_workflow_output` again if the workflow has
+     already completed — otherwise the final assembly step below picks up the
+     corrected results.
+
+When every stage is finished, assemble the final output once: call
+`update_workflow_output` with the complete report for all stages, formatted per
+the active workflow's `<workflow-result-formatting-instructions>`. Do this a
+single time, at the end. The per-stage results you already emitted via
+`update_workflow_stage` are retained and shown to the user as the workflow runs,
+so there is no need to re-emit cumulative output between stages.
 
 ## Selecting a workflow
 
@@ -394,7 +402,8 @@ class WorkflowRegistry(Mapping[str, Workflow]):
             if next_key is None:
                 lines.append(
                     "The workflow is now complete. Call `update_workflow_output` "
-                    "with the cumulative results for the entire workflow."
+                    "once with the complete report for all stages, formatted per the "
+                    "workflow's `<workflow-result-formatting-instructions>`."
                 )
             else:
                 next_position = f"Stage {index + 2} of {total}"
@@ -419,8 +428,11 @@ class WorkflowRegistry(Mapping[str, Workflow]):
         """
         Updates the overall output of the workflow.
 
-        This tool must be called whenever a workflow stage completes, or whenever
-        redoing a task would impact the "final output" of a workflow.
+        Call this tool once, after the final stage of the workflow finishes, to
+        assemble the complete report. Call it again only if a change made after the
+        workflow has already completed alters the final output. Do not call it
+        between stages — per-stage results are emitted via `update_workflow_stage`
+        and shown to the user as the workflow runs.
 
         The final output of the workflow must be formatted according to the
         `<workflow-result-formatting-instructions></workflow-result-formatting-instructions>`
