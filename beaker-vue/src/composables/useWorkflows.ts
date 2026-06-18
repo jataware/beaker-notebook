@@ -32,7 +32,6 @@ interface UseWorkflowsReturn {
     attachedWorkflowId: ComputedRef<string | undefined>;
     attachedWorkflow: ComputedRef<BeakerWorkflow | undefined>;
     attachedWorkflowProgress: ComputedRef<{[key: string]: {
-        code_cell_id: string,
         state: 'in_progress' | 'finished',
         results_markdown: string
     }} | undefined>;

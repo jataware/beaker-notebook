@@ -181,13 +181,16 @@ const searchResults = computed<{[key in string]: any}>(() => {
     if (!workflows.value) return {};
     return Object.fromEntries(
         Object.entries(workflows.value).filter(([_, workflow]) =>
-            searchText.value === ""
+            // Hidden workflows are never offered in the picker; they remain
+            // attachable by id (e.g. a context default) and render fine if attached.
+            !workflow.hidden
+            && (searchText.value === ""
             || searchText.value === undefined
             || [
                 workflow.human_description,
                 workflow.title,
                 workflow.category
-            ].join(' ').toLocaleLowerCase().includes(searchText.value.toLocaleLowerCase()))
+            ].join(' ').toLocaleLowerCase().includes(searchText.value.toLocaleLowerCase())))
     );
 });
 

@@ -1,7 +1,7 @@
 from archytas.tool_utils import tool, statetool, AgentRef
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterator, Literal, Optional, Any, TypedDict
+from dataclasses import dataclass, field, asdict
+from typing import TYPE_CHECKING, Iterator, Literal, Optional, Any
 
 from beaker_notebook.lib.utils import slugify
 
@@ -105,6 +105,12 @@ class Workflow:
     example_prompt: str
     stages: list[WorkflowStage]
 
+    # When true, the workflow is not surfaced proactively: it is excluded from
+    # both the agent's workflow synopsis (see create_available_workflows_prompt
+    # below) and the UI picker (filtered in beaker-vue's WorkflowSelectDialog.vue,
+    # since the full set is still shipped to the client as a by-id lookup table).
+    # It remains attachable by explicit id -- e.g. as a context default
+    # (is_context_default) or via a programmatic attach.
     hidden: Optional[bool] = field(default=False)
     is_context_default: Optional[bool] = field(default=False)
     category: Optional[str] = field(default=None)
@@ -117,6 +123,28 @@ class Workflow:
         self.title = self.title.strip()
         if not self.id:
             self.id = slugify(self.title)
+
+        # Normalize hidden to a real bool: from_yaml passes None when the key is
+        # absent, and downstream filters test it directly.
+        self.hidden = bool(self.hidden)
+
+        # Reject duplicate stage names. Progress is keyed by stage name and
+        # `update_workflow_stage` matches the agent's input via
+        # slugify(..., collapse=True); names that are equal -- or merely
+        # slug-equal (differ only in case/punctuation/whitespace) -- would
+        # collapse into a single progress slot. Detect collisions on the slug so
+        # those variants are caught too, and fail load with a clear message
+        # (discovery turns this into a per-file skip).
+        seen: dict[str, str] = {}
+        for stage in self.stages:
+            key = slugify(stage.name, collapse=True)
+            if key in seen:
+                raise ValueError(
+                    f"Workflow {self.title!r} has a duplicate stage name "
+                    f"{stage.name!r} (collides with {seen[key]!r}); stage names "
+                    "must be unique."
+                )
+            seen[key] = stage.name
 
     @staticmethod
     def from_yaml(source: dict[str, Any]) -> "Workflow":
@@ -178,19 +206,20 @@ class Workflow:
         return "\n".join(prompt_parts)
 
 
-class WorkflowStageProgress(TypedDict):
+@dataclass(kw_only=True)
+class WorkflowStageProgress:
     state: Literal['in_progress', 'finished']
-    code_cell_id: str
     results_markdown: str
 
 
-class WorkflowState(TypedDict):
+@dataclass(kw_only=True)
+class WorkflowState:
     workflow_id: str
     progress: dict[str, WorkflowStageProgress | None]
     final_response: str
 
     @classmethod
-    def from_workflow(cls, workflow: Workflow) -> "WorkflowState": # type: ignore
+    def from_workflow(cls, workflow: Workflow) -> "WorkflowState":
         return cls(
             workflow_id=workflow.id,
             progress={
@@ -207,6 +236,9 @@ def create_available_workflows_prompt(
     """
     Create a fully rendered prompt for the context based on a list of workflows and which,
     if any, of them is active.
+
+    Hidden workflows are omitted from the synopsis so the agent does not surface
+    them proactively; they remain attachable by explicit id.
     """
     workflow_synopsis = "\n\n".join([
         f"""<workflow>
@@ -215,6 +247,7 @@ def create_available_workflows_prompt(
     <description>{workflow.agent_description}</description>
 </workflow>"""
         for workflow in workflows
+        if not workflow.hidden
     ])
 
     return WORKFLOW_PREAMBLE_PROMPT.format(
@@ -291,7 +324,7 @@ class WorkflowRegistry(Mapping[str, Workflow]):
                 return f"Failed to find workflow with id `{workflow_id}`. Existing workflows: `{(list(self.keys()))!r}`: invalid tool input."
 
         agent.context.attach_workflow(workflow)
-        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        agent.context.send_workflow_state()
         return f'Successfully set the attached workflow to "{workflow.title}" ({workflow.id}).'
 
     @tool(internal=True)
@@ -326,7 +359,7 @@ class WorkflowRegistry(Mapping[str, Workflow]):
             return "State must be one of `in_progress` or `finished`."
 
         # Resolve the agent's input to the canonical stored stage key via slugify on both sides.
-        progress = agent.context.current_workflow_state["progress"]
+        progress = agent.context.current_workflow_state.progress
         resolved_key = None
         desired = slugify(stage_name, collapse=True)
         for key in progress:
@@ -359,12 +392,11 @@ class WorkflowRegistry(Mapping[str, Workflow]):
                     skipped_stages.append(key)
 
         progress[resolved_key] = WorkflowStageProgress(
-            code_cell_id='',
             state=state,
             results_markdown=results,
         )
 
-        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        agent.context.send_workflow_state()
 
         return self._build_stage_response(agent, resolved_key, state, skipped_stages)
 
@@ -380,7 +412,7 @@ class WorkflowRegistry(Mapping[str, Workflow]):
         Re-grounds the agent at every transition: its position (`N of M`), and,
         when finishing a non-final stage, the next stage's name and steps.
         """
-        progress_keys = list(agent.context.current_workflow_state["progress"].keys())
+        progress_keys = list(agent.context.current_workflow_state.progress.keys())
         total = len(progress_keys)
         index = progress_keys.index(resolved_key)  # zero-based
         position = f"Stage {index + 1} of {total}"
@@ -447,8 +479,8 @@ class WorkflowRegistry(Mapping[str, Workflow]):
         Returns:
             str: Information about the operation.
         """
-        agent.context.current_workflow_state["final_response"] = results
-        agent.context.send_response("iopub", "update_workflow_state", agent.context.current_workflow_state)
+        agent.context.current_workflow_state.final_response = results
+        agent.context.send_workflow_state()
         return "Successfully set workflow output."
 
 

@@ -580,7 +580,7 @@ class BeakerContext:
             agent_details = None
 
         workflow_info = {
-            "state": self.current_workflow_state,
+            "state": asdict(self.current_workflow_state) if self.current_workflow_state is not None else None,
             "workflows": {
                 uuid: asdict(workflow)
                 for uuid, workflow in self.workflows.items()
@@ -844,14 +844,20 @@ class BeakerContext:
 
     @property
     def attached_workflow(self) -> Workflow | None:
-        return self.workflows.get(self.current_workflow_state["workflow_id"], None) if self.current_workflow_state else None
+        return self.workflows.get(self.current_workflow_state.workflow_id, None) if self.current_workflow_state else None
 
     def attach_workflow(self, workflow: Workflow | None):
         if workflow is None:
             self.current_workflow_state = None
         else:
             self.current_workflow_state = WorkflowState.from_workflow(workflow)
-        self.send_response("iopub", "update_workflow_state", self.current_workflow_state)
+        self.send_workflow_state()
+
+    def send_workflow_state(self):
+        state = self.current_workflow_state
+        if dataclasses.is_dataclass(state):
+            state = dataclasses.asdict(state)
+        self.send_response("iopub", "update_workflow_state", state)
 
     @action()
     async def set_workflow(self, message):
