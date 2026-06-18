@@ -72,3 +72,7 @@ shell.nix
 beaker_config.py
 beaker_*_config.py
 src/beaker_notebook/**/ui/*
+
+.worktreeinclude
+**/worktrees
+**/.worktrees
