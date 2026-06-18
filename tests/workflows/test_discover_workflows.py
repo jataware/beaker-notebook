@@ -6,6 +6,7 @@ auto-attach of a default workflow.
 """
 
 import logging
+from dataclasses import asdict
 from unittest.mock import MagicMock
 
 from beaker_notebook.lib.context import BeakerContext
@@ -160,13 +161,13 @@ def test_default_workflow_attached_during_init(tmp_path):
     ctx = ctx_cls(beaker_kernel=kernel)
 
     assert ctx.current_workflow_state is not None
-    assert ctx.current_workflow_state["workflow_id"] == slugify("Build Pipeline")
+    assert ctx.current_workflow_state.workflow_id == slugify("Build Pipeline")
     # The attach went through send_response on the (already-wired) kernel.
     # send_response forwards extra positional args (channel, parent_header, ...),
     # so match only the leading (stream, msg_type, content) triple.
     assert any(
         call.args[:3]
-        == ("iopub", "update_workflow_state", ctx.current_workflow_state)
+        == ("iopub", "update_workflow_state", asdict(ctx.current_workflow_state))
         for call in kernel.send_response.call_args_list
     )
 

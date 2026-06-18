@@ -1,5 +1,7 @@
 """Tests for tools on WorkflowRegistry (lib/workflow.py)."""
 
+import json
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -10,13 +12,35 @@ from beaker_notebook.lib.workflow import (
     WorkflowRegistry,
     WorkflowStage,
     WorkflowStep,
+    WorkflowState,
     WorkflowStageProgress,
     create_available_workflows_prompt,
     workflow_condition,
 )
 
 
-def _make_workflow(title: str = "Build Pipeline", id: str = None, agent_instructions: str | None = None) -> Workflow:
+def _make_context(workflows, state, attached, *kwargs) -> SimpleNamespace:
+    from beaker_notebook.lib.context import BeakerContext
+
+    ns = SimpleNamespace(
+        workflows=workflows,
+        current_workflow_state=state,
+        attached_workflow=attached,
+        attach_workflow=MagicMock(),
+        send_response=MagicMock(),
+        send_workflow_state=None,
+    )
+    ns.send_workflow_state = partial(BeakerContext.send_workflow_state, ns)
+
+    return ns
+
+
+def _make_workflow(
+    title: str = "Build Pipeline",
+    id: str = None,
+    agent_instructions: str | None = None,
+    hidden: bool = False,
+) -> Workflow:
     return Workflow(
         title=title,
         id=id,
@@ -31,6 +55,7 @@ def _make_workflow(title: str = "Build Pipeline", id: str = None, agent_instruct
             )
         ],
         agent_instructions=agent_instructions,
+        hidden=hidden,
     )
 
 
@@ -41,18 +66,12 @@ def _make_agent_ref(
 ):
     if progress is None:
         progress = {"stage_one": None}
-    state = {
-        "workflow_id": "wf-uuid",
-        "progress": progress,
-        "final_response": "",
-    }
-    context = SimpleNamespace(
-        workflows=workflows,
-        current_workflow_state=state,
-        attached_workflow=attached,
-        attach_workflow=MagicMock(),
-        send_response=MagicMock(),
+    state = WorkflowState(
+        workflow_id="wf-uuid",
+        progress=progress,
+        final_response="",
     )
+    context = _make_context(workflows, state, attached)
     return SimpleNamespace(context=context), state, context
 
 
@@ -168,9 +187,9 @@ async def test_update_workflow_stage_writes_progress():
     result = await WorkflowRegistry.update_workflow_stage(
         registry, stage_name="stage_one", state="finished", results="done", agent=agent_ref,
     )
-    progress = state["progress"]["stage_one"]
-    assert progress["state"] == "finished"
-    assert progress["results_markdown"] == "done"
+    progress = state.progress["stage_one"]
+    assert progress.state == "finished"
+    assert progress.results_markdown == "done"
     ctx.send_response.assert_called_once()
     # single-stage workflow finished -> completion message
     assert "Stage 1 of 1" in result
@@ -208,7 +227,7 @@ async def test_update_workflow_stage_slug_match_resolves_variant():
     )
     assert "Stage name not found" not in result
     # canonical key was the one mutated
-    assert state["progress"]["Collect METAR data"]["state"] == "finished"
+    assert state.progress["Collect METAR data"].state == "finished"
 
 
 async def test_update_workflow_stage_slug_match_resolves_extra_spaces():
@@ -225,7 +244,7 @@ async def test_update_workflow_stage_slug_match_resolves_extra_spaces():
     )
     assert "Stage name not found" not in result
     # canonical key was the one mutated
-    assert state["progress"]["Collect METAR data"]["state"] == "finished"
+    assert state.progress["Collect METAR data"].state == "finished"
 
 
 
@@ -244,7 +263,7 @@ async def test_update_workflow_stage_finished_blank_results_rejected():
         agent=agent_ref,
     )
     assert "not modified" in result
-    assert state["progress"]["Collect METAR data"] is None
+    assert state.progress["Collect METAR data"] is None
     ctx.send_response.assert_not_called()
 
 
@@ -260,7 +279,7 @@ async def test_update_workflow_stage_in_progress_nonblank_results_rejected():
         agent=agent_ref,
     )
     assert "not modified" in result
-    assert state["progress"]["Collect METAR data"] is None
+    assert state.progress["Collect METAR data"] is None
     ctx.send_response.assert_not_called()
 
 
@@ -276,7 +295,7 @@ async def test_update_workflow_stage_out_of_order_finish_warns_but_records():
         results="conditions ok",
         agent=agent_ref,
     )
-    assert state["progress"]["Assess flight conditions"]["state"] == "finished"
+    assert state.progress["Assess flight conditions"].state == "finished"
     assert "Warning" in result
     assert "Collect METAR data" in result
 
@@ -374,7 +393,7 @@ async def test_update_workflow_output_sets_final_response():
         registry, results="# Final report", agent=agent_ref,
     )
     assert "Successfully" in result
-    assert state["final_response"] == "# Final report"
+    assert state.final_response == "# Final report"
     ctx.send_response.assert_called_once()
 
 
@@ -501,3 +520,108 @@ def test_agent_instructions_only_appear_after_selection():
     agent_ref, _, _ = _make_agent_ref(workflows={"u1": wf}, attached=wf)
     attached_state = WorkflowRegistry.attached_workflow_state(registry, agent=agent_ref)
     assert AGENT_INSTRUCTIONS in attached_state
+
+
+# --- #196: WorkflowState must survive the wire as a dataclass --------------
+#
+# WorkflowState / WorkflowStageProgress moved from TypedDict to dataclass. The
+# emit sites hand the state to send_response, whose real serialization is a bare
+# json.dumps with no dataclass fallback. These tests use a send_response that
+# reproduces that serialization, so they FAIL (TypeError) until the state is
+# converted to a plain dict (e.g. asdict / to_dict) at each emit site, and they
+# also pin the wire shape — including the removal of the dead `code_cell_id`.
+
+
+async def test_update_workflow_stage_emits_wire_serializable_state():
+    wf = _make_workflow()
+    registry = WorkflowRegistry()
+    agent_ref, state, context = _make_agent_ref(
+        workflows={"u1": wf}, attached=wf,
+    )
+    await WorkflowRegistry.update_workflow_stage(
+        registry, stage_name="stage_one", state="finished", results="done", agent=agent_ref,
+    )
+    assert context.send_response.call_count == 1
+    _, msg_type, payload = context.send_response.call_args.args
+    assert msg_type == "update_workflow_state"
+    assert payload["workflow_id"] == "wf-uuid"
+    assert payload["final_response"] == ""
+    stage = payload["progress"]["stage_one"]
+    assert stage["state"] == "finished"
+    assert stage["results_markdown"] == "done"
+    # Dead field removed (#196 item 1): it must not reappear on the wire.
+    assert "code_cell_id" not in stage
+
+
+async def test_update_workflow_output_emits_wire_serializable_state():
+    registry = WorkflowRegistry()
+    agent_ref, state, context = _make_agent_ref(workflows={})
+    await WorkflowRegistry.update_workflow_output(
+        registry, results="# Final report", agent=agent_ref,
+    )
+    assert context.send_response.call_count == 1
+    _, msg_type, payload = context.send_response.call_args.args
+    assert msg_type == "update_workflow_state"
+    assert payload["final_response"] == "# Final report"
+
+
+async def test_attach_workflow_emits_wire_serializable_state():
+    wf = _make_workflow("Build Pipeline")
+    workflow_id = wf.id
+    registry = WorkflowRegistry({workflow_id: wf})
+    agent_ref, state, context = _make_agent_ref(workflows=registry)
+
+    await WorkflowRegistry.attach_workflow.run(
+        args={"workflow_id": workflow_id, "agent": agent_ref},
+        tool_context={"agent": agent_ref},
+        self_ref=registry,
+    )
+    assert context.send_response.call_count == 1
+    _, msg_type, payload = context.send_response.call_args.args
+    assert msg_type == "update_workflow_state"
+    assert payload["workflow_id"] == "wf-uuid"
+    assert "progress" in payload
+    assert "final_response" in payload
+
+
+# --- #196 item 2: hidden workflows are not surfaced to the agent -----------
+#
+# `hidden: true` means "not surfaced proactively." For the agent that means the
+# workflow is omitted from the synopsis (create_available_workflows_prompt /
+# system_preamble); it stays attachable by id. (The UI half of this -- the
+# picker -- is enforced in WorkflowSelectDialog.vue.)
+
+
+def test_hidden_workflow_excluded_from_synopsis():
+    visible = _make_workflow("Visible Flow")
+    hidden = _make_workflow("Hidden Flow", hidden=True)
+    prompt = create_available_workflows_prompt([visible, hidden])
+    assert "Visible Flow" in prompt
+    assert visible.id in prompt
+    assert "Hidden Flow" not in prompt
+    assert hidden.id not in prompt
+
+
+async def test_hidden_workflow_excluded_from_system_preamble():
+    visible = _make_workflow("Visible Flow")
+    hidden = _make_workflow("Hidden Flow", hidden=True)
+    registry = WorkflowRegistry({visible.id: visible, hidden.id: hidden})
+    preamble = await registry.system_preamble()
+    assert preamble is not None
+    assert "Visible Flow" in preamble
+    assert "Hidden Flow" not in preamble
+
+
+async def test_hidden_workflow_still_attachable_by_id():
+    """Hidden only suppresses proactive surfacing; explicit attach still works."""
+    hidden = _make_workflow("Hidden Flow", hidden=True)
+    registry = WorkflowRegistry({hidden.id: hidden})
+    agent_ref, _, ctx = _make_agent_ref(workflows=registry)
+
+    result = await WorkflowRegistry.attach_workflow.run(
+        args={"workflow_id": hidden.id, "agent": agent_ref},
+        tool_context={"agent": agent_ref},
+        self_ref=registry,
+    )
+    assert "Successfully" in result
+    ctx.attach_workflow.assert_called_once_with(hidden)
