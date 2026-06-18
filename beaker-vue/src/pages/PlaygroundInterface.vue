@@ -109,7 +109,7 @@
                         <div class="demo-grid">
                             <div class="demo-item">
                                 <h3>Pending</h3>
-                                <NextBeakerQueryCell 
+                                <BeakerQueryCell
                                     :index="0" 
                                     :cell="pendingCell" 
                                 />
@@ -117,7 +117,7 @@
                             
                             <div class="demo-item">
                                 <h3>In Progress</h3>
-                                <NextBeakerQueryCell 
+                                <BeakerQueryCell
                                     :index="1" 
                                     :cell="inProgressCell" 
                                 />
@@ -125,7 +125,7 @@
                             
                             <div class="demo-item">
                                 <h3>Success</h3>
-                                <NextBeakerQueryCell 
+                                <BeakerQueryCell
                                     :index="2" 
                                     :cell="successCell" 
                                 />
@@ -133,7 +133,7 @@
                             
                             <div class="demo-item">
                                 <h3>Aborted</h3>
-                                <NextBeakerQueryCell 
+                                <BeakerQueryCell
                                     :index="3" 
                                     :cell="abortedCell" 
                                 />
@@ -141,7 +141,7 @@
                             
                             <div class="demo-item">
                                 <h3>Failed</h3>
-                                <NextBeakerQueryCell 
+                                <BeakerQueryCell
                                     :index="4" 
                                     :cell="failedCell" 
                                 />
@@ -262,7 +262,7 @@
 import { computed, inject, ref } from 'vue';
 import Card from 'primevue/card';
 import Button from 'primevue/button';
-import NextBeakerQueryCell from '../components/cell/NextBeakerQueryCell.vue';
+import BeakerQueryCell from '../components/cell/BeakerQueryCell.vue';
 import type { IBeakerTheme } from '../plugins/theme';
 
 const beakerApp = inject<any>("beakerAppConfig");

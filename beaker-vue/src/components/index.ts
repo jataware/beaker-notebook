@@ -1,7 +1,6 @@
 export * as agent from './agent';
 export * as cell from './cell';
 export * as chatInterface from './chat-interface';
-export * as dev_interface from './dev-interface';
 export * as icons from './icons';
 export * as integrations from './integrations';
 export * as misc from './misc';

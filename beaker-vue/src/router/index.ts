@@ -26,13 +26,8 @@ export type Routes = { [key: Slug]: Route }
 export const defaultRouteMap: Routes = {
     "notebook": {
       "path": "/notebook",
-      "component": () => import('@/pages/NextNotebookInterface.vue'),
-      "role": "home",
-    },
-    "next-notebook": {
-      "path": "/legacy",
       "component": () => import('@/pages/NotebookInterface.vue'),
-      "role": "alt",
+      "role": "home",
     },
     "chat": {
       "path": "/chat",
@@ -42,10 +37,6 @@ export const defaultRouteMap: Routes = {
     "integrations": {
       "path": "/integrations",
       "component": () => import('@/pages/IntegrationsInterface.vue'),
-    },
-    "dev": {
-      "path": "/dev",
-      "component": () => import('@/pages/DevInterface.vue'),
     },
     "admin": {
       "path": "/admin",
