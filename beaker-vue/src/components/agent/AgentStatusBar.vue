@@ -55,7 +55,7 @@ const lastThoughtText = computed(() => {
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
     background-color: var(--p-surface-b);
-    border-bottom: 1px solid var(--p-surface-border);
+    border-top: 1px solid var(--p-surface-border);
     // Cap height so long activity text can never push content off-screen
     // (~3 lines of the thought + the label line).
     max-height: 5rem;
