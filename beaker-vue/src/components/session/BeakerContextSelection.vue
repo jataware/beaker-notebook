@@ -4,7 +4,7 @@
         <InputGroup>
             <Select
                 v-model="selectedContextSlug"
-                :options="contextInfo"
+                :options="contextStore.contextList"
                 option-label="full_name"
                 option-value="slug"
             />
@@ -21,9 +21,10 @@
 
         <div class="code-container">
             <CodeEditor
+                ref="payloadRef"
                 :tab-size="2"
                 language="javascript"
-                v-model="contextPayloadData[selectedContextSlug]"
+                v-model="currentPayload"
             />
         </div>
 
@@ -57,8 +58,7 @@
 
 <script setup lang="ts">
 
-import { ref, onMounted, computed, watch, inject } from "vue";
-import Dialog from 'primevue/dialog';
+import { ref, computed, watch, inject } from "vue";
 import Button from 'primevue/button';
 import Panel from 'primevue/panel';
 import InputGroup from 'primevue/inputgroup';
@@ -66,7 +66,7 @@ import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import type { BeakerSessionComponentType } from './BeakerSession.vue';
 import CodeEditor from '../misc/CodeEditor.vue';
-import { contextService, type ISubkernelInfo, type IContextInfo } from '@/services/context';
+import { useContextStore, type ISubkernelInfo, type IContextInfo } from "@/stores/contexts";
 
 const props = defineProps([
     "isOpen",
@@ -74,10 +74,9 @@ const props = defineProps([
 
 const logDebug = ref(false);
 const logVerbose = ref(false);
+const payloadRef = ref();
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
-
-const contextInfo = contextService.contextList;
-const contextMap = contextService.contextMap;
+const contextStore = useContextStore();
 
 const emit = defineEmits([
     "update-context-info",
@@ -99,12 +98,11 @@ const activeSubkernelSlug = computed<string | undefined>(() => {
 });
 
 const activeContext = computed<IContextInfo | undefined>(() => {
-    // return contextInfo.value?.find((context) => (context.slug == activeContextSlug.value));
-    return contextMap.value[activeContextSlug.value];
+    return contextStore.contextMap[activeContextSlug.value];
 });
 
 const selectedContext = computed<IContextInfo | undefined>(() => {
-    return contextMap.value?.[selectedContextSlug.value]
+    return contextStore.contextMap[selectedContextSlug.value]
 })
 
 const activeSubkernel = computed<ISubkernelInfo | undefined>(() => {
@@ -119,6 +117,14 @@ const selectedContextSlug = ref<string>(activeContextSlug.value);
 const selectedSubkernelSlug = ref<string | undefined>(activeSubkernel.value?.slug);
 const contextPayloadData = ref<{[key: string]: string}>({});
 
+const currentPayload = computed<string>({
+    get() {
+        return contextPayloadData.value[selectedContextSlug.value] ?? "{}";
+    },
+    set(newValue) {
+        contextPayloadData.value[selectedContextSlug.value] = newValue;
+    },
+});
 
 // When selectedContextSlug dropdown changes, the selected
 // language might not be available in the new languageOptions/context
@@ -136,15 +142,6 @@ watch(selectedContextSlug, (newSelectedContextSlug: string) => {
     if (!isSelectedAvailable) {
         selectedSubkernelSlug.value = availableSubkernels.value?.[0].slug;
     }
-
-        // When changing from active context slug to a different one, set default payload
-        // if user has not modified it before (payload data is still empty)
-        const existingContextPayload = contextPayloadData.value[newSelectedContextSlug];
-
-        if (!existingContextPayload) {
-            console.log("Need to fetch default payload");
-        }
-    // }
 });
 
 const setContext = async () => {
@@ -156,7 +153,7 @@ const setContext = async () => {
     const contextMessageContent = {
       context: selectedContextSlug.value,
       subkernel: selectedSubkernelSlug.value,
-      context_info: JSON.parse(contextInfo || ''),
+      context_info: JSON.parse(contextInfo || '{}'),
       debug: isDebug,
       verbose: isVerbose,
     };
