@@ -66,6 +66,8 @@
 
                 <div class="agent-input-section">
 
+                    <AgentStatusBar :cell="activeQueryCell" />
+
                     <BeakerAgentQuery
                         ref="agentQueryRef"
                         class="agent-query-container"
@@ -188,6 +190,7 @@ import { computed, ref, watch, onBeforeMount, provide } from 'vue';
 import Button from "primevue/button";
 import BaseInterface from './BaseInterface.vue';
 import BeakerAgentQuery from '../components/agent/BeakerAgentQuery.vue';
+import AgentStatusBar from '../components/agent/AgentStatusBar.vue';
 import InfoPanel from '../components/panels/InfoPanel.vue';
 import FilePanel from '../components/panels/FilePanel.vue';
 import ConfigPanel from '../components/panels/ConfigPanel.vue';
@@ -331,6 +334,17 @@ const headerNav = computed(() => createHeaderNav('notebook'));
 const notebookKeyBindings = createNotebookKeyBindings();
 
 const iopubMessageHandler = createIopubMessageHandler();
+
+// The query cell the agent is currently working on, surfaced in the bottom
+// status bar above the chat input. Null when the agent is idle.
+const activeQueryCell = computed(() => {
+    const cells = beakerSession.value?.session?.notebook?.cells ?? [];
+    return cells.find(cell =>
+        cell.cell_type === 'query'
+        && cell.metadata?.query_status === 'in-progress'
+        && ['busy', 'awaiting_input'].includes(cell.status)
+    ) || null;
+});
 
 const hasActiveQueryCells = computed(() => {
     return false;
