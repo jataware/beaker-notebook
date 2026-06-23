@@ -20,6 +20,8 @@ class ContextApi(ServiceApi):
             return context_manager
 
         async def get(self, context_slug=None):
+            ksm = self.kernel_spec_manager
+            installed_kernel_specs = ksm.get_all_specs()
 
             if self.request.arguments.get("update", False):
                 self.log.info("Updating contexts per request")
@@ -32,5 +34,5 @@ class ContextApi(ServiceApi):
                     raise HTTPError(404, f"Context with slug '{context_slug}' not found.")
             else:
                 verbose = self.request.arguments.get("verbose", False)
-                result = self.context_manager.list_contexts(verbose=verbose)
+                result = self.context_manager.list_contexts(installed_kernels=installed_kernel_specs, verbose=verbose)
             self.write(result)

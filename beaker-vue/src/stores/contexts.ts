@@ -1,5 +1,5 @@
-import { ref, reactive, computed } from 'vue';
-import type { Ref } from 'vue';
+import { defineStore } from 'pinia';
+import { ref, computed } from 'vue';
 import type { Integration } from '@/util/integration';
 import type { BeakerWorkflow } from '@/composables/useWorkflows';
 import { fetch } from '@/util/fetch';
@@ -86,19 +86,18 @@ export interface IContextInfo {
 
 }
 
+export const useContextStore = defineStore('beaker-contexts', () => {
+    const _contextInfo = ref<IContextInfo[]>([]);
 
-class ContextService {
-    private _contextInfo: Ref<IContextInfo[]> = ref<IContextInfo[]>();
-
-    public get contextList() {
-        return this._contextInfo;
-    }
-
-    public contextMap = computed(() => {
-        return Object.fromEntries(this.contextList.value.map((context) => [context.slug, context]));
+    const contextList = computed(() => {
+        return _contextInfo.value;
     });
 
-    public async refresh(forceUpdate: boolean = false, verbose: boolean = false) {
+    const contextMap = computed(() => {
+        return Object.fromEntries(contextList.value.map((context) => [context.slug, context]));
+    });
+
+    const refresh = async (forceUpdate: boolean = false, verbose: boolean = false) => {
         const params = new URLSearchParams({
             ...(forceUpdate ? {update: "1"} : {}),
             ...(verbose ? {verbose: "1"} : {}),
@@ -106,13 +105,14 @@ class ContextService {
 
         const url = `/beaker/contexts${params.size ? "?" + params.toString() : ""}`;
         const contextInfoReq = await fetch(url, {});
-        this._contextInfo.value = await contextInfoReq.json();
+        _contextInfo.value = await contextInfoReq.json();
     }
 
-    constructor() {
-        this.refresh();
-    }
-}
+    refresh();
 
-
-export const contextService = new ContextService();
+    return {
+        contextList,
+        contextMap,
+        refresh
+    };
+});

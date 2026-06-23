@@ -10,6 +10,7 @@
                     <BeakerHeader
                         :connectionStatus="connectionStatus"
                         @select-kernel="toggleContextSelection"
+                        @context-changed="(contextData) => {beakerSession.setContext(contextData)}"
                         :title="props.title"
                         :title-extra="props.titleExtra"
                         :nav="props.headerNav"

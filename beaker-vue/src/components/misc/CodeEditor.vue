@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, inject } from "vue";
+import { ref, shallowRef, computed, inject, watch } from "vue";
 import { Codemirror } from "vue-codemirror";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec, type Extension } from "@codemirror/state";
@@ -53,6 +53,12 @@ const props = withDefaults(defineProps<CodeEditorProps>(), {
 });
 
 const model = ref<string>(props.modelValue);
+
+watch(() => props.modelValue, (newValue) => {
+    if (newValue !== model.value) {     // guard prevents an echo loop with modelUpdate
+        model.value = newValue;
+    }
+});
 
 const emit = defineEmits([
         'submit',

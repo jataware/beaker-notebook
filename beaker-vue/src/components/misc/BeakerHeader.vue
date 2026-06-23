@@ -4,27 +4,29 @@
             <SessionStatus
                 :connection-status="beakerSession.status"
             />
-            <Button
-                v-if="showContextSelection"
-                outlined
-                size="small"
-                icon="pi pi-angle-down"
-                iconPos="right"
-                class="connection-button"
-                @click="selectKernel"
-                :label="beakerSession.activeContext?.slug"
-                :loading="loading"
-                v-tooltip.bottom="$tmpl._('select_kernel_tooltip', 'Change or update the context')"
-            />
-            <Button
-                text
-                size="small"
-                v-else-if="loading"
-                :loading=loading
-                :disabled="true"
-
-                v-tooltip.bottom="'Connecting'"
-            />
+            <template v-if="showContextSelection">
+                <Button
+                    outlined
+                    size="small"
+                    icon="pi pi-angle-down"
+                    iconPos="right"
+                    class="connection-button"
+                    @click="selectKernel"
+                    :label="beakerSession.activeContext?.name"
+                    :loading="loading"
+                    v-tooltip.bottom="$tmpl._('select_kernel_tooltip', 'Change context')"
+                />
+                <TieredMenu ref="contextSelection" id="contextSelectionMenu" :model="contextDropdownInfo" popup/>
+            </template>
+            <template v-else-if="loading">
+                <Button
+                    text
+                    size="small"
+                    :loading=loading
+                    :disabled="true"
+                    v-tooltip.bottom="'Connecting'"
+                />
+            </template>
             <div v-if="showWorkflowDropdown">
                 <Button
                     outlined
@@ -95,15 +97,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { ref, computed, inject } from "vue";
 import { RouterLink } from "vue-router";
 import Toolbar from 'primevue/toolbar';
 import Button from 'primevue/button';
 import { type BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import { type IBeakerTheme } from '../../plugins/theme';
 import SessionStatus from "../session/SessionStatus.vue";
-import { useDialog } from "primevue";
-import { useWorkflows } from '../../composables/useWorkflows';
+import { TieredMenu, useDialog } from "primevue";
+import { type MenuItem } from "primevue/menuitem";
+import { useWorkflows } from '@/composables/useWorkflows';
+import { useContextStore } from "@/stores/contexts.js";
 
 export interface BeakerHeaderProps {
     title: string;
@@ -115,12 +119,16 @@ const props = withDefaults(defineProps<BeakerHeaderProps>(), {
     title: "Beaker",
 });
 
-const emit = defineEmits(["selectKernel"]);
+const emit = defineEmits([
+    "selectKernel",
+    "context-changed",
+]);
 
 const { theme, toggleDarkMode } = inject<IBeakerTheme>('theme');
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const beakerApp = inject<any>("beakerAppConfig");
 const siteConfig = inject<any>("siteConfig", {});
+const contextStore = useContextStore();
 
 const navItems = computed(() => {
     if (props.nav) {
@@ -152,8 +160,8 @@ const navItems = computed(() => {
     ];
 })
 
-function selectKernel() {
-    emit('selectKernel');
+function selectKernel(event) {
+    contextSelection.value.toggle(event);
 }
 
 const dialog = useDialog()
@@ -171,6 +179,72 @@ const showWorkflowDropdown = computed(() => {
     }
     return Object.keys(workflows.value).length > 0;
 })
+
+const contextSelection = ref();
+
+const changeContext = (ctx_slug, subkernel_slug) => {
+    return () => {
+        const contextMessageContent = {
+            context: ctx_slug,
+            subkernel: subkernel_slug,
+            context_info: "{}",
+            debug: false,
+            verbose: false,
+        };
+        emit("context-changed", contextMessageContent);
+    }
+}
+
+const contextDropdownInfo = computed(() => {
+    const contextOptions: MenuItem[] = [];
+
+    contextStore.contextList.forEach((ctx) => {
+        const hasSubkernel = Object.entries(ctx.subkernels).length > 0;
+        if (!hasSubkernel) {
+            console.warn(`Context '${ctx.slug}' does not have a valid subkernel defined. Skipping...`)
+            return;
+        }
+
+        const hasSubmenu = Object.entries(ctx.subkernels).length > 1;
+        const defaultSubkernel = Object.values(ctx.subkernels)[0];
+        const label = ctx.full_name;
+        const children = (hasSubmenu
+            ? Object.entries(ctx.subkernels).map(([slug, subkernel]) => {
+                return {
+                    label: subkernel.display_name,
+                    value: slug,
+                    description: subkernel.description,
+                    command: changeContext(ctx.slug, slug),
+                }
+            })
+            : undefined
+        );
+
+        const option = {
+            label,
+            description: ctx.description,
+            value: ctx.slug,
+            items: children,
+            command: (hasSubmenu ? undefined : changeContext(ctx.slug, defaultSubkernel.slug)),
+        };
+        contextOptions.push(option);
+    });
+    contextOptions.push(
+        {
+            label: "Advanced",
+            description: "Advanced setup",
+            value: "advanced",
+            icon: "pi pi-external-link",
+            class: "external-link",
+            command: () => {
+                emit("selectKernel");
+            }
+
+        }
+    );
+    return contextOptions;
+})
+
 
 const showContextSelection = computed(() => {
     // Hide if env flag is set
@@ -276,6 +350,11 @@ export interface NavOption {
 
 .beaker-toolbar .title h4 {
     white-space: nowrap;
+}
+
+li.external-link a.p-tieredmenu-item-link {
+    flex-direction: row-reverse;
+    justify-content: space-between;
 }
 
 </style>
