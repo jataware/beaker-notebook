@@ -47,7 +47,7 @@ ENV JULIA_DEPOT_PATH=":/usr/local/julia/depot"
 # R install
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    if [ "$R_ENABLED" == "true" ]; then \
+    if [ "${R_ENABLED}" = "true" ]; then \
         apt update -y && \
         apt install -y --no-install-recommends r-base-core r-cran-irkernel; \
     fi
