@@ -1,3 +1,4 @@
+import copy
 import inspect
 from dataclasses import is_dataclass, asdict
 from typing import TYPE_CHECKING, Any
@@ -78,8 +79,20 @@ class BeakerContextManager(LoggingConfigurable):
             self._contexts[slug] = record
             return record
 
-    def list_contexts(self, verbose: bool = False) -> list[ContextInfo]:
-        return [self._deserialize_context(record, verbose=verbose) for record in self._contexts.values()]
+    def list_contexts(self, installed_kernels: list|None = None, verbose: bool = False) -> list[ContextInfo]:
+        context_records = copy.deepcopy(list(self._contexts.values()))
+
+        # Filter out subkernels that are not installed
+        if installed_kernels:
+            available_kernel_languages = {kernel.get("spec", {}).get("language") for kernel in installed_kernels.values()}
+            for context in context_records:
+                updated_subkernels = {}
+                for subkernel_slug, subkernel_info in context.subkernels.items():
+                    if subkernel_info.kernel_name in installed_kernels or subkernel_info.language in available_kernel_languages:
+                        updated_subkernels[subkernel_slug] = subkernel_info
+                context.subkernels = updated_subkernels
+
+        return [self._deserialize_context(record, verbose=verbose) for record in context_records]
 
     def get_context(self, slug: str, verbose: bool = True) -> ContextInfo | None:
         record = self._contexts.get(slug)
