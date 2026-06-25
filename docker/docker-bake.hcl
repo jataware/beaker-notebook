@@ -11,6 +11,16 @@ variable "packages" {
   type = map(string)
 }
 
+variable "JULIA_ENABLED" {
+  default = true
+  type = bool
+}
+
+variable "R_ENABLED" {
+  default = true
+  type = bool
+}
+
 group "default" {
   targets = ["notebook", "server"]
 }
@@ -67,8 +77,8 @@ target "notebook" {
     packages = "target:package-collector",
   }
   args = {
-    JULIA_ENABLED = "true"
-    R_ENABLED = "true"
+    JULIA_ENABLED = JULIA_ENABLED
+    R_ENABLED = R_ENABLED
   }
   tags = [
     "beaker-notebook:${tag}"

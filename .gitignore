@@ -5,6 +5,7 @@
 **/.cache
 **/.ipython
 **/.notebooks/
+/tmp
 
 # Gradle
 .gradle/

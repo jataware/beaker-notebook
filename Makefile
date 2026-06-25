@@ -44,8 +44,8 @@ docs-down:
 	(cd docs && docker compose down)
 
 .PHONY:dev
-dev:src/beaker_notebook/app/ui/index.html docker-build
-	export BUILDX_BAKE_ENTITLEMENTS_FS=0; \
+dev:src/beaker_notebook/app/ui/index.html
+	export R_ENABLED=false JULIA_ENABLED=false BUILDX_BAKE_ENTITLEMENTS_FS=0; \
 	cd docker && docker buildx bake dev
 	VARIANT="dev" $(MAKE) docker-compose-up; \
 	(sleep 1; python -m webbrowser "http://localhost:8888/"); \
