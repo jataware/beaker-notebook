@@ -9,4 +9,5 @@ export * from './notebook';
 export * from './render';
 export * from './util';
 export * from './history';
+export * from './chatHistory';
 
