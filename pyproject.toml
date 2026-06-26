@@ -290,7 +290,6 @@ asyncio_default_fixture_loop_scope = "function"
 
 [project.entry-points."nbconvert.exporters"]
 streamline = "beaker_notebook.lib.exporters.streamline:StreamlineExporter"
-full_context_notebook = "beaker_notebook.lib.exporters.full_context_notebook:FullContextNotebookExporter"
 chat = "beaker_notebook.lib.exporters.chat:ChatExporter"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]

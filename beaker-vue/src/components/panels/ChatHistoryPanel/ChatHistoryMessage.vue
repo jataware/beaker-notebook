@@ -28,7 +28,7 @@
                         ></span>
                     </div>
                     <span class="chat-history-message-title-token-count" >
-                        {{ (record?.token_count/1000).toFixed(2) }}k tokens
+                        {{ ((record?.token_count ?? 0)/1000).toFixed(2) }}k tokens
                     </span>
                 </div>
             </template>

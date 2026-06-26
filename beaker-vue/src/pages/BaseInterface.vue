@@ -326,7 +326,7 @@ const saveSnapshot = async (ignoreSession: boolean = false) => {
     // Only save state if there is state to save
     if (session.notebook) {
         if (!ignoreSession) {
-            notebookData.content = session.notebook.toIPynb();
+            notebookData.content = session.toIPynb();
         }
 
         const notebookChecksum: string = hashSum(notebookData.content);

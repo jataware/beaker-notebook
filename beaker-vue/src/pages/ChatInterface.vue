@@ -355,8 +355,11 @@ const iopubMessage = (msg) => {
             body: msg.content.body,
             timestamp: msg.header.date,
         });
-    } else if (msg.header.msg_type === "chat_history") {
-        chatHistory.value = msg.content;
+    } else if (msg.header.msg_type === "set_chat_history" || msg.header.msg_type === "add_chat_record") {
+        // The ChatHistory instance on the session is the source of truth and is
+        // updated by its own iopub handler; snapshot it into the ref so the UI
+        // re-renders with a fresh object reference.
+        chatHistory.value = beakerSession.value?.session?.chatHistory?.snapshot();
     }
 };
 
