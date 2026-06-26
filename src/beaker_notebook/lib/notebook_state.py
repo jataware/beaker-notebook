@@ -144,7 +144,7 @@ def _execute_result_output(output: NotebookNode, ref: str, truncate: bool=True, 
     )
 
 def _error_output(output: NotebookNode, ref: str, truncate: bool=True, exclude_media: bool=False) -> str:
-    traceback = _maybe_truncate((output.traceback or ""), truncate)
+    traceback = _maybe_truncate("\n".join(output.traceback or []), truncate)
     return _block(
         "output",
         {"type": output.output_type, "ename": output.get("ename"), "evalue": output.get("evalue")},
