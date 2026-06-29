@@ -244,11 +244,6 @@ const handleExport = async (format: string, mimetype: string) => {
         });
     }
 
-    if (format === "full_context_notebook") {
-        const history = await session.executeAction("get_agent_history", {}).done;
-        tempNotebook.content.metadata.chat_history = history.content.return;
-    }
-
     const exportNotebook = tempNotebook.toIPynb();
 
     fetch(
@@ -389,7 +384,6 @@ const refreshExportTypes = async () => {
             script: "📜 Script (.py)",
             slides: "🖥️ Slides (.html)",
             streamline: "✨ Notebook (AI streamlined)",
-            full_context_notebook: "📓 Notebook (full agent context)",
         };
         const label = labelMap[format] ?? format;
         return {
@@ -452,7 +446,7 @@ function loadNotebook(notebookJSON: any, filename: string) {
 }
 
 async function saveNotebook() {
-    const notebookContent = session.notebook.toIPynb();
+    const notebookContent = session.toIPynb();
     const contentsService = session.services.contents;
     if (!saveAsFilename.value) {
         resetSaveAsFilename();
@@ -474,27 +468,9 @@ async function saveAs() {
 }
 
 function downloadNotebook() {
-    const processedNotebookData = processNotebookForExport(notebook.notebook);
-    const tempNotebook = new BeakerNotebook();
-    tempNotebook.fromJSON(processedNotebookData);
-
-    if (tempNotebook.content.cells && Array.isArray(tempNotebook.content.cells)) {
-        tempNotebook.content.cells = tempNotebook.content.cells.map((cell: any) => {
-            if (cell.cell_type === 'raw') {
-                return new BeakerRawCell(cell);
-            } else if (cell.cell_type === 'code') {
-                return new BeakerCodeCell(cell);
-            } else if (cell.cell_type === 'query') {
-                return new BeakerQueryCell(cell);
-            } else if (cell.cell_type === 'markdown') {
-                return new BeakerMarkdownCell(cell);
-            } else {
-                return new BeakerRawCell(cell);
-            }
-        });
-    }
-
-    const exportNotebook = tempNotebook.toIPynb();
+    // Serialize the full session document (cells + chat history) the same way
+    // the local-save path does, so a downloaded .ipynb matches a saved one.
+    const exportNotebook = session.toIPynb();
 
     const data = new Blob([JSON.stringify(exportNotebook, null, 2)]);
 

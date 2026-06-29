@@ -101,8 +101,8 @@
         </div>
         <div class="chat-history-records">
             <ChatHistoryMessage
-                v-for="record, index in props.chatHistory?.records"
-                :key="record.uuid"
+                v-for="record, index in displayRecords"
+                :key="record.uuid || `preamble-${index}`"
                 :record="record"
                 :idx="index"
                 :tool-call-message="getToolCallForRecord(record)"
@@ -117,58 +117,22 @@ import { ref, computed, inject, watch } from "vue";
 import ChatHistoryMessage from "./ChatHistoryMessage.vue";
 import Button from "primevue/button";
 import type { BeakerSessionComponentType } from "../../session/BeakerSession.vue";
-
-
-export interface IMessage {
-    content: string | (string | {[key: string]: any})[];
-    responseMetadata: {[key: string]: any};
-    type: string;
-    name?: string;
-    id?: string;
-    additionalKwargs?: {[key: string]: any};
-    tool_calls?: any[];
-    tool_call_id?: string;
-}
-
-interface IRecordBase {
-    message: IMessage;
-    uuid: string;
-    token_count?: number;
-    metadata?: {[key: string]: any};
-}
-
-export interface IMessageRecord extends IRecordBase{
-    reactLoopId?: number;
-
-}
-export interface ISummaryRecord extends IRecordBase {
-    summarizedMessages: string[];
-}
-
-export type RecordType = IMessageRecord | ISummaryRecord;
-
-export interface IChatHistory {
-    records: RecordType[];
-    systemMessage?: string;
-    toolTokenUsageEstimate?: number;
-    token_estimate?: number;
-    message_token_count?: number;
-    summary_token_count?: number;
-    model: {
-        provider: string;
-        model_name: string;
-        context_window?: number;
-
-    };
-    overhead_token_count?: number;
-    summarization_threshold?: number;
-}
+import type { IChatHistory, RecordType } from "@jataware/beaker-client";
 
 export interface ChatHistoryProps {
     chatHistory: IChatHistory;
 }
 
 const props = defineProps<ChatHistoryProps>()
+
+// The system message and preambles are stored separately from the conversation
+// records but are prepended to the rendered list in prompt-assembly order.
+const displayRecords = computed<RecordType[]>(() => [
+    props.chatHistory?.systemMessageRecord,
+    props.chatHistory?.systemPreambleRecord,
+    props.chatHistory?.userPreambleRecord,
+    ...(props.chatHistory?.records ?? []),
+].filter(Boolean) as RecordType[]);
 
 const showPreambleInput = ref<boolean>(false);
 const preambleText = ref('');
@@ -223,24 +187,36 @@ const contextWindowUsage = computed(() => {
 })
 
 const contextWindowSize = computed(() => props.chatHistory?.model?.context_window);
-const overheadUsagePct = computed(() => Math.round((props.chatHistory?.overhead_token_count / contextWindowSize.value) * 1000) / 10);
-const messageUsagePct = computed(() => Math.round((props.chatHistory?.message_token_count / contextWindowSize.value) * 1000) / 10);
-const summaryUsagePct = computed(() => Math.round((props.chatHistory?.summary_token_count / contextWindowSize.value) * 1000) / 10);
+
+// Token counts are computed lazily and may be absent (e.g. before the first
+// estimate on a fresh session); treat a missing value/window as 0% rather than
+// rendering NaN.
+const toPct = (value?: number): number => {
+    const contextWindow = contextWindowSize.value;
+    if (!contextWindow || value === undefined || value === null) {
+        return 0;
+    }
+    return Math.round((value / contextWindow) * 1000) / 10;
+};
+
+const overheadUsagePct = computed(() => toPct(props.chatHistory?.overhead_token_count));
+const messageUsagePct = computed(() => toPct(props.chatHistory?.message_token_count));
+const summaryUsagePct = computed(() => toPct(props.chatHistory?.summary_token_count));
 const summarizationThresholdLowPct = computed({
-    get() { return Math.round((props.chatHistory?.summarization_threshold / contextWindowSize.value) * 1000) / 10},
+    get() { return toPct(props.chatHistory?.summarization_threshold); },
     set(value) {console.log(value)},
 });
 const totalTokenCount = computed<number>(() => (
-        props.chatHistory?.overhead_token_count
-        + props.chatHistory?.message_token_count
-        + props.chatHistory?.summary_token_count
+        (props.chatHistory?.overhead_token_count ?? 0)
+        + (props.chatHistory?.message_token_count ?? 0)
+        + (props.chatHistory?.summary_token_count ?? 0)
 ));
 
 const usageLabel = computed<string>(() => {
     const rawSum = totalTokenCount.value;
     const roundedSum = displayNumber(roundToFiveHundred(rawSum));
     const contextWindowSizeK = displayNumber(roundToFiveHundred(contextWindowSize.value));
-    return `${ contextWindowUsage.value?.toLocaleString() }% (~ ${roundedSum} / ${contextWindowSizeK})`;
+    return `${ (contextWindowUsage.value ?? 0).toLocaleString() }% (~ ${roundedSum} / ${contextWindowSizeK})`;
 })
 
 const getToolCallerMessage = (toolCallId: string) => {
@@ -255,11 +231,17 @@ const getToolCallForRecord = (record: RecordType) => {
     }
 }
 
-const roundToFiveHundred = (rawValue: number): number => {
+const roundToFiveHundred = (rawValue?: number): number => {
+    if (rawValue === undefined || rawValue === null || Number.isNaN(rawValue)) {
+        return 0;
+    }
     return Math.round(rawValue / 500) * 0.5
 }
 
-const displayNumber = (rawValue: number): string => {
+const displayNumber = (rawValue?: number): string => {
+    if (rawValue === undefined || rawValue === null || Number.isNaN(rawValue)) {
+        rawValue = 0;
+    }
     let label = 'k';
     let value: string = rawValue.toLocaleString();
     if (rawValue >= 1000) {

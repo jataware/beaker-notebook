@@ -1,6 +1,6 @@
 import { ref, computed, watch, nextTick, inject, reactive, type Ref, type ComputedRef } from 'vue';
 import { JupyterMimeRenderer } from '@jataware/beaker-client';
-import type { IBeakerCell, IMimeRenderer } from '@jataware/beaker-client';
+import type { IBeakerCell, IMimeRenderer, IChatHistory } from '@jataware/beaker-client';
 import type { BeakerNotebookComponentType } from '../components/notebook/BeakerNotebook.vue';
 import type { BeakerSessionComponentType } from '../components/session/BeakerSession.vue';
 import { JavascriptRenderer, JSONRenderer, LatexRenderer, MarkdownRenderer, wrapJupyterRenderer, TableRenderer, type BeakerRenderOutput } from '../renderers';
@@ -8,7 +8,6 @@ import { atStartOfInput, atEndOfInput } from '../util';
 import type { NavOption } from '../components/misc/BeakerHeader.vue';
 import { standardRendererFactories } from '@jupyterlab/rendermime';
 import type { IBeakerTheme } from '../plugins/theme';
-import type { IChatHistory } from '../components/panels/ChatHistoryPanel';
 
 interface UseNotebookInterfaceReturn {
     // refs
@@ -344,8 +343,11 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
                 sideMenuRef.value.selectPanel('workflow-steps');
                 rightSideMenuRef.value.selectPanel('workflow-output');
             }
-        } else if (msg.header.msg_type === "chat_history") {
-            chatHistory.value = msg.content;
+        } else if (msg.header.msg_type === "set_chat_history" || msg.header.msg_type === "add_chat_record") {
+            // The ChatHistory instance on the session is the source of truth and
+            // is updated by its own iopub handler; snapshot it into the ref so the
+            // UI re-renders with a fresh object reference.
+            chatHistory.value = beakerSession.value?.session?.chatHistory?.snapshot();
         } else if (msg.header.msg_type === "context_setup_response" || msg.header.msg_type === "context_info_response") {
             let incomingIntegrations;
             if (msg.header.msg_type === "context_setup_response") {
@@ -387,12 +389,6 @@ export function useNotebookInterface(): UseNotebookInterfaceReturn {
 
         const notebook = beakerNotebookRef.value;
         beakerSession.value?.session.loadNotebook(notebookJSON);
-        if (notebookJSON?.metadata?.chat_history) {
-            beakerSession.value?.session.executeAction(
-                "set_agent_history",
-                notebookJSON?.metadata?.chat_history
-            );
-        }
         saveAsFilename.value = filename;
 
         const cellIds = notebook.notebook.cells.map((cell) => cell.id);

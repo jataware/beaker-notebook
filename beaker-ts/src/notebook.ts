@@ -770,18 +770,6 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
         return outputCells as [BeakerMarkdownCell, ...BeakerBaseCell[]];
     }
 
-    // public fromJSON(obj: any) {
-    //     if (this.metadata.beaker_cell_type !== "query") {
-    //         throw TypeError("Cell is trying to be parsed as a query cell, but doesn't have the required metadata.")
-    //     }
-    //     this.source = obj.metadata.prompt;
-    //     this.events = obj.metadata.events;
-    // }
-
-    // public toJSON() {
-    //     return this.toMarkdownCell();
-    // }
-
     public fromIPynb(obj: any) {
         if (this.metadata.beaker_cell_type !== "query") {
             throw TypeError("Cell is trying to be parsed as a query cell, but doesn't have the required metadata.")
@@ -798,12 +786,20 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
 
 export type IBeakerCell = BeakerCodeCell | BeakerMarkdownCell | BeakerRawCell | nbformat.IUnrecognizedCell;
 
+export interface IBeakerNotebookMetadata extends nbformat.INotebookMetadata {
+    beaker?: {
+        session_id?: string;
+        context_info?: any;
+        [key: string]: any;
+    }
+}
+
 export class BeakerNotebookContent implements nbformat.INotebookContent {
 
     [key: string]: PartialJSONValue;
     nbformat: number = 4;
     nbformat_minor: number = 5;
-    metadata: nbformat.INotebookMetadata = {};
+    metadata: IBeakerNotebookMetadata = {};
     cells: BeakerBaseCell[] = [];
 }
 
@@ -820,8 +816,8 @@ export class BeakerNotebook {
                     "display_name": "Beaker Kernel",
                     "name": "beaker",
                     "language": "beaker",
-                   },
-                   "language_info": this.subkernelInfo,
+                },
+                "language_info": this.subkernelInfo,
             },
         }
 
@@ -897,7 +893,7 @@ export class BeakerNotebook {
         this.content.metadata = obj.metadata;
     }
 
-    public toIPynb() {
+    public toIPynb(): nbformat.INotebookContent {
         this.content.metadata.language_info = this.subkernelInfo;
         return {
             nbformat: this.content.nbformat,

@@ -139,7 +139,7 @@ def test_round_trip_preserves_summaries(doc, history):
 
 def test_round_trip_preserves_metadata(doc):
     restored = BeakerChatHistoryDoc.from_dict(doc.to_dict(compress=False))
-    assert restored.metadata == {"context": "test"}
+    assert restored.metadata.get("context", None) == "test"
 
 
 # -- structured cell links --
@@ -253,6 +253,11 @@ def test_unparseable_cell_link_is_skipped_with_warning(doc, history):
 
 
 # -- framing-field omission policy --
+#
+# The framing fields (system_message, system_preamble) are serialized in full so
+# the front end has the data it needs to render; an ``omissions_on_save`` hint in
+# the metadata tells the front end which fields it may drop when it re-saves. The
+# user_preamble is never listed -- it can carry user-authored text.
 
 
 def _history_with_preambles() -> ChatHistory:
@@ -263,32 +268,38 @@ def _history_with_preambles() -> ChatHistory:
     return history
 
 
-def test_save_clears_system_message_and_system_preamble():
+def test_save_retains_framing_and_records_omissions():
     doc = BeakerChatHistoryDoc.from_history(_history_with_preambles())
-    payload = doc.to_dict(compress=False)["history"]
+    result = doc.to_dict(compress=False)
+    payload = result["history"]
 
-    assert payload["system_message"] is None
-    assert payload["system_preamble"] is None
-    # user_preamble is retained (user-authored, not regenerable).
+    # All framing fields are serialized so the front end has the full data.
+    assert payload["system_message"] is not None
+    assert payload["system_preamble"] is not None
     assert payload["user_preamble"] is not None
+    # The metadata advertises which regenerable fields the front end may omit.
+    assert tuple(result["metadata"]["omissions_on_save"]) == (
+        "system_message",
+        "system_preamble",
+    )
 
 
-def test_round_trip_keeps_user_preamble_drops_regenerable_framing():
+def test_round_trip_preserves_framing_fields():
     doc = BeakerChatHistoryDoc.from_history(_history_with_preambles())
     restored = BeakerChatHistoryDoc.from_dict(doc.to_dict(compress=False))
 
-    assert restored.history.system_message is None
-    assert restored.history.system_preamble is None
+    assert restored.history.system_message is not None
+    assert restored.history.system_preamble is not None
     assert restored.history.user_preamble is not None
     assert restored.history.user_preamble.message.text == "user preamble"
 
 
-def test_omission_holds_under_compression():
+def test_round_trip_preserves_framing_under_compression():
     doc = BeakerChatHistoryDoc.from_history(_history_with_preambles())
     restored = BeakerChatHistoryDoc.from_dict(doc.to_dict(compress=True))
 
-    assert restored.history.system_message is None
-    assert restored.history.system_preamble is None
+    assert restored.history.system_message is not None
+    assert restored.history.system_preamble is not None
     assert restored.history.user_preamble.message.text == "user preamble"
 
 
@@ -313,7 +324,7 @@ def test_compressed_envelope_stays_cleartext(doc, history):
     data = doc.to_dict(compress=True)
     assert data["format"] == BEAKER_CHAT_HISTORY_SCHEMA.to_dict()
     assert data["cell_links_format"] == CELL_LINKS_SCHEMA.to_dict()
-    assert data["metadata"] == {"context": "test"}
+    assert data["metadata"]["context"] == "test"
     human_uuid = history.raw_records[0].uuid
     assert data["cell_links"][human_uuid] == {"kind": "human", "cell": "query-cell"}
 

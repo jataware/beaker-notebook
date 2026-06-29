@@ -59,7 +59,7 @@ import copy
 import gzip
 import json
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -316,6 +316,27 @@ def _link_cell_ids(link: CellLink) -> list[str]:
 
 
 @dataclass
+class Model:
+    """
+    A round-trippable representation of the model associated with the chat history
+
+    If the model changes, any token counts are no longer trustworthy and should be invalidated.
+    """
+
+    provider: str
+    model_name: str
+    context_window: Optional[int] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "Model":
+        return cls(**data)
+
+
+
+@dataclass
 class BeakerChatHistoryDoc:
     """A versioned, round-trippable Beaker envelope around an Archytas ChatHistory.
 
@@ -330,6 +351,7 @@ class BeakerChatHistoryDoc:
 
     history: ChatHistory
     cell_links: dict[str, CellLink] = field(default_factory=dict)
+    model: Model = field(default_factory=lambda: Model(provider="None", model_name="None"))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -337,12 +359,14 @@ class BeakerChatHistoryDoc:
         cls,
         history: ChatHistory,
         cell_links: Optional[Mapping[str, CellLink]] = None,
+        model: Optional[Model] = None,
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> "BeakerChatHistoryDoc":
         """Build a document from a live history plus an optional cell-link overlay."""
         return cls(
             history=history,
             cell_links=dict(cell_links or {}),
+            model=model,
             metadata=dict(metadata or {}),
         )
 
@@ -400,24 +424,19 @@ class BeakerChatHistoryDoc:
 
     def to_dict(
         self,
-        compress: bool | str = "auto",
+        compress: bool | str = False,
         compress_threshold: int = DEFAULT_COMPRESS_THRESHOLD,
     ) -> dict[str, Any]:
         """Serialize to a JSON-compatible envelope document.
 
         Args:
-            compress: ``True``/``False`` to force or forbid gzip+base64 of the
-                inner Archytas history payload, or ``"auto"`` (default) to
-                compress only when the serialized payload exceeds
+            compress: ``True``/``False`` (default) to force or forbid
+                gzip+base64 of the inner Archytas history payload, or ``"auto"``
+                to compress only when the serialized payload exceeds
                 ``compress_threshold`` bytes.
             compress_threshold: Byte threshold for ``compress="auto"``.
         """
         history_payload = self.history.to_dict()
-        # Drop the regenerable framing fields before measuring/compressing so the
-        # stored payload reflects what is actually persisted.
-        for omitted in _OMITTED_HISTORY_FIELDS:
-            if omitted in history_payload:
-                history_payload[omitted] = None
 
         if isinstance(compress, str):
             if compress != "auto":
@@ -436,10 +455,13 @@ class BeakerChatHistoryDoc:
             history_field = history_payload
             encoding = _ENCODING_JSON
 
+        metadata = copy.deepcopy(self.metadata)
+        metadata["omissions_on_save"] = _OMITTED_HISTORY_FIELDS
+
         return {
             "format": BEAKER_CHAT_HISTORY_SCHEMA.to_dict(),
             "cell_links_format": CELL_LINKS_SCHEMA.to_dict(),
-            "metadata": copy.deepcopy(self.metadata),
+            "metadata": metadata,
             "cell_links": {
                 record_uuid: link.to_dict()
                 for record_uuid, link in self.cell_links.items()
@@ -458,7 +480,8 @@ class BeakerChatHistoryDoc:
     ) -> "BeakerChatHistoryDoc":
         """Reconstruct from :meth:`to_dict` output.
 
-        ``model`` and the summarizers are not part of the serialized document;
+        ``model`` and the summarizers are not should not be rehydrated from
+        the serialized document as model is a runtime concern. Therefore we
         supply live ones to attach to the reconstructed :class:`ChatHistory`.
         Omit the summarizers to let Archytas apply its own defaults, or pass
         ``None`` to disable them explicitly. Individual cell links that cannot

@@ -1,17 +1,20 @@
 import { SessionContext } from '@jupyterlab/apputils';
 import { ServerConnection } from '@jupyterlab/services/lib/serverconnection';
-import { IKernelConnection} from '@jupyterlab/services/lib/kernel/kernel';
+import type { IKernelConnection} from '@jupyterlab/services/lib/kernel/kernel';
 import { ServiceManager } from '@jupyterlab/services';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
-import { JSONObject } from '@lumino/coreutils';
+import type { JSONObject } from '@lumino/coreutils';
 import { v4 as uuidv4 } from 'uuid';
-import { Slot, Signal } from '@lumino/signaling';
-import { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
+import type { Slot, Signal } from '@lumino/signaling';
+import * as nbformat from '@jupyterlab/nbformat';
+import type { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
 
 import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo } from './util';
 import { BeakerNotebook, IBeakerShellMessage, IBeakerAnyMessage, BeakerRawCell, BeakerCodeCell, BeakerMarkdownCell, BeakerQueryCell, IBeakerIOPubMessage } from './notebook';
 import { BeakerHistory } from './history';
-import { BeakerRenderer, IBeakerRendererOptions } from './render';
+import { BeakerRenderer, type IBeakerRendererOptions } from './render';
+import { ChatHistory, type IChatHistory } from './chatHistory';
+import type { BeakerNotebookContent } from './notebook';
 
 
 export interface IBeakerSessionOptions {
@@ -42,6 +45,7 @@ export class BeakerSession {
         this._services = new ServiceManager({
             serverSettings: this._serverSettings,
         });
+        this._chatHistory = new ChatHistory();
         this._hasBeenConnected = false;
         this._services.connectionFailure.connect(this._connectionFailureHandler);
         this._renderer = new BeakerRenderer(options?.rendererOptions);
@@ -101,6 +105,8 @@ export class BeakerSession {
                 this._hasBeenConnected = true;
             }
         });
+
+        this._chatHistory?.registerHandlers(this._sessionContext);
 
         // Initialize the session
         await this._sessionContext.initialize();
@@ -232,6 +238,7 @@ export class BeakerSession {
             if (future !== undefined) {
                 future.onIOPub = async (msg: any) => {
                     if (msg.header.msg_type === "context_info_response") {
+                        this._contextInfo = {...msg.content};
                         resolve({
                             ...msg.content,
                             kernelInfo: await this.kernel?.info,
@@ -245,6 +252,9 @@ export class BeakerSession {
     }
 
     public async setContext(contextPayload: any): Promise<IActiveContextInfo> {
+        if (!Object.hasOwn(contextPayload, "chat_history") && this.chatHistory?.initialized) {
+            contextPayload["chat_history"] = this.chatHistory;
+        }
         return new Promise(async (resolve, reject) => {
             const setupResult = this.sendBeakerMessage(
                 "context_setup_request",
@@ -254,6 +264,7 @@ export class BeakerSession {
                 await setupResult.done;
                 const contextInfo = setupResult.msg.content as IActiveContextInfo;
                 const kernelInfo = await this.kernel?.requestKernelInfo();
+                this._contextInfo = contextInfo;
 
                 resolve({
                     ...contextInfo,
@@ -394,8 +405,60 @@ export class BeakerSession {
      *
      * @param notebookJSONObject - The json representation of a notebook, as found inside an .ipynb file
      */
-    public loadNotebook(notebookJSONObject: object) {
+    public async loadNotebook(notebookJSONObject: BeakerNotebookContent) {
         this.notebook.loadFromIPynb(notebookJSONObject);
+        let contextInfo;
+        if (notebookJSONObject?.metadata?.beaker?.chat_history) {
+            // Update the existing instance in place rather than replacing it, so
+            // the iopub handlers registered during initialize() keep updating the
+            // same ChatHistory that the UI and serialization read from.
+            this._chatHistory?.setChatHistory(notebookJSONObject.metadata.beaker.chat_history);
+        }
+        if (notebookJSONObject?.metadata?.beaker?.context_info) {
+            contextInfo = notebookJSONObject.metadata.beaker.context_info;
+        }
+        else if (this._contextInfo) {
+            contextInfo = this._contextInfo;
+        }
+        else {
+            contextInfo = await this.activeContext()
+        }
+        if (contextInfo) {
+            this.setContext(contextInfo);
+        }
+
+
+    }
+
+    /**
+     * Serializes the full session notebook document for persistence, embedding
+     * the current chat history under `metadata.beaker.chat_history`.
+     *
+     * This is the session-level counterpart to {@link BeakerNotebook.toIPynb}.
+     * The notebook itself is intentionally unaware of the chat history, so the
+     * session — which owns both the notebook and the history — is responsible
+     * for assembling the complete document. The returned object is a fresh copy
+     * so injecting the history does not mutate the live notebook metadata.
+     */
+    public toIPynb(): nbformat.INotebookContent {
+        const notebookContent = this.notebook.toIPynb();
+        const chatHistoryDoc = this._chatHistory?.toJSON();
+        if (!chatHistoryDoc) {
+            return notebookContent;
+        }
+        // Shallow-copy the metadata (and its `beaker` block) so injecting the
+        // chat history does not mutate the live notebook's metadata. Typed as
+        // `any` locally to avoid the `PartialJSONValue` index-signature friction
+        // on IBeakerNotebookMetadata.
+        const metadata: any = { ...(notebookContent.metadata ?? {}) };
+        metadata.beaker = {
+            ...(metadata.beaker ?? {}),
+            chat_history: chatHistoryDoc,
+        };
+        return {
+            ...notebookContent,
+            metadata,
+        };
     }
 
     /**
@@ -405,7 +468,12 @@ export class BeakerSession {
         // Remove cells via splice to ensure reactivity
         this.notebook.cells.splice(0, this.notebook.cells.length);
         this._history.clear();
-        this._sessionContext.restartKernel();
+        if (this._contextInfo) {
+            this.setContext(this._contextInfo);
+        }
+        else {
+            this._sessionContext.restartKernel();
+        }
     }
 
     /**
@@ -469,6 +537,10 @@ export class BeakerSession {
         return this._prevClientId;
     }
 
+    get chatHistory() {
+        return this._chatHistory;
+    }
+
     /**
      * A reference to the Jupyter ServiceManager which contains all of the services for this session.
      */
@@ -485,6 +557,8 @@ export class BeakerSession {
     }
 
     private _initialized: Promise<void>;
+    private _chatHistory?: ChatHistory;
+    private _contextInfo?: any;  // TODO: Properly type this
     private _sessionId: string;
     private _sessionOptions?: IBeakerSessionOptions;
     private _services: ServiceManager;
