@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import copy
 import os
 import inspect
 import json
@@ -377,35 +378,81 @@ def url_path_join(*pieces: str) -> str:
         result = "/"
     return result
 
+def _split_tool_message_content(content: "str | list") -> "tuple[str, list]":
+    """Split a ToolMessage's content into (text, non_text_blocks).
+
+    A langchain `ToolMessage.content` may be either a plain string or a list of
+    content blocks, where each block is a string or a dict (e.g.
+    `{"type": "text", "text": ...}` or an image block). The concatenated text is
+    returned for length-checking and truncation, while non-text blocks (images,
+    etc.) are returned separately so they can be preserved untouched.
+    """
+    if isinstance(content, str):
+        return content, []
+    text_parts: list[str] = []
+    other_blocks: list = []
+    for item in content:
+        if isinstance(item, str):
+            text_parts.append(item)
+        elif isinstance(item, dict) and item.get("type") == "text":
+            text_parts.append(str(item.get("text", "")))
+        elif isinstance(item, dict):
+            other_blocks.append(item)
+        else:
+            text_parts.append(str(item))
+    return "\n".join(text_parts), other_blocks
+
+
 def succinct_tool_summarizer(
     max_length: int=300
 ):
-    async def succinct_tool_summarizer(
+    async def _succinct_tool_summarizer(
         message: "ToolMessage",
         chat_history: "ChatHistory",
         agent: "BeakerAgent",
         model: "BaseArchytasModel" = None
     ):
-        message_length = len(message.content)
-        if message_length < max_length:
-            # Message is already short enough
+        text, other_blocks = _split_tool_message_content(message.content)
+        message_length = len(text)
+        if message_length < max_length and not other_blocks:
+            # Short, text-only output: nothing worth summarizing.
             return
 
-        all_messages = await chat_history.messages(auto_update_context=False)
-        last_message = all_messages[-1]
-        last_message_id = last_message.id
+        summary_parts = []
 
-        _, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+        caller, tool_call = chat_history.get_tool_caller(message.tool_call_id)
+
+        # Truncate the textual portion if it exceeds the limit.
+        summarized_text = text[:max_length]
+        if message_length > max_length:
+            summarized_text = f"{summarized_text}<... {message_length - max_length} characters truncated ...>"
+
+        if summarized_text:
+            summary_parts.extend([
+                "Text content:"
+                f"    `{summarized_text}`",
+                "",
+            ])
+
+        summarized_blocks = []
+        for block in other_blocks:
+            summarized_block = copy.deepcopy(block)
+            for block_key, block_value in summarized_block.items():
+                    if len(str(block_value)) > max_length:
+                        summarized_block[block_key] = "[Omitted due to size]"
+            summarized_blocks.append(summarized_block)
+        if summarized_blocks:
+            summary_parts.append("Message Blocks:")
+            summary_parts.extend(f"```block {i}\n{block}\n```" for i, block in enumerate(summarized_blocks, 1))
 
         message.content = f"""\
-## Auto-summarized tool call output (summarized after processing message `{last_message_id}`)
+## Auto-summarized tool call output for tool call `{message.tool_call_id}` from record `{caller.uuid}`
 Tool `{tool_call.get("name")}` called with {len(tool_call.get("args", []))} arguments.
 Status: {message.status}
-Output:
-    `{message.content[:max_length]}<... {message_length - max_length} characters truncated ...>`
+{"\n".join(summary_parts)}
 """
         message.artifact["summarized"] = True
-    return succinct_tool_summarizer
+    return _succinct_tool_summarizer
 
 
 def normalize_notebook(nb: "dict|NotebookNode") -> "NotebookNode":
