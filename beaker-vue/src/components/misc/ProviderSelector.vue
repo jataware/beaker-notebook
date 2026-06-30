@@ -258,9 +258,14 @@ onBeforeMount(() => {
     }
 }
 
-#config-panel-provider {
+#provider-select-providers {
     grid-area: provider;
-    background-color: blue;
+    // Allow the form to scroll within its grid cell instead of overflowing
+    // down onto the dialog buttons row. `min-height: 0` is required for a
+    // grid item to shrink below its content size and enable scrolling.
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0.5rem 0.5rem 1rem;
 }
 
 .p-listbox-item {
