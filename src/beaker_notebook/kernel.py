@@ -797,7 +797,9 @@ class BeakerKernel(KernelProxyManager):
             reset_config()
             model = config.get_model()
         if model:
-            self.context.agent.model = model
+            # set_model updates both the agent's model and the chat history's
+            # (the UI reads model metadata + token budgets from the latter).
+            self.context.agent.set_model(model)
         await self.send_set_chat_history(message.header)
 
     @message_handler
