@@ -92,7 +92,7 @@
 
 <script setup lang="tsx">
 import { type ErrorObject, isErrorObject } from '../util';
-import { h, useSlots, isVNode, ref, onMounted, provide, nextTick, onUnmounted, toRaw} from 'vue';
+import { h, useSlots, isVNode, ref, onMounted, provide, onUnmounted, toRaw} from 'vue';
 import { type Component, type ComponentInstance } from 'vue';
 import Dialog from 'primevue/dialog';
 import DynamicDialog from 'primevue/dynamicdialog';
@@ -108,8 +108,7 @@ import InputText from 'primevue/inputtext';
 import InputGroup from 'primevue/inputgroup';
 import Button from 'primevue/button';
 import ProviderSelector from '../components/misc/ProviderSelector.vue';
-import { fetch } from '../util/fetch';
-import hashSum from 'hash-sum';
+import { useNotebookSnapshot } from '../composables/useNotebookSnapshot';
 
 import {default as ConfigPanel, getConfigAndSchema, dropUnchangedValues, objectifyTables, tablifyObjects, saveConfig} from '../components/panels/ConfigPanel.vue';
 import SideMenu, { type MenuPosition } from '../components/sidemenu/SideMenu.vue';
@@ -120,20 +119,7 @@ import type { DynamicDialogInstance, DynamicDialogOptions } from 'primevue/dynam
 const dialog = useDialog();
 const toast = useToast();
 
-const lastSaveChecksum = ref<string>();
 const mainRef = ref();
-const notebookInfo = ref<{
-    id: string;
-    name: string;
-    created: string;
-    last_modified: string;
-    size: number;
-    type?: string;
-    session_id?: string;
-    content?: any;
-    checksum?: string;
-    metadata?: {[key: string]: any};
-}>(null);
 
 // TODO -- WARNING: showToast is only defined locally, but provided/used everywhere. Move to session?
 export interface ShowToastOptions {
@@ -168,7 +154,6 @@ const emit = defineEmits([
 ]);
 
 const connectionStatus = ref('connecting');
-const saveInterval = ref();
 const beakerSession = ref<typeof BeakerSession>();
 const authDialogVisible = ref<boolean>(props.apiKeyPrompt || false);
 const authDialogEntry = ref<string>("");
@@ -176,6 +161,12 @@ const authMessage = ref<string>("");
 const authRetryCell = ref();
 const loginDialogRef = ref();
 const overlayRef = ref<DynamicDialogInstance>();
+
+const { loadSnapshot, startAutosave, stopAutosave } = useNotebookSnapshot({
+    beakerSession,
+    savefile: () => props.savefile,
+    onOpenFile: (content, name, openOptions) => emit('open-file', content, name, openOptions),
+});
 
 const contextSelectionOpen = ref(false);
 
@@ -259,26 +250,20 @@ const connectionFailure = (error: Error) => {
     });
 }
 
-// Wrapper to allow removal from beforeunload event
-const saveSnapshotWrapper = () => {
-    saveSnapshot();
-}
-
 onMounted(async () => {
     const session: Session = beakerSession.value.session;
     await session.sessionReady;  // Ensure content service is up
-    const sessionId = session.sessionId;
 
-    // Connect listener for authentication message
+    // Actions to perform only after session is connected.
     session.session.ready.then(() => {
+        // Connect listener for authentication message
         const sessionContext = toRaw(session.session.session)
         sessionContext.iopubMessage.connect(iopubMessage);
+        // Start periodic autosave
+        startAutosave();
     });
 
     await loadSnapshot();
-
-    saveInterval.value = setInterval(saveSnapshot, 10000);
-    window.addEventListener("beforeunload", saveSnapshotWrapper);
 });
 
 
@@ -305,185 +290,8 @@ const setAgentModel = async (modelConfig = null, rerunLastCommand = false) => {
 }
 
 onUnmounted(() => {
-    clearInterval(saveInterval.value);
-    saveInterval.value = null;
-    window.removeEventListener("beforeunload", saveSnapshotWrapper);
+    stopAutosave();
 });
-
-const saveSnapshot = async (ignoreSession: boolean = false) => {
-    const session: Session = beakerSession.value?.session;
-    const sessionId = session?.sessionId ;
-
-    const notebookData: {[key: string]: any} = {
-        ...(notebookInfo.value || {}),
-    };
-    if (notebookData.session_id && sessionId && notebookData.session_id !== sessionId) {
-        console.warn(`saveSnapshot: session id mismatch (expected ${notebookData.session_id}, got ${sessionId}); skipping save.`);
-        return;
-    }
-    notebookData.session_id = sessionId;
-
-    // Only save state if there is state to save
-    if (session.notebook) {
-        if (!ignoreSession) {
-            notebookData.content = session.toIPynb();
-        }
-
-        const notebookChecksum: string = hashSum(notebookData.content);
-        const notebookComponent = beakerSession.value.notebookComponent;
-
-        if (notebookChecksum === notebookData.checksum) {
-            // No changes since last save
-            return;
-        }
-        else {
-            notebookData.checksum = notebookChecksum;
-        }
-
-        if (notebookComponent) {
-            notebookData.selectedCell = notebookComponent.selectedCellId
-        }
-
-        if (!notebookData.filename && (props.savefile && typeof props.savefile === "string")) {
-            notebookData.filename = props.savefile;
-        }
-
-        if (notebookData.selectedCell) {
-            // Store selected cell in notebook metadata before saving
-            notebookData.content.metadata = notebookData.content.metadata || {};
-            notebookData.content.metadata.selected_cell = notebookData.selectedCell;
-        }
-
-        if (notebookInfo.value?.type === "browserStorage" && notebookData.id) {
-            const localRecordString = JSON.stringify(notebookData);
-            window.localStorage.setItem(notebookData.id, localRecordString);
-            notebookInfo.value = {
-                ...notebookInfo.value,
-                checksum: notebookChecksum,
-            };
-        }
-        else {
-            const notebookId = notebookInfo.value?.id || "";
-            const saveRequest = await fetch(`/beaker/notebook/${notebookId}?session=${session.sessionId}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(notebookData),
-            });
-            if (saveRequest.ok) {
-                const response = await saveRequest.json();
-                notebookInfo.value = {
-                    ...notebookInfo.value,
-                    metadata: response,
-                    checksum: notebookChecksum
-                }
-            }
-        }
-    }
-};
-
-const loadSnapshot = async () => {
-    const session: Session = beakerSession.value.session;
-    await session.sessionReady;  // Ensure content service is up
-    const sessionId = session.sessionId;
-
-    try {
-        const notebookInfoResponse = await fetch(`/beaker/notebook/?session=${session.sessionId}`);
-        if (notebookInfoResponse.ok) {
-                const response = await notebookInfoResponse.json();
-                const content = response.content;
-                const metadata = {
-                    ...response,
-                    content: undefined,
-                };
-                const checksum = hashSum(content)
-                notebookInfo.value = {
-                    ...notebookInfo.value,
-                    content,
-                    metadata,
-                    checksum,
-                };
-
-        }
-    }
-    catch (e) {
-        console.error(e);
-        notebookInfo.value = {
-            id: sessionId,
-            name: sessionId,
-            created: "",
-            last_modified: "",
-            size: 0,
-            session_id: sessionId,
-        };
-    }
-
-    const notebookData: {[key: string]: any} = {
-        ...(notebookInfo.value || {}),
-    };
-
-    if (notebookInfo.value?.type === "browserStorage") {
-        // Notebook is stored in browser local storage, load it from there
-        const fullNotebookData = localStorage.getItem("notebookData");
-        const fullData = JSON.parse(fullNotebookData || "null");
-        const localRecord = JSON.parse(window.localStorage.getItem(notebookData.id) || "null");
-
-        const hasLocalRecord = notebookData.id in window.localStorage;
-        const hasLegacyRecord = fullData && sessionId in fullData;
-
-        if (hasLegacyRecord && !hasLocalRecord) {
-            console.log(`Migrating notebook data for session ${sessionId} from full localStorage to per-notebook storage.`);
-            notebookData.content = fullData[sessionId]?.data || undefined;
-            notebookData.selectedCell = fullData[sessionId]?.selectedCell || undefined;
-            if (fullData[sessionId]?.name) {
-                notebookData.name = fullData[sessionId]?.name;
-            }
-
-            notebookInfo.value = {
-                id: notebookData.id,
-                name: notebookData.name,
-                created: notebookData.created,
-                last_modified: notebookData.last_modified,
-                size: notebookData.size,
-                type: "browserStorage",
-                content: notebookData.content,
-                session_id: sessionId,
-            };
-            saveSnapshot(true).then(() => {
-                const fullData = JSON.parse(fullNotebookData || "null");
-                delete fullData[sessionId];
-                window.localStorage.setItem("notebookData", JSON.stringify(fullData));
-            }).then(async () => {
-                await loadSnapshot();
-            });
-            return;
-        }
-        else if (hasLocalRecord && hasLegacyRecord) {
-            // Remove legacy record
-            delete fullData[sessionId];
-            window.localStorage.setItem("notebookData", JSON.stringify(fullData));
-        }
-        else {
-            notebookData.content = localRecord?.content || undefined;
-            notebookData.selectedCell = localRecord?.selectedCell || undefined;
-            if (localRecord?.name) {
-                notebookData.name = localRecord?.name;
-            }
-        }
-    }
-
-    if (notebookData && notebookData.content) {
-        emit('open-file', notebookData.content, notebookData.name, {selectedCell: notebookData.selectedCell});
-    }
-
-    if (notebookData.selectedCell !== undefined) {
-        nextTick(() => {
-            beakerSession.value.notebookComponent?.selectCell(notebookData.selectedCell);
-        });
-    }
-    return notebookData;
-};
 
 const providerConfig = () => {
 }

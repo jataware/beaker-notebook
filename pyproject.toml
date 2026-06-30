@@ -36,6 +36,7 @@ dependencies = [
   "click~=8.1",
   "python-dotenv~=1.0",
   "hatch",
+  "platformdirs",
   "toml",
   "dill",
   "pandas",
