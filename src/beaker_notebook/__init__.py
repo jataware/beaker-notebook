@@ -79,7 +79,6 @@ redirect_map: ImportRedirectMap = {
     },
     'beaker_kernel.service.storage.notebook': {
         'BaseNotebookManager': 'beaker_kernel.services.storage.notebook',
-        'BrowserLocalDataNotebookManager': 'beaker_kernel.services.storage.notebook',
         'FileNotebookManager': 'beaker_kernel.services.storage.notebook',
         'NotebookInfo': 'beaker_kernel.services.storage.notebook',
         'with_hidden_files': 'beaker_kernel.services.storage.notebook',
@@ -162,7 +161,6 @@ redirect_map: ImportRedirectMap = {
     },
     'beaker_notebook.service.storage.notebook': {
         'BaseNotebookManager': 'beaker_notebook.services.storage.notebook',
-        'BrowserLocalDataNotebookManager': 'beaker_notebook.services.storage.notebook',
         'FileNotebookManager': 'beaker_notebook.services.storage.notebook',
         'NotebookInfo': 'beaker_notebook.services.storage.notebook',
         'with_hidden_files': 'beaker_notebook.services.storage.notebook',

@@ -48,37 +48,13 @@ class NotebookHandler(JupyterHandler):
 
     async def get(self, notebook_id=None):
         notebook_id = notebook_id or None
-        session_id = self.get_query_argument("session", None)
         try:
-            notebook = await self.notebook_manager.get_notebook(notebook_id, session_id)
+            notebook = await self.notebook_manager.get_notebook(notebook_id)
         except FileNotFoundError:
             notebook = None
         if notebook is None:
             raise tornado.web.HTTPError(404, "Notebook not found")
         self.write(notebook)
-        # if notebook_id:
-        #     try:
-        #         notebook = await self.notebook_manager.get_notebook(notebook_id)
-        #         self.write(notebook)
-        #         return
-        #     except FileNotFoundError:
-        #         raise tornado.web.HTTPError(404, f"Notebook {notebook_id} not found")
-
-        # notebooks = await self.notebook_manager.list_notebooks()
-
-        # If only a single notebook with ID "*", return it directly to allow browser to use alternative storage
-        # if len(notebooks) == 1 and notebooks[0].id == "*":
-        #     notebooks[0].session_id = session_id
-            # return self.write(notebooks[0])
-
-        # if session_id is not None:
-        #     for nb in notebooks:
-        #         if nb.session_id == session_id:
-        #             notebook = await self.notebook_manager.get_notebook(nb.id)
-        #             self.write(notebook)
-        #     raise tornado.web.HTTPError(404, f"No notebook found for session {session_id}")
-        # else:
-        #     self.write(notebooks)
 
     async def post(self, notebook_id=None):
         notebook_id = notebook_id or None
@@ -97,14 +73,6 @@ class NotebookHandler(JupyterHandler):
         )
         self.write(notebook)
 
-    # async def patch(self, notebook_id=None):
-    #     body = tornado.escape.json_decode(self.request.body)
-    #     self.write({})
-    #
-    # async def put(self, notebook_id=None):
-    #     body = tornado.escape.json_decode(self.request.body)
-    #     self.write({})
-
     async def delete(self, notebook_id=None):
         if not notebook_id:
             raise tornado.web.HTTPError(400, "No notebook ID provided for deletion")
@@ -113,6 +81,82 @@ class NotebookHandler(JupyterHandler):
         # self.finish()
 
 
+class SnapshotHandler(JupyterHandler):
+    """
+    Handler for session based notebook snapshots.
+    """
+
+    def set_default_headers(self):
+        self.set_header("Content-Type", "application/json")
+
+    def write(self, chunk):
+        if is_dataclass(chunk):
+            chunk = asdict(chunk)
+        elif isinstance(chunk, list):
+            chunk = [asdict(item) if is_dataclass(item) else item for item in chunk]
+        if isinstance(chunk, (dict, list)):
+            chunk = json.dumps(chunk, default=json_default)
+        return super().write(chunk)
+
+    @property
+    def notebook_manager(self) -> "BaseNotebookManager":
+        notebook_manager = getattr(self.serverapp, "notebook_manager", None)
+        if notebook_manager is None:
+            raise tornado.web.HTTPError(404, "Notebook manager not found")
+        return notebook_manager
+
+    def _safe_session_id(self, session_id: str) -> str:
+        """Ensure the session id is a single, traversal-free path component.
+
+        The session id is taken straight from the URL and used to build the
+        snapshot filename, so reject anything that could escape the snapshot
+        directory before it reaches the storage layer.
+        """
+        if not session_id:
+            raise tornado.web.HTTPError(400, "No session ID provided")
+        if session_id in (".", "..") or "/" in session_id or "\\" in session_id or "\x00" in session_id:
+            raise tornado.web.HTTPError(400, "Invalid session ID")
+        return session_id
+
+    async def head(self, session_id=None):
+        try:
+            snapshots = await self.notebook_manager.list_snapshots()
+            self.write(snapshots)
+        except Exception:
+            self.write({})
+
+    async def get(self, session_id):
+        session_id = self._safe_session_id(session_id)
+        try:
+            notebook = await self.notebook_manager.get_snapshot(session_id)
+        except FileNotFoundError:
+            notebook = None
+        if notebook is None:
+            raise tornado.web.HTTPError(404, "Notebook not found")
+        self.write(notebook)
+
+    async def post(self, session_id):
+        session_id = self._safe_session_id(session_id)
+        name = self.get_query_argument("name", None)
+        body = tornado.escape.json_decode(self.request.body)
+        content: "typing.Optional[NotebookContent]" = body.get("content", None)
+        if content is None:
+            raise tornado.web.HTTPError(400, "No notebook content provided in request body")
+
+        notebook: "NotebookInfo" = await self.notebook_manager.save_snapshot(
+            session_id=session_id,
+            content=content,
+            name=name,
+        )
+        self.write(notebook)
+
+    async def delete(self, session_id):
+        session_id = self._safe_session_id(session_id)
+        await self.notebook_manager.delete_snapshot(session_id)
+        self.set_status(204)
+
+
 handlers = [
+    (r"/notebook/snapshot/?(?P<session_id>.*)/?$", SnapshotHandler),
     (r"/notebook/?(?P<notebook_id>.*)/?$", NotebookHandler),
 ]

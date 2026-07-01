@@ -1,28 +1,14 @@
 import json
 import os
 import os.path
-from dataclasses import dataclass
-from typing import Any
-
-import traitlets
+from pathlib import Path
 
 from jupyter_server.base.handlers import AuthenticatedFileHandler
 from jupyter_server.services.contents.manager import ContentsManager
 from jupyter_server.services.contents.largefilemanager import AsyncLargeFileManager
-from beaker_notebook.services.auth import current_user, BeakerUser, BeakerAuthorizer, BeakerIdentityProvider
 
-
-def with_hidden_files(func):
-    """Decorator to temporarily enable hidden files during a method call."""
-    async def wrapper(self, *args, **kwargs):
-        orig_allow_hidden = self.contents_manager.allow_hidden
-        self.contents_manager.allow_hidden = True
-        try:
-            result = await func(self, *args, **kwargs)
-        finally:
-            self.contents_manager.allow_hidden = orig_allow_hidden
-        return result
-    return wrapper
+from beaker_notebook.services.auth import current_user, BeakerUser
+from beaker_notebook.services.storage import BEAKER_LOCAL_DATA_PATH, with_hidden_files, with_temp_root
 
 
 class BaseBeakerContentsManager(ContentsManager):
@@ -63,6 +49,14 @@ class BeakerLocalContentsManager(AsyncLargeFileManager, BaseBeakerContentsManage
         str
             Absolute path within user's home directory
         """
+
+        # Allow local contents manager to access files within the user's data_path as well.
+        # Resolve first: is_relative_to() is purely lexical, so without normalizing away
+        # ".." segments a crafted path could pass this check and still escape the data path.
+        abs_path = (Path("/") / path).resolve()
+        if abs_path.is_relative_to(BEAKER_LOCAL_DATA_PATH.resolve()):
+            return str(abs_path)
+
         user: BeakerUser = current_user.get()
         if isinstance(user, BeakerUser):
             userdir_path = os.path.join(self.parent.virtual_home_root, user.home_dir)
