@@ -87,7 +87,7 @@
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.0",
+    "@playwright/test": "^1.60.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@tsconfig/node22": "^22.0.1",
     "@types/content-disposition": "^0.5.8",

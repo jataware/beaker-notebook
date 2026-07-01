@@ -1,21 +1,42 @@
-name: Playwright Tests
+name: Automatic testing
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ dev, main ]
 jobs:
-  test:
+  python-unit-tests:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+    - uses: actions/checkout@v5
+    - name: python-setup
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: install-dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install hatch uv
+    # One interpreter per job, so run the default hatch env's test script.
+    - name: Run unit tests
+      run: hatch run test
+
+  playwright:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
     # node / python
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - uses: actions/setup-node@v5
       with:
         node-version: lts/*
     - name: python-setup
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12'
     # pip install dependencies for building beaker
@@ -54,7 +75,7 @@ jobs:
     - name: Run Playwright tests
       working-directory: beaker-vue
       run: npx playwright test
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       if: ${{ !cancelled() }}
       with:
         name: playwright-report

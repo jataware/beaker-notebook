@@ -445,11 +445,12 @@ def succinct_tool_summarizer(
             summary_parts.append("Message Blocks:")
             summary_parts.extend(f"```block {i}\n{block}\n```" for i, block in enumerate(summarized_blocks, 1))
 
+        summary = "\n".join(summary_parts)
         message.content = f"""\
 ## Auto-summarized tool call output for tool call `{message.tool_call_id}` from record `{caller.uuid}`
 Tool `{tool_call.get("name")}` called with {len(tool_call.get("args", []))} arguments.
 Status: {message.status}
-{"\n".join(summary_parts)}
+{summary}
 """
         message.artifact["summarized"] = True
     return _succinct_tool_summarizer
