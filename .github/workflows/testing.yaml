@@ -1,11 +1,11 @@
 name: Automatic testing
 on:
   push:
-    branches: [ main, "reenable-tests" ]
+    branches: [ main ]
   pull_request:
     branches: [ dev, main ]
 jobs:
-  unit-tests:
+  python-unit-tests:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     strategy:
