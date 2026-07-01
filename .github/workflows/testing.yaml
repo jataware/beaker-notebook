@@ -1,11 +1,32 @@
-name: Playwright Tests
+name: Automatic testing
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "reenable-tests" ]
   pull_request:
     branches: [ dev, main ]
 jobs:
-  test:
+  unit-tests:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+    - uses: actions/checkout@v4
+    - name: python-setup
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: install-dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install hatch uv
+    # One interpreter per job, so run the default hatch env's test script.
+    - name: Run unit tests
+      run: hatch run test
+
+  playwright:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
@@ -13,7 +34,10 @@ jobs:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v5
       with:
-        node-version: lts/*
+        # Pinned to 22 LTS: Node 24.16.0 (current lts/*) has an extract-zip
+        # regression that hangs `playwright install` after download completes.
+        # See https://github.com/microsoft/playwright/issues/41133
+        node-version: 22
     - name: python-setup
       uses: actions/setup-python@v5
       with:
