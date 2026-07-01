@@ -14,7 +14,7 @@ jobs:
         runs-on: ubuntu-22.04
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                 ref: ${{ github.event.workflow_run.head_branch }}
                 fetch-depth: 0
@@ -52,7 +52,7 @@ jobs:
                   sudo apt install -y nodejs npm python3-pip || true
                   pip install uv
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                 ref: ${{ github.event.workflow_run.head_branch }}
 
@@ -71,12 +71,12 @@ jobs:
         permissions:
             id-token: write
         steps:
-            - uses: actions/setup-node@v5
+            - uses: actions/setup-node@v6
               with:
                 node-version: '24.x'
                 registry-url: 'https://registry.npmjs.org'
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                 ref: ${{ github.event.workflow_run.head_branch }}
 
