@@ -90,7 +90,7 @@ jobs:
               working-directory: beaker-ts
               shell: bash
               run: |
-                npm ci
+                npm i
                 npm run build
                 npm publish --provenance --access public ${{ steps.prerelease_tag.outputs.prerelease_tag }}
 
@@ -98,6 +98,6 @@ jobs:
               working-directory: beaker-vue
               shell: bash
               run: |
-                npm ci
+                npm i
                 npm run build
                 npm publish --provenance --access public ${{ steps.prerelease_tag.outputs.prerelease_tag }}

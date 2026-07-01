@@ -77,3 +77,6 @@ src/beaker_notebook/**/ui/*
 .worktreeinclude
 **/worktrees
 **/.worktrees
+
+beaker-ts/package-lock.json
+beaker-vue/package-lock.json

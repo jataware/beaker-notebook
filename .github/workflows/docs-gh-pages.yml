@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: 20
       - name: Install npm requirements
-        run: npm ci
+        run: npm i
         working-directory: ./beaker-ts
       - name: Build TypeDoc
         run: npx typedoc --out ../_site/beaker-ts
