@@ -58,7 +58,7 @@ dev:src/beaker_notebook/app/ui/index.html
 	# echo "Don't forget to set your OPENAI key in the .env file!"; \
 
 beaker-ts/node_modules:beaker-ts/package*.json
-	(cd beaker-ts/ && npm install --include=dev && npm link) && \
+	(cd beaker-ts/ && npm install --include=dev) && \
 	touch beaker-ts/node_modules
 
 beaker-ts/dist:$(call npm_build_deps,beaker-ts)
@@ -66,11 +66,8 @@ beaker-ts/dist:$(call npm_build_deps,beaker-ts)
 	touch beaker-ts/dist
 
 beaker-vue/node_modules:beaker-vue/package*.json beaker-ts/dist
-	(cd beaker-vue && npm install --include=dev && npm link @jataware/beaker-client) && \
+	(cd beaker-vue && npm install --include=dev) && \
 	touch beaker-vue/node_modules
-
-beaker-vue/node_modules/@jataware/beaker-client:beaker-ts/dist
-	(cd beaker-vue && npm link @jataware/beaker-client)
 
 beaker-vue/dist:$(call npm_build_deps,beaker-vue)
 	(cd beaker-vue && npm run build-lib) && \

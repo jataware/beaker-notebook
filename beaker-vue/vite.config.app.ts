@@ -103,10 +103,10 @@ export const appConfig: UserConfig = {
       ...(baseConfig.resolve?.alias),
       // Allows automatic updating when beaker-ts is updated, but will use the dist version of beaker-ts/beaker-kernel
       // when building or running in production mode.
-      'beaker-kernel': (
+      '@jataware/beaker-client': (
         process.env.NODE_ENV === "development"
         ? fileURLToPath(new URL('../beaker-ts/src', import.meta.url))
-        : 'beaker-kernel'
+        : '@jataware/beaker-client'
       ),
     },
     dedupe: [
