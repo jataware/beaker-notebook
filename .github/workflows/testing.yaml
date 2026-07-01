@@ -45,12 +45,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install hatch uv
     # install npm packages in ts packages
-    - name: beaker-vue npm ci
+    - name: beaker-vue npm install
       working-directory: beaker-vue
-      run: npm ci
-    - name: beaker-ts npm ci
+      run: npm install
+    - name: beaker-ts npm install
       working-directory: beaker-ts
-      run: npm ci
+      run: npm install
     # make beaker package
     - name: make build
       run: make build
