@@ -13,9 +13,9 @@ jobs:
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: python-setup
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: install-dependencies
@@ -31,15 +31,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     # node / python
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - uses: actions/setup-node@v5
       with:
-        # Pinned to 22 LTS: Node 24.16.0 (current lts/*) has an extract-zip
-        # regression that hangs `playwright install` after download completes.
-        # See https://github.com/microsoft/playwright/issues/41133
-        node-version: 22
+        node-version: lts/*
     - name: python-setup
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12'
     # pip install dependencies for building beaker
@@ -78,7 +75,7 @@ jobs:
     - name: Run Playwright tests
       working-directory: beaker-vue
       run: npx playwright test
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       if: ${{ !cancelled() }}
       with:
         name: playwright-report
