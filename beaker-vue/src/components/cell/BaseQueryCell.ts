@@ -39,6 +39,13 @@ export const useBaseQueryCell = (props) => {
             });
             msg.cell = cell.value;
           }
+          // Tag auth-failure messages with the originating cell so the model
+          // configuration dialog can re-run this query once credentials are
+          // provided (otherwise the user's prompt is silently dropped).
+          else if (msg.header?.msg_type === 'llm_auth_failure') {
+            msg.cell = cell.value;
+          }
+          return true;
         }
       )
     });

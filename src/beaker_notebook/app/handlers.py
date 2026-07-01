@@ -157,12 +157,16 @@ class ConfigController(JupyterHandler):
             if type_args:
                 if isinstance(type_obj, UnionType):
                     type_def["type_str"] = repr(type_obj)
-                elif issubclass(type_origin, Choice):
+                elif isinstance(type_origin, type) and issubclass(type_origin, Choice):
                     source = get_args(type_args[0])[0]
                     type_def["type_str"] = f"{type_origin.__name__}['{source}']"
                     type_def["choice_source"] = source
+                elif isinstance(type_origin, type):
+                    type_def["type_str"] = f"{type_origin.__name__}[{', '.join(getattr(arg, '__name__', repr(arg)) for arg in type_args)}]"
                 else:
-                    type_def["type_str"] = f"{type_origin.__name__}[{', '.join(arg.__name__ for arg in type_args)}]"
+                    # Non-class origins (e.g. typing.Literal[...]) have no __name__
+                    # and aren't valid issubclass() args; represent them directly.
+                    type_def["type_str"] = repr(type_obj)
                 if type_origin:
                     type_def["type_origin"] = ConfigController.map_type(type_origin)
                 if type_args:
@@ -185,7 +189,8 @@ class ConfigController(JupyterHandler):
                     type_def["default_value"] = default_value
                 except TypeError:
                     pass
-        except:
+        except Exception:
+            logger.exception("Failed to build config schema for type %r; falling back to repr", type_obj)
             type_def["type_str"] = repr(type_obj)
         return type_def
 
@@ -202,7 +207,13 @@ class ConfigController(JupyterHandler):
             description = metadata.pop("description", None)
             option_func = metadata.pop("options", None)
             if option_func and callable(option_func):
-                metadata["options"] = option_func()
+                try:
+                    metadata["options"] = option_func()
+                except Exception:
+                    # A failing options provider must not blank out the field (and,
+                    # for nested schemas, the entire config form). Degrade gracefully.
+                    logger.exception("Failed to resolve options for config field %r", field_name)
+                    metadata["options"] = None
             field_result = {
                 "name": field.name,
                 "description": description,

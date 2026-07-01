@@ -1,4 +1,5 @@
 import binascii
+import functools
 import importlib.resources
 import dotenv
 import importlib
@@ -18,16 +19,31 @@ from beaker_notebook.lib.utils import DefaultModel
 logger = logging.getLogger(__name__)
 
 
-def get_providers() -> dict[str, str]:
+@functools.lru_cache(maxsize=1)
+def _discover_provider_import_paths() -> tuple[tuple[str, str], ...]:
+    """Discover available archytas model provider classes as (name, import_path).
+
+    Cached because the set of model modules is fixed for the life of a process,
+    and a failed import is *not* memoized by ``importlib`` -- so without caching
+    every call re-attempts (and re-logs) any broken module. Returns an immutable
+    tuple so the cache can't be mutated by callers.
+    """
     import archytas.models
     from archytas.models.base import BaseArchytasModel
     base_class = BaseArchytasModel
-    result = {}
+    result: dict[str, str] = {}
     for resource in importlib.resources.files(archytas.models).iterdir():
         if resource.is_file() and resource.name.endswith('.py'):
             name = resource.name.split('.', 1)[0]
             mod_name = f'archytas.models.{name}'
-            mod = importlib.import_module(mod_name, 'archytas.models')
+            try:
+                mod = importlib.import_module(mod_name, 'archytas.models')
+            except Exception as err:
+                # A single model module that fails to import (e.g. an upstream
+                # dependency mismatch) must not take down provider discovery and,
+                # with it, the entire config/provider-selection UI. Skip it.
+                logger.warning("Skipping archytas model module %r: failed to import (%s)", mod_name, err)
+                continue
             items = inspect.getmembers(
                 mod,
                 lambda item:
@@ -36,7 +52,11 @@ def get_providers() -> dict[str, str]:
                     item is not base_class
             )
             result.update({item[0]: f"{item[1].__module__}.{item[1].__name__}" for item in items})
-    return result
+    return tuple(result.items())
+
+
+def get_providers() -> dict[str, str]:
+    return dict(_discover_provider_import_paths())
 
 
 CONFIG_FILE_SEARCH_LOCATIONS = [  # (path, filename, check_parent_paths, default)
