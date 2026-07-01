@@ -165,6 +165,13 @@ class BaseBeakerApp(ServerApp):
         url_prefix = os.environ.get("BEAKER_SERVER_PREFIX", "").rstrip("/")
         self.base_url = url_prefix
 
+        # Register Beaker-branded error templates ahead of Jupyter's defaults so that
+        # 404/500/generic error pages match the Beaker interface instead of the stock
+        # Jupyter pages. The jinja FileSystemLoader searches extra_template_paths first.
+        error_template_path = os.path.join(os.path.dirname(__file__), "error_templates")
+        if error_template_path not in self.extra_template_paths:
+            self.extra_template_paths = [*self.extra_template_paths, error_template_path]
+
         super().initialize(argv, find_extensions, new_httpserver, starter_extension, **kwargs)
 
         self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")

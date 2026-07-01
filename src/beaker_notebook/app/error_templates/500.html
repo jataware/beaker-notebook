@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Something went wrong · Beaker</title>
+  <link rel="icon" href="{{ base_url }}favicon.ico" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      box-sizing: border-box;
+      background-color: #eff3f8;
+      color: #043d75;
+      font-family: Lato, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .beaker-error-card {
+      width: 100%;
+      max-width: 30rem;
+      background-color: #ffffff;
+      border: 1px solid #dfe7ef;
+      border-radius: 0.75rem;
+      box-shadow: 0 1px 3px rgba(4, 61, 117, 0.08);
+      padding: 2.5rem 2rem;
+      text-align: center;
+      box-sizing: border-box;
+    }
+    .beaker-error-logo {
+      width: 4rem;
+      height: 4rem;
+      margin-bottom: 1rem;
+    }
+    .beaker-error-code {
+      font-size: 3.5rem;
+      font-weight: 700;
+      line-height: 1;
+      color: #7254f3;
+      margin: 0;
+    }
+    .beaker-error-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin: 0.75rem 0 0.5rem;
+    }
+    .beaker-error-message {
+      font-size: 1rem;
+      line-height: 1.5;
+      color: #708da9;
+      margin: 0 0 1.75rem;
+    }
+    .beaker-error-button {
+      display: inline-block;
+      padding: 0.6rem 1.4rem;
+      background-color: #7254f3;
+      color: #ffffff;
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-decoration: none;
+      border-radius: 0.5rem;
+      transition: background-color 0.15s ease-in-out;
+    }
+    .beaker-error-button:hover {
+      background-color: #5f43e0;
+    }
+  </style>
+</head>
+<body>
+  <main class="beaker-error-card">
+    <p class="beaker-error-code">500</p>
+    <h1 class="beaker-error-title">Something went wrong</h1>
+    <p class="beaker-error-message">
+      Beaker ran into an unexpected problem while handling your request. Try again
+      in a moment &mdash; if the issue persists, check the server logs.
+    </p>
+    <a class="beaker-error-button" href="{{ base_url }}">Return to Beaker</a>
+  </main>
+</body>
+</html>

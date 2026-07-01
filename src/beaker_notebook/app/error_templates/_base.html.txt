@@ -1,0 +1,6 @@
+NOTE: This directory holds Beaker-branded error pages that override Jupyter's
+default error templates. They are plain HTML rendered through Jupyter's jinja
+environment (via `extra_template_paths`), so the only template variables used
+are the standard Jupyter namespace values (`base_url`, `status_code`,
+`status_message`). Keep these pages self-contained: no external CSS/JS, and use
+only the `{base_url}/beaker.svg` asset that the server already serves.
