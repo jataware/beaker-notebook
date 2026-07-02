@@ -162,6 +162,7 @@ const language = computed(() => (beakerSession.activeContext?.language?.slug || 
 
 const execute = (evt: any) => {
     const future = props.cell.execute(session);
+    props.cell.last_execution.status = ExecuteStatus.Pending;
     exit();
 }
 

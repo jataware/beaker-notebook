@@ -5,6 +5,7 @@
                 <SplitButton
                     @click="notebook.insertCellAfter()"
                     class="toolbar-splitbutton add-cell-button"
+                    v-tooltip.bottom="{value: 'Add Code Cell', showDelay: 300}"
                     icon="pi pi-plus"
                     size="small"
                     :severity="props.defaultSeverity"
@@ -20,6 +21,8 @@
                     }"
                 />
                 <Button
+                    aria-label="Remove Cell"
+                    v-tooltip.bottom="{value: 'Remove Cell', showDelay: 300}"
                     @click="notebook.removeCell()"
                     icon="pi pi-minus"
                     size="small"
@@ -27,6 +30,8 @@
                     text
                 />
                 <Button
+                    aria-label="Execute Selected Cell"
+                    v-tooltip.bottom="{value: 'Execute Selected Cell', showDelay: 300}"
                     @click="notebook.selectedCell().execute()"
                     icon="pi pi-play"
                     size="small"
@@ -34,6 +39,17 @@
                     text
                 />
                 <Button
+                    aria-label="Rerun Full Notebook"
+                    v-tooltip.bottom="{value: 'Rerun Full Notebook', showDelay: 300}"
+                    @click="rerunNotebook()"
+                    icon="pi pi-forward"
+                    size="small"
+                    :severity="props.defaultSeverity"
+                    text
+                />
+                <Button
+                    aria-label="Interrupt execution"
+                    v-tooltip.bottom="{value: 'Interrupt execution', showDelay: 300}"
                     @click="session.interrupt()"
                     icon="pi pi-stop"
                     size="small"
@@ -55,6 +71,7 @@
         <template #end>
             <slot name="end">
                 <AnnotationButton
+                    aria-label="Analyze Codecells"
                     :action="analyzeCells"
                     v-tooltip.bottom="{value: 'Analyze Codecells', showDelay: 300}"
                     size="small"
@@ -62,6 +79,7 @@
                     text
                 />
                 <Button
+                    aria-label="Reset notebook"
                     @click="resetNotebook"
                     v-tooltip.bottom="{value: 'Reset notebook', showDelay: 300}"
                     icon="pi pi-refresh"
@@ -71,6 +89,7 @@
                 />
                 <div v-if="props.saveAvailable" class="p-splitbutton toolbar-splitbutton">
                     <Button
+                        aria-label="Save"
                         class="p-splitbutton-defaultbutton"
                         @click="saveNotebook"
                         v-tooltip.bottom="{
@@ -100,6 +119,7 @@
                         <div>Save as:</div>
                         <InputGroup>
                             <InputText
+                                aria-label="Filename to save to"
                                 class="saveas-input"
                                 ref="saveAsInputRef"
                                 v-model="saveAsFilename"
@@ -111,6 +131,7 @@
                     </Popover>
                 </div>
                 <SplitButton
+                    aria-label="Download notebook"
                     @click="downloadNotebook"
                     class="toolbar-splitbutton"
                     v-tooltip.bottom="{value: 'Export (download) as .ipynb', showDelay: 300}"
@@ -360,6 +381,17 @@ const processNotebookForExport = (notebookData: any) => {
 
     return clonedNotebook;
 };
+
+const rerunNotebook = async () => {
+    console.log("Rerunning");
+    console.log({session, beakerSession, notebook});
+    for (const cell of session.notebook.cells) {
+        if (cell.cell_type === "code" && cell.source.length) {
+            const beakerCell = beakerSession.findNotebookCellById(cell.id);
+            await beakerCell.execute();
+        }
+    }
+}
 
 const refreshExportTypes = async () => {
     const ignoredFormats = new Set(["custom", "qtpdf", "qtpng", "webpdf"]);
