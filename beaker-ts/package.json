@@ -1,6 +1,6 @@
 {
   "name": "@jataware/beaker-client",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "type": "module",
   "description": "Beaker Notebook client library",
   "repository": {
