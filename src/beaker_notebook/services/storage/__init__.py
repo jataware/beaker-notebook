@@ -28,7 +28,7 @@ class with_temp_root():
     def __init__(self, contents_manager: ContentsManager, root: os.PathLike):
         self.cm = contents_manager
         self.orig_root = None
-        self.temp_root = root
+        self.temp_root = os.path.abspath(os.path.join(root, '..'))
 
     async def __aenter__(self):
         # Setting trait values directly to avoid calling root_dir's validator which doesn't

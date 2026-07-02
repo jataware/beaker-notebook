@@ -89,6 +89,25 @@ def manager(data_path, local_cm):
     )
 
 
+@pytest.fixture
+def relative_manager(tmp_path, monkeypatch):
+    """A FileNotebookManager backed by a *plain* contents manager and configured
+    with a relative snapshot path.
+
+    This is the deploy-bug shape: without the data-path shortcut of
+    ``BeakerLocalContentsManager``, resolution goes through the ``with_temp_root``
+    ``root_dir`` swap, which is exactly where the path used to be doubled. cwd is
+    pinned to ``tmp_path`` so the relative path resolves into the sandbox.
+    """
+    monkeypatch.chdir(tmp_path)
+    cm = AsyncFileContentsManager(root_dir=str(tmp_path))
+    return FileNotebookManager(
+        contents_manager=cm,
+        snapshot_path="snaps",
+        notebook_path="nb",
+    )
+
+
 class TestSafeSessionId:
     """SnapshotHandler must reject session ids that aren't a single, safe path
     component before they reach the storage layer."""
@@ -132,13 +151,40 @@ class TestGetOsPathContainment:
 class TestWithTempRoot:
     """The root_dir swap must be reversible, validator-free, and lock-safe."""
 
+    @pytest.mark.parametrize(
+        "root, expected",
+        [
+            # Callers pass the *full* path into the contents-manager ops inside the
+            # block, so the temp root must be the path's parent -- otherwise the
+            # path component is counted twice (the "./foo/foo/..." doubling bug).
+            ("/data/notebooks/.snapshots", "/data/notebooks"),
+            ("/data", "/"),
+            ("/data/", "/"),
+        ],
+    )
+    async def test_roots_at_parent_of_absolute_path(self, plain_cm, root, expected):
+        async with with_temp_root(contents_manager=plain_cm, root=root):
+            assert str(plain_cm.root_dir) == expected
+
+    async def test_roots_at_parent_of_relative_path(self, plain_cm, tmp_path, monkeypatch):
+        # A relative path is resolved against cwd, so its parent is cwd itself for
+        # a single-component path.
+        monkeypatch.chdir(tmp_path)
+        async with with_temp_root(contents_manager=plain_cm, root="snaps"):
+            assert str(plain_cm.root_dir) == os.path.abspath(str(tmp_path))
+
     async def test_bypasses_validator_restores_root_and_releases_lock(self, plain_cm, tmp_path):
         original = plain_cm.root_dir
         missing = str(tmp_path / "does" / "not" / "exist")
+        # with_temp_root roots the manager at the *parent* of the requested path,
+        # since callers pass the full path (not just a filename) into the
+        # contents-manager operations inside the block.
+        expected_root = os.path.abspath(os.path.join(missing, os.pardir))
         async with with_temp_root(contents_manager=plain_cm, root=missing):
             # The root_dir validator would reject a non-existent dir; the swap
-            # writes the trait store directly to get around it.
-            assert str(plain_cm.root_dir) == missing
+            # writes the trait store directly to get around it. (The parent is
+            # itself non-existent here, so the bypass is still exercised.)
+            assert str(plain_cm.root_dir) == expected_root
             assert temp_root_lock.locked()
         assert plain_cm.root_dir == original
         assert not temp_root_lock.locked()
@@ -157,12 +203,17 @@ class TestWithTempRoot:
         observed_own_root = []
 
         async def worker(name):
-            root = str(tmp_path / name)
+            # with_temp_root roots at the parent of the requested path, so give
+            # each worker a *distinct* parent (tmp_path/<name>). If they shared a
+            # parent, the assertion below would hold even without the lock and the
+            # test would no longer prove serialization.
+            root = str(tmp_path / name / "leaf")
+            expected_root = os.path.abspath(os.path.join(root, os.pardir))
             async with with_temp_root(contents_manager=plain_cm, root=root):
                 # Without the serializing lock, a sibling task could swap
                 # root_dir out from under us across this await point.
                 await asyncio.sleep(0)
-                observed_own_root.append(str(plain_cm.root_dir) == root)
+                observed_own_root.append(str(plain_cm.root_dir) == expected_root)
 
         await asyncio.gather(*(worker(f"r{i}") for i in range(8)))
         assert observed_own_root and all(observed_own_root)
@@ -224,3 +275,33 @@ class TestSnapshotLifecycle:
     async def test_get_missing_snapshot_raises_file_not_found(self, manager):
         with pytest.raises(FileNotFoundError):
             await manager.get_snapshot("never-saved")
+
+
+class TestPathResolution:
+    """A snapshot must land at exactly one copy of its path -- never doubled --
+    for both absolute and relative snapshot paths."""
+
+    async def test_absolute_snapshot_path_is_not_doubled(self, manager, data_path):
+        # BeakerLocalContentsManager resolves absolute paths under the data dir
+        # directly (root_dir is bypassed), but the file must still land once.
+        await manager.save_snapshot(session_id="sess-1", content=_notebook())
+        snapshot_dir = data_path / "notebooks" / ".snapshots"
+        assert (snapshot_dir / "sess-1.ipynb").is_file()
+        # The pre-fix bug produced ".../.snapshots/notebooks/.snapshots/...".
+        assert not (snapshot_dir / "notebooks" / ".snapshots" / "sess-1.ipynb").exists()
+
+    async def test_relative_snapshot_path_is_not_doubled(self, relative_manager, tmp_path):
+        # This is the regression guard for the deploy bug: with a relative path
+        # the file used to land at "<cwd>/snaps/snaps/sess-1.ipynb".
+        await relative_manager.save_snapshot(session_id="sess-1", content=_notebook())
+        assert (tmp_path / "snaps" / "sess-1.ipynb").is_file()
+        assert not (tmp_path / "snaps" / "snaps" / "sess-1.ipynb").exists()
+
+    async def test_relative_snapshot_round_trips(self, relative_manager):
+        # Save and read back through the same relative-path resolution.
+        await relative_manager.save_snapshot(
+            session_id="sess-1", content=_notebook(selected_cell="cell-xyz")
+        )
+        got = await relative_manager.get_snapshot("sess-1")
+        assert got.content["nbformat"] == 4
+        assert got.content["metadata"]["selected_cell"] == "cell-xyz"
