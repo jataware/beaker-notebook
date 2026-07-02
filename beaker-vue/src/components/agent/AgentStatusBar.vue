@@ -37,11 +37,15 @@ const lastThoughtText = computed(() => {
 
     if (typeof lastThought.content === 'string') {
         return lastThought.content;
-    } else if (typeof lastThought.content === 'object' && lastThought.content?.thought) {
-        return lastThought.content.thought;
-    } else if (typeof lastThought.content === 'object') {
+    } else if (typeof lastThought.content === 'object' && lastThought.content) {
         const content = lastThought.content;
-        return content.thought || content.text || content.message || JSON.stringify(content);
+        // A react step can legitimately have an empty thought -- some models
+        // (e.g. terse ones) don't narrate before a tool call. Show nothing in
+        // that case rather than dumping the raw step object as JSON.
+        if ('thought' in content) {
+            return content.thought || null;
+        }
+        return content.text || content.message || null;
     }
 
     return null;
