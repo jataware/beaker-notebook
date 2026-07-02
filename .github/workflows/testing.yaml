@@ -45,11 +45,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install hatch uv
     # install npm packages in ts packages
-    - name: beaker-vue npm install
-      working-directory: beaker-vue
-      run: npm install
+    # Note: always install beaker-ts first as it is a dependency of beaker-vue
     - name: beaker-ts npm install
       working-directory: beaker-ts
+      run: npm install
+    - name: beaker-vue npm install
+      working-directory: beaker-vue
       run: npm install
     # make beaker package
     - name: make build
