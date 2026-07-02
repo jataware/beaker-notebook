@@ -271,8 +271,16 @@ export class ChatHistory implements IChatHistory {
     }
 
     get message_token_count(): number {
+        // Records that have been folded into a summary stay in raw_records but
+        // are excluded from the outgoing history, so they must not count
+        // toward live message usage.
+        const summarizedUuids = new Set(
+            (this.history?.summaries ?? []).flatMap(
+                (summary) => summary.summarized_messages ?? [],
+            ),
+        );
         return this.records
-            .filter((record) => !("summarizedMessages" in record))
+            .filter((record) => !("summarizedMessages" in record) && !summarizedUuids.has(record.uuid))
             .reduce((sum, record) => sum + (record.token_count ?? 0), 0);
     }
 
