@@ -2,7 +2,9 @@
     <div id="provider-select">
         <div v-if="props.configType !== 'server' && config?.config_type !== 'server'" id="provider-select-container" class="config-option">
             <div id="provider-select-selector">
-                <Listbox v-model="inputModel.provider" :options="providerNames"/>
+                <!-- scroll-height fills the container instead of PrimeVue's 14rem
+                     default, which otherwise hides providers past the ~6th. -->
+                <Listbox v-model="inputModel.provider" :options="providerNames" scroll-height="100%"/>
             </div>
             <div id="provider-select-providers">
                 <ConfigEntryComponent
