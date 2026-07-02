@@ -35,6 +35,42 @@ jobs:
                   echo "Tag is not on main and is not a prerelease version. Exiting."
                   exit 1
 
+    # Look for a passing run of the testing workflow already tied to this
+    # commit. Merges/pushes to main test the same SHA we tag, so full releases
+    # normally already have a passing run and can skip the inline tests below.
+    check-tests:
+        name: Check for existing test run
+        runs-on: ubuntu-22.04
+        needs: sanity-check
+        outputs:
+            already_tested: ${{ steps.check.outputs.already_tested }}
+        steps:
+            - name: Look for a passing test run for this commit
+              id: check
+              env:
+                GH_TOKEN: ${{ github.token }}
+              run: |
+                  SHA="${{ github.sha }}"
+                  SUCCESS=$(gh api \
+                    "repos/${{ github.repository }}/actions/workflows/testing.yaml/runs?head_sha=$SHA&status=completed" \
+                    --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+                  if [ "${SUCCESS:-0}" -gt 0 ]; then
+                      echo "Found $SUCCESS passing test run(s) for $SHA; skipping inline tests."
+                      echo "already_tested=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "No passing test run for $SHA; tests will run inline."
+                      echo "already_tested=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+    # Inline fallback: only runs when the tagged commit has no passing test
+    # run yet (e.g. prereleases cut from commits that were never on main).
+    run-tests:
+        name: Run tests (inline fallback)
+        needs: check-tests
+        if: needs.check-tests.outputs.already_tested != 'true'
+        uses: ./.github/workflows/testing.yaml
+        secrets: inherit
+
     build-python:
         name: Build & Publish
         runs-on: ubuntu-22.04
@@ -43,7 +79,11 @@ jobs:
           PIP_PRE: 1
         permissions:
             id-token: write
-        needs: sanity-check
+        needs: [sanity-check, check-tests, run-tests]
+        # Proceed when tests are known good: either a pre-existing passing run
+        # (run-tests skipped) or a successful inline run. !failure() lets a
+        # skipped run-tests through while still blocking on any real failure.
+        if: ${{ !failure() && !cancelled() }}
         steps:
             - name: Apt update and build install
               shell: bash
@@ -67,7 +107,10 @@ jobs:
     build-deploy-npm:
         name: Build & Publish
         runs-on: ubuntu-22.04
-        needs: sanity-check
+        needs: [sanity-check, check-tests, run-tests]
+        # See build-python: proceed on a pre-existing pass or a successful
+        # inline run, block on any real failure.
+        if: ${{ !failure() && !cancelled() }}
         permissions:
             id-token: write
         steps:
