@@ -93,14 +93,6 @@ const emit = defineEmits([
     'blur',
 ])
 
-enum ExecuteStatus {
-  Success = 'ok',
-  Modified = 'modified',
-  Error = 'error',
-  Pending = 'pending',
-  None = 'none'
-}
-
 const hasRollback = computed(() => {
     return typeof(cell.value?.last_execution?.checkpoint_index) !== "undefined";
 });
@@ -138,11 +130,11 @@ const analyzeCell = async () => {
 const badgeSeverity = computed(() => {
     const defaultValue = "secondary";
     const mappings = {
-        [ExecuteStatus.Success]: 'success',
-        [ExecuteStatus.Modified]: 'warning',
-        [ExecuteStatus.Error]: 'danger',
-        [ExecuteStatus.Pending]: defaultValue,
-        [ExecuteStatus.None]: defaultValue,
+        [CodeCellExecutionStatus.Success]: 'success',
+        [CodeCellExecutionStatus.Modified]: 'warning',
+        [CodeCellExecutionStatus.Error]: 'danger',
+        [CodeCellExecutionStatus.Pending]: defaultValue,
+        [CodeCellExecutionStatus.None]: defaultValue,
     };
     return mappings[cell.value?.last_execution?.status] || defaultValue;
 });
@@ -162,8 +154,9 @@ const language = computed(() => (beakerSession.activeContext?.language?.slug || 
 
 const execute = (evt: any) => {
     const future = props.cell.execute(session);
-    props.cell.last_execution.status = ExecuteStatus.Pending;
+    props.cell.last_execution.status = CodeCellExecutionStatus.Pending;
     exit();
+    return future;
 }
 
 const enter = (position?: "start" | "end" | number) => {
@@ -256,6 +249,15 @@ watch(
 
 <script lang="ts">
 import { BeakerCodeCell } from "@jataware/beaker-client";
+
+export enum CodeCellExecutionStatus {
+  Success = 'ok',
+  Modified = 'modified',
+  Error = 'error',
+  Pending = 'pending',
+  None = 'none'
+}
+
 export default {
     modelClass: BeakerCodeCell,
     icon: "pi pi-code",

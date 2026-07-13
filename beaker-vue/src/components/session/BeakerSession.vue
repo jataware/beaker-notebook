@@ -9,7 +9,7 @@ import { reactive, ref, inject, provide, defineComponent } from 'vue';
 import type { VNode, PropType, ComponentInternalInstance, DefineComponent } from 'vue';
 import CodeEditor from '../misc/CodeEditor.vue';
 import { BeakerSession } from '@jataware/beaker-client';
-import type { IMimeRenderer, IBeakerCell, BeakerKernelStatus } from '@jataware/beaker-client';
+import type { IMimeRenderer, IBeakerCell, BeakerKernelStatus, IBeakerFuture } from '@jataware/beaker-client';
 import * as messages from '@jupyterlab/services/lib/kernel/messages';
 import type { ConnectionStatus as JupyterConnectionStatus } from '@jupyterlab/services/lib/kernel/kernel';
 
@@ -20,7 +20,7 @@ export interface IBeakerCellComponent {
   cell: IBeakerCell,
   enter: (position?: "start" | "end" | number) => void,
   exit: () => void,
-  execute: () => void,
+  execute: () => IBeakerFuture,
   clear: () => void,
   editor?: typeof CodeEditor,
   lintAnnotations?: {}[],
@@ -32,27 +32,22 @@ export const toBeakerCellComponent = (vnode: VNode): IBeakerCellComponent => {
   if (component === undefined) {
     return undefined;
   }
-  return reactive({
-    // @
-    ...{
-      cell: (component.proxy as unknown as {cell: IBeakerCell}).cell,
-    },
-    ...{
-      enter: component.exposed.enter,
-      exit: component.exposed.exit,
-      execute: component.exposed.execute,
-      clear: component.exposed.clear,
-      editor: component.exposed.editor,
-      lintAnnotations: component.exposed.lintAnnotations,
-    } as {
-      enter: (position?: "start" | "end" | number)=>void,
-      exit: ()=>void,
-      execute: ()=>void,
-      clear: ()=>void,
-      editor?: typeof CodeEditor,
-    },
-    $: component,
-  });
+  return reactive(
+    {
+      ...{
+        cell: (component.proxy as unknown as {cell: IBeakerCell}).cell,
+      },
+      ...{
+        enter: component.exposed.enter,
+        exit: component.exposed.exit,
+        execute: component.exposed.execute,
+        clear: component.exposed.clear,
+        editor: component.exposed.editor,
+        lintAnnotations: component.exposed.lintAnnotations,
+      },
+      $: component,
+    } as IBeakerCellComponent
+  );
 }
 
 export const BeakerSessionComponent: DefineComponent<any, any, any> = defineComponent({

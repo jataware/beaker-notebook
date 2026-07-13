@@ -154,6 +154,7 @@ import { PageConfig } from '@jupyterlab/coreutils';
 import { URLExt } from '@jupyterlab/coreutils';
 import type { BeakerSession, BeakerBaseCell } from '@jataware/beaker-client';
 import { BeakerNotebook, BeakerCodeCell, BeakerMarkdownCell, BeakerRawCell, BeakerQueryCell } from '@jataware/beaker-client';
+import { CodeCellExecutionStatus } from "@/components/cell/BeakerCodeCell.vue";
 import type { BeakerNotebookComponentType } from './BeakerNotebook.vue';
 import contentDisposition from "content-disposition";
 
@@ -383,12 +384,16 @@ const processNotebookForExport = (notebookData: any) => {
 };
 
 const rerunNotebook = async () => {
-    console.log("Rerunning");
-    console.log({session, beakerSession, notebook});
     for (const cell of session.notebook.cells) {
-        if (cell.cell_type === "code" && cell.source.length) {
+        if (cell instanceof BeakerCodeCell && cell.source.length) {
             const beakerCell = beakerSession.findNotebookCellById(cell.id);
-            await beakerCell.execute();
+            const future = beakerCell.execute();
+            await future.done;
+            if (cell.last_execution?.status === CodeCellExecutionStatus.Error) {
+                console.error(`Execution of cell ${cell.id} resulted in error '${cell.last_execution.ename}: ${cell.last_execution.evalue}'.\nAborting execution of additional cells.`)
+                // Stop iterating and return immediately
+                return;
+            }
         }
     }
 }
