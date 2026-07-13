@@ -344,6 +344,11 @@ boolean value which will enable/disable the tool based on the value.",
                 "default_model_name": "mistral-nemo",
                 "api_key": ""
             },
+            "openrouter": {
+                "import_path": "archytas.models.openrouter.OpenRouterModel",
+                "default_model_name": "openai/gpt-4o-mini",
+                "api_key": ""
+            },
         },
     )
 
