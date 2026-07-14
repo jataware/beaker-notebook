@@ -1,14 +1,15 @@
 import abc
 import asyncio
+import hashlib
 import inspect
 import json
-from typing import Any, Callable, Optional, TYPE_CHECKING, ClassVar
-import hashlib
-import shutil
-from tempfile import mkdtemp
 import os
 import os.path
+import shutil
 import requests
+import yaml
+from tempfile import mkdtemp
+from typing import Any, Callable, Optional, TYPE_CHECKING, ClassVar
 
 from archytas.tool_utils import AgentRef, tool, statetool, LoopControllerRef, ReactContextRef
 
@@ -174,7 +175,25 @@ class BeakerSubkernel(abc.ABC):
         ]
         if doc:
             parts.append(doc)
-        return "\n".join(parts)
+        data = {
+            "usage": [
+                "This is information regarding the Jupyter kernel environment that your notebook, ",
+                "and the code you write, are running in."
+            ],
+            "subkernel": {
+                "name": self.DISPLAY_NAME,
+                "language": self.JUPYTER_LANGUAGE,
+                "docstring": doc or None,
+            },
+        }
+        yaml_text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False).rstrip("\n")
+        return f"""
+## Runtime environment
+
+```yaml
+{yaml_text}
+```
+        """.strip()
 
     @classmethod
     @abc.abstractmethod

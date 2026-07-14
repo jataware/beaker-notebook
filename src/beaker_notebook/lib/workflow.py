@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from .context import BeakerContext
 
 WORKFLOW_PREAMBLE_PROMPT="""
+## Workflows
+
+```xml
 <workflows>
 A workflow is a named, multi-stage procedure for solving an end-to-end problem.
 Each workflow has STAGES; each stage has ordered STEPS. At most one workflow
@@ -62,6 +65,7 @@ Files saved relative to the agent working directory are served under /files/
 {workflow_synopsis}
 </workflows-list>
 </workflows>
+```
 """
 
 @dataclass(kw_only=True)

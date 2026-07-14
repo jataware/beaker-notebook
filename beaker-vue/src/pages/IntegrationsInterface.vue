@@ -184,6 +184,7 @@ import ProgressSpinner from 'primevue/progressspinner';
 
 import AdhocIntegrationEditor from '../components/integrations/AdhocIntegrationEditor.vue';
 import SkillIntegrationViewer from '../components/integrations/SkillIntegrationViewer.vue';
+import MCPIntegrationViewer from '../components/integrations/MCPIntegrationViewer.vue';
 import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
 import ExamplesPanel from '../components/integrations/ExamplesPanel.vue';
 import ResourceViewer from '../components/integrations/ResourceViewer.vue';
@@ -282,6 +283,13 @@ const integrationMapping: {[integrationType: string]: any} = {
         rightPanelComponent: ExamplesPanel,
         rightPanelLabel: 'Example Editor',
         rightPanelIcon: 'pi pi-list-check',
+    },
+    mcp: {
+        readOnly: true,
+        centerComponent: MCPIntegrationViewer,
+        rightPanelComponent: null,
+        rightPanelLabel: 'Resources',
+        rightPanelIcon: 'pi pi-folder-open',
     },
     default: {
         readOnly: false,

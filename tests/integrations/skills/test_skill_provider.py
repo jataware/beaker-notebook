@@ -471,11 +471,6 @@ class TestPrompt:
         assert "full-skill" in prompt
         assert "minimal-skill" in prompt
 
-    def test_prompt_includes_location(self, skills_data_dir: Path):
-        provider = _make_provider([str(skills_data_dir)])
-        skill = provider._find_skill_by_slug("full-skill")
-        assert f"Location: {skill.base_path}" in provider.prompt
-
     def test_prompt_includes_compatibility(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
         assert "Requires Python 3.10+" in provider.prompt
@@ -488,7 +483,7 @@ class TestPrompt:
 
     def test_prompt_includes_code_example_count(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])
-        assert "Code examples: 2" in provider.prompt
+        assert "has_code_examples: true" in provider.prompt
 
     def test_prompt_lists_available_resources(self, skills_data_dir: Path):
         provider = _make_provider([str(skills_data_dir)])

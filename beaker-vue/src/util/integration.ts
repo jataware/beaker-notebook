@@ -51,6 +51,30 @@ export interface SkillExampleResource extends IntegrationResource {
     content?: string
 }
 
+export interface MCPToolResource extends IntegrationResource {
+    resource_type: "mcp_tool";
+    tool_name: string
+    description?: string
+    // JSON Schema for the tool's arguments, as returned by tools/list.
+    input_schema?: Record<string, any>
+}
+
+export interface MCPResourceResource extends IntegrationResource {
+    resource_type: "mcp_resource";
+    uri: string
+    name: string
+    description?: string
+    mime_type?: string
+    content?: string
+}
+
+export interface MCPPromptResource extends IntegrationResource {
+    resource_type: "mcp_prompt";
+    prompt_name: string
+    description?: string
+    arguments?: Record<string, any>[]
+}
+
 export type IntegrationResourceMap = {
     [id in string]: IntegrationResource
 }
@@ -66,6 +90,36 @@ export interface Integration {
     datatype?: string
     // important: resources are loaded via a second API call and may not exist or be filled on the object
     resources?: IntegrationResourceMap;
+}
+
+// Connection config for an MCP server. Either stdio (command/args/env) or
+// http/sse (url/headers). `transport` may be explicit or left for the backend
+// to infer from command/url.
+export interface MCPServerConfig {
+    name: string
+    title?: string
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+    url?: string
+    headers?: Record<string, string>
+    transport?: "stdio" | "http" | "sse"
+    disabled?: boolean
+    description?: string
+    metadata?: Record<string, any>
+}
+
+export interface MCPIntegration extends Integration {
+    datatype: "mcp";
+    server_config?: MCPServerConfig
+    // Transient: true only while a live session is open.
+    connected?: boolean
+    // Whether the tool/resource/prompt catalog has been fetched into resources.
+    resources_loaded?: boolean
+    server_title?: string
+    server_version?: string
+    instructions?: string
+    capabilities?: Record<string, any>
 }
 
 export type IntegrationMap = {[key in string]: Integration};
@@ -120,6 +174,42 @@ async function integrationApiWrapper<T>(
 export const getIntegrationProviderType = (integration: Integration) => integration.provider.split(":")[0];
 
 export const getIntegrationProviderSlug = (integration: Integration) => integration.provider.split(":")[1]
+
+// Per-datatype display metadata. Single source of truth for how each
+// integration datatype is presented in the UI; extend this interface as more
+// per-type presentation data is needed.
+export interface DatatypeDisplay {
+    // Human-readable name for the datatype (e.g. surfaced as an icon tooltip).
+    label: string;
+    // Bare filename of a bundled icon in public/icons/. Omit for datatypes
+    // that have no associated icon.
+    icon?: string;
+}
+
+const DATATYPE_DISPLAY: {[datatype in string]: DatatypeDisplay} = {
+    api: { label: "API" },
+    database: { label: "Database" },
+    dataset: { label: "Dataset" },
+    mcp: { label: "MCP Server", icon: "mcp.webp" },
+    skill: { label: "Agent Skill", icon: "skill.png" },
+};
+
+// Resolves the displayable icon URL for an integration based on its datatype,
+// or undefined if that datatype has no associated icon. Uses BASE_URL so the
+// path is correct under a non-root deployment base.
+export const getIntegrationIcon = (integration: Integration): string | undefined => {
+    const filename = integration?.datatype ? DATATYPE_DISPLAY[integration.datatype]?.icon : undefined;
+    return filename ? `${import.meta.env.BASE_URL}icons/${filename}` : undefined;
+};
+
+// Returns a human-readable label for an integration's datatype, falling back to
+// the raw datatype string (or undefined if unset).
+export const getIntegrationTypeLabel = (integration: Integration): string | undefined => {
+    if (!integration?.datatype) {
+        return undefined;
+    }
+    return DATATYPE_DISPLAY[integration.datatype]?.label ?? integration.datatype;
+};
 
 export const listIntegrations = async (sessionId: string): Promise<IntegrationMap> => {
     return (await integrationApiWrapper<{"integrations": IntegrationMap}>("GET", {sessionId})).integrations;

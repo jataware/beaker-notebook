@@ -26,7 +26,9 @@ from beaker_notebook.lib.chat_history import BeakerChatHistoryDoc
 from beaker_notebook.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook, url_path_join
 from beaker_notebook.lib.config import config as beaker_config
 from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.integrations.mcp import MCPIntegrationProvider
 from beaker_notebook.lib.integrations.registry import IntegrationProviderRegistry
+from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
 from beaker_notebook.lib.integrations.types import Integration
 from beaker_notebook.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
 
@@ -66,6 +68,11 @@ class BeakerContext:
     RENDERERS: ClassVar[Optional[Dict[str, Dict[str, str]]]] = None
     INTEGRATION_PROVIDERS: ClassVar[list[tuple[type[BaseIntegrationProvider], tuple, dict[str, Any]]]] = []
 
+    DEFAULT_INTEGRATION_PROVIDER_CLASSES: ClassVar[tuple[type[BaseIntegrationProvider]]] = (
+        SkillIntegrationProvider,
+        MCPIntegrationProvider,
+    )
+
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
     config: Dict[str, Any]
@@ -99,7 +106,7 @@ class BeakerContext:
             integrations = []
         if agent_cls is None:
             agent_cls = self.AGENT_CLS
-        integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
+        integrations.extend((*self.default_integration_providers, *self.context_integration_providers, *self.extra_integration_providers()))
 
 
         self.intercepts = []
@@ -280,28 +287,24 @@ class BeakerContext:
             self._notebook_state = None
 
     @property
-    def default_integration_providers(self) -> set[BaseIntegrationProvider]:
-        from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
+    def default_integration_providers(self) -> list[BaseIntegrationProvider]:
+        # Returns a list, not a set: order matters. When two providers of the
+        # same class appear (e.g. the default skills below and the context's own
+        # skills further down), the registry folds them into one and the
+        # first-added instance is the merge winner. Keeping the default instance
+        # first makes that outcome deterministic.
 
         # Load global default skills
-        default_providers = { SkillIntegrationProvider("Default Skills"), }
-
-        # Check for a skills.json file a the same level as the context.py and load it if it exists.
-        context_dir_path = Path(inspect.getabsfile(self.__class__)).parent
-        context_skills = []
-        skill_file = context_dir_path / "skills.json"
-        skill_dir = context_dir_path / "skills"
-        if skill_file.is_file():
-            context_skills.append(str(skill_file))
-        if skill_dir.is_dir() and any((child.is_dir() for child in skill_dir.iterdir())):
-            context_skills.append(str(skill_dir))
-
-        if context_skills:
-            context_skill_integration = SkillIntegrationProvider(f"{self.__class__.__name__} Skills", skill_paths=context_skills)
-            default_providers.add(context_skill_integration)
+        default_providers = [cls() for cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES]
 
         return default_providers
 
+    @property
+    def context_integration_providers(self) -> list[BaseIntegrationProvider]:
+        result = []
+        for provider in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES:
+            result.extend(provider.from_context(self))
+        return result
 
     @classmethod
     def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
@@ -698,7 +701,7 @@ class BeakerContext:
                         if integration.uuid == target_id
                     )
                 except StopIteration as e:
-                    msg = f"Integration `{target_id}` not found in {[i.slug for i in all_integrations]}"
+                    msg = f"Integration `{target_id}` not found in {[i.uuid for i in all_integrations]}"
                     raise KeyError(msg) from e
                 _provider_type, provider_id = integration.provider.split(":", maxsplit=1)
                 try:
