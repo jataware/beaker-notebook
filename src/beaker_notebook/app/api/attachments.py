@@ -117,9 +117,14 @@ class SessionAttachmentHandler(JupyterHandler):
         self._write_json(result)
 
     async def delete(self, session_id: str, attachment_id: str | None = None):
-        if not attachment_id:
-            raise web.HTTPError(400, "No attachment ID provided")
         _, owner, _ = await self._resolve_session(session_id)
+        if not attachment_id:
+            await asyncio.to_thread(
+                self.attachment_manager.delete_session, session_id, owner
+            )
+            self.set_status(204)
+            self.finish()
+            return
         try:
             await asyncio.to_thread(
                 self.attachment_manager.delete_attachment, session_id, attachment_id, owner

@@ -2,12 +2,13 @@ import hashlib
 import io
 import zipfile
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tornado import web
 
 from beaker_notebook.app.api.attachments import SessionAttachmentHandler
+from beaker_notebook.kernel import BeakerKernel
 from beaker_notebook.services.attachments import (
     AttachmentError,
     AttachmentLimits,
@@ -75,6 +76,53 @@ def test_attachment_handler_rejects_an_unverified_kernel_header():
         SessionAttachmentHandler._authenticated_request_kernel_id(handler)
 
     assert error.value.status_code == 403
+
+
+def test_kernel_clears_attachments_for_its_current_session():
+    kernel = SimpleNamespace(
+        beaker_session="session-one",
+        session_id="fallback-session",
+        jupyter_server="http://localhost:8890",
+        api_auth=MagicMock(return_value="signed-token"),
+    )
+    response = SimpleNamespace(status_code=204, text="")
+
+    with patch("beaker_notebook.kernel.requests.delete", return_value=response) as request:
+        BeakerKernel.clear_session_attachments(kernel)
+
+    request.assert_called_once_with(
+        "http://localhost:8890/beaker/attachments/session-one",
+        headers={"X-AUTH-BEAKER": "signed-token"},
+        timeout=10,
+    )
+
+
+async def test_reset_kernel_clears_session_attachments_before_rebuilding_context():
+    context = SimpleNamespace(
+        SLUG="default",
+        config={"context_info": {}},
+        subkernel=SimpleNamespace(SLUG="python3"),
+        session_attachments=[{"id": "old-attachment"}],
+    )
+    kernel = SimpleNamespace(
+        context=context,
+        clear_session_attachments=MagicMock(),
+        set_context=AsyncMock(),
+        send_set_chat_history=AsyncMock(),
+    )
+    message = SimpleNamespace(header={"msg_id": "reset-one"})
+
+    with patch("beaker_notebook.kernel.reset_config"):
+        await BeakerKernel.reset_kernel.__wrapped__(kernel, message)
+
+    kernel.clear_session_attachments.assert_called_once_with()
+    assert context.session_attachments == []
+    kernel.set_context.assert_awaited_once_with(
+        "default",
+        context.config,
+        subkernel="python3",
+        parent_header=message.header,
+    )
 
 
 def test_regular_attachment_is_draft_until_committed(manager):

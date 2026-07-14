@@ -203,6 +203,24 @@ class BeakerKernel(KernelProxyManager):
             item["current"] = item.get("id") in current_ids
         return attachments
 
+    def clear_session_attachments(self) -> None:
+        """Delete every temporary attachment owned by the current notebook session."""
+        session_id = self.beaker_session or self.session_id
+        url = url_path_join(
+            self.jupyter_server,
+            "/beaker/attachments/",
+            urllib.parse.quote(str(session_id), safe=""),
+        )
+        response = requests.delete(
+            url,
+            headers={"X-AUTH-BEAKER": self.api_auth()},
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Unable to clear session attachments (status {response.status_code}): {response.text}"
+            )
+
     async def handle_magic_word(self, server, target_stream, data):
         message = JupyterMessage.parse(data)
         cell_content: str = message.content.get("code", "").strip()
@@ -841,6 +859,8 @@ class BeakerKernel(KernelProxyManager):
     @message_handler
     async def reset_kernel(self, message):
         reset_config()
+        self.clear_session_attachments()
+        self.context.session_attachments = []
         await self.set_context(
             self.context.SLUG,
             self.context.config,

@@ -80,4 +80,13 @@ test('notebook chat attachments upload, remove, extract ZIPs, and send without t
       archiveStatus: attachment.archive_status,
     }));
   }).toEqual([{name: 'dataset.zip', committed: true, archiveStatus: 'extracted'}]);
+
+  const xsrfCookie = (await page.context().cookies()).find((cookie) => cookie.name === '_xsrf');
+  expect(xsrfCookie).toBeDefined();
+  const clearResponse = await page.request.delete(`${baseUrl}/beaker/attachments/${sessionId}`, {
+    headers: {'X-XSRFToken': xsrfCookie!.value},
+  });
+  expect(clearResponse.status()).toBe(204);
+  const remainingResponse = await page.request.get(`${baseUrl}/beaker/attachments/${sessionId}`);
+  expect(await remainingResponse.json()).toEqual([]);
 });
