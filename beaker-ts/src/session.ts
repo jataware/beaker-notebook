@@ -10,7 +10,7 @@ import * as nbformat from '@jupyterlab/nbformat';
 import type { ConnectionStatus as JupyterConnectionStatus, IAnyMessageArgs } from '@jupyterlab/services/lib/kernel/kernel';
 
 import { createMessageId, IBeakerAvailableContexts, IBeakerFuture, IActiveContextInfo } from './util';
-import { BeakerNotebook, IBeakerShellMessage, IBeakerAnyMessage, BeakerRawCell, BeakerCodeCell, BeakerMarkdownCell, BeakerQueryCell, IBeakerIOPubMessage } from './notebook';
+import { BeakerNotebook, IBeakerShellMessage, IBeakerAnyMessage, BeakerRawCell, BeakerCodeCell, BeakerMarkdownCell, BeakerQueryCell, IBeakerIOPubMessage, ISessionAttachment } from './notebook';
 import { BeakerHistory } from './history';
 import { BeakerRenderer, type IBeakerRendererOptions } from './render';
 import { ChatHistory, type IChatHistory } from './chatHistory';
@@ -390,12 +390,13 @@ export class BeakerSession {
      * @param metadata - (Optional) Any metadata to be associated with the cell.
      * @returns - A reference to the generated cell
      */
-    public addQueryCell(source: string, metadata={}) {
+    public addQueryCell(source: string, metadata={}, sessionAttachments: ISessionAttachment[] = []) {
         const cell = new BeakerQueryCell({
             cell_type: "query",
             source,
             metadata,
         });
+        cell.session_attachments = sessionAttachments;
         this.notebook.addCell(cell);
         return cell;
     };

@@ -1,5 +1,7 @@
 """Tests for tools defined on BeakerAgent (lib/agent.py)."""
 
+import json
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -164,6 +166,55 @@ async def test_notebook_state_escapes_session_id():
     assert 'session-id="weird"id<>&"' not in result
     import xml.etree.ElementTree as ET
     ET.fromstring(result)  # must still parse
+
+
+# --- session attachments --------------------------------------------------
+
+
+async def test_session_attachments_state_exposes_current_files_and_paths(tmp_path):
+    file_path = tmp_path / "sales.csv"
+    file_path.write_text("region,revenue\nwest,42\n")
+    agent = _agent_instance()
+    agent.context = SimpleNamespace(session_attachments=[{
+        "id": "attachment-one",
+        "name": "sales.csv",
+        "mimetype": "text/csv",
+        "size": file_path.stat().st_size,
+        "kind": "file",
+        "current": True,
+        "path": str(file_path),
+        "root_path": str(tmp_path),
+        "files": ["sales.csv"],
+    }])
+
+    result = json.loads(await BeakerAgent.session_attachments(agent))
+
+    assert result["attachments"][0]["current"] is True
+    assert result["attachments"][0]["path"] == str(file_path)
+    assert "temporary session attachments" in result["instructions"]
+
+
+async def test_get_session_attachment_reads_text_and_blocks_path_escape(tmp_path):
+    root = tmp_path / "archive"
+    root.mkdir()
+    file_path = root / "README.txt"
+    file_path.write_text("temporary attachment")
+    agent = _agent_instance()
+    agent.context = SimpleNamespace(session_attachments=[{
+        "id": "attachment-one",
+        "name": "dataset.zip",
+        "mimetype": "application/zip",
+        "kind": "archive",
+        "root_path": str(root),
+        "original_path": str(tmp_path / "dataset.zip"),
+        "files": ["README.txt"],
+    }])
+
+    result = await BeakerAgent.get_session_attachment(agent, "attachment-one", "README.txt")
+    assert result == "temporary attachment"
+
+    with pytest.raises(ValueError, match="must remain inside"):
+        await BeakerAgent.get_session_attachment(agent, "attachment-one", "../outside.txt")
 
 
 # --- get_notebook_cell ----------------------------------------------------

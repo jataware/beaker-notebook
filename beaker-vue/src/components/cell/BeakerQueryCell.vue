@@ -10,6 +10,24 @@
                         <span class="pi pi-user query-icon"></span>
                         <span class="query-label-user">User</span>
                     </div>
+                    <div v-if="cell.session_attachments?.length" class="query-attachments">
+                        <span
+                            v-for="attachment in cell.session_attachments"
+                            :key="attachment.id"
+                            class="query-attachment"
+                            :title="attachment.archive_error || attachment.name"
+                        >
+                            <i :class="attachment.kind === 'archive' ? 'pi pi-box' : 'pi pi-paperclip'"></i>
+                            {{ attachment.name }}
+                            <small v-if="attachment.kind === 'archive' && attachment.archive_status === 'extracted'">
+                                {{ attachment.file_count }} {{ attachment.file_count === 1 ? 'file' : 'files' }}
+                            </small>
+                            <i
+                                v-if="attachment.archive_status === 'failed'"
+                                class="pi pi-exclamation-triangle attachment-warning"
+                            ></i>
+                        </span>
+                    </div>
                     <div class="query-text">{{ cell.source }}</div>
                 </div>
             </div>
@@ -216,6 +234,32 @@ onBeforeUnmount(() => {
     white-space: pre-wrap;
     font-family: inherit;
     margin-top: 0.33rem;
+}
+
+.query-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
+}
+
+.query-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 999px;
+    background: var(--p-content-background);
+    font-size: 0.85rem;
+
+    small {
+        color: var(--p-text-muted-color);
+    }
+}
+
+.attachment-warning {
+    color: var(--p-orange-500);
 }
 
 .collapse-control {

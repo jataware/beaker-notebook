@@ -158,6 +158,8 @@ class BaseBeakerApp(ServerApp):
         self.notebook_manager = self.notebook_manager_class(
             parent=self,
         )
+        from beaker_notebook.services.attachments import SessionAttachmentManager
+        self.attachment_manager = SessionAttachmentManager(parent=self)
         from beaker_notebook.services.context.manager import BeakerContextManager
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
@@ -274,6 +276,9 @@ class BaseBeakerApp(ServerApp):
 
     def stop(self, from_signal = False, **kwargs):
         print("Shutting down Beaker server...")
+        attachment_manager = getattr(self, "attachment_manager", None)
+        if attachment_manager is not None:
+            attachment_manager.cleanup()
         return super().stop(from_signal, **kwargs)
 
     @property

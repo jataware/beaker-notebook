@@ -122,6 +122,7 @@ class BeakerContext:
         )
 
         self.current_llm_query = None
+        self.session_attachments: list[dict[str, Any]] = []
         self._notebook_state = None
 
         self.disable_tools()

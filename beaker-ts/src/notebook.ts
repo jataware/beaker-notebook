@@ -196,6 +196,22 @@ export type BeakerQueryEvent =
 export interface IQueryCell extends nbformat.IBaseCell {
     cell_type: 'query';
     events: BeakerQueryEvent[];
+    session_attachments?: ISessionAttachment[];
+}
+
+export interface ISessionAttachment extends PartialJSONObject {
+    id: string;
+    name: string;
+    mimetype: string;
+    size: number;
+    kind: "file" | "archive";
+    path?: string | null;
+    root_path: string;
+    original_path?: string | null;
+    archive_status?: "extracted" | "failed" | null;
+    archive_error?: string | null;
+    file_count: number;
+    files: string[];
 }
 
 export class BeakerRawCell extends BeakerBaseCell implements nbformat.IRawCell {
@@ -335,6 +351,8 @@ export class BeakerMarkdownCell extends BeakerBaseCell implements nbformat.IMark
 export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     cell_type: "query" = "query";
     events: BeakerQueryEvent[] = [];
+    /** Live-session chat attachments. Intentionally omitted from notebook serialization. */
+    session_attachments: ISessionAttachment[] = [];
     _current_input_request_message?: messages.IInputRequestMsg;
     _toolCallIndex: Map<string, {eventIndex: number; slot: number}> = new Map();
 
@@ -564,7 +582,8 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
         const future = session.sendBeakerMessage(
             "llm_request",
             {
-                request: this.source
+                request: this.source,
+                attachments: this.session_attachments.map((attachment) => attachment.id),
             },
             undefined,
             metadata,
