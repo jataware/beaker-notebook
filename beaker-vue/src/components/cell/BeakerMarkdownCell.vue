@@ -27,7 +27,7 @@
 
 <script setup lang="ts">
 import { ref, inject, computed, nextTick, onBeforeMount, getCurrentInstance, onBeforeUnmount} from "vue";
-import { marked } from 'marked';
+import { marked } from '../../util/markdown';
 import { findSelectableParent } from '../../util';
 import type { BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import type { BeakerNotebookComponentType } from '../notebook/BeakerNotebook.vue';

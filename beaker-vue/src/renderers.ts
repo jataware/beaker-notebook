@@ -3,7 +3,7 @@ import { type Component, defineComponent, h } from 'vue';
 import type { IMimeRenderer, MimetypeString } from '@jataware/beaker-client';
 import type { PartialJSONObject } from '@lumino/coreutils';
 import VueJsonPretty from 'vue-json-pretty';
-import { marked } from 'marked';
+import { marked, renderMath, stripMathDelimiters } from './util/markdown';
 import TableRendererComponent from './components/render/TableRenderer.vue';
 
 export interface BeakerRenderOutput {
@@ -62,18 +62,16 @@ export const LatexRenderer: BeakerMimeRenderer = {
     rank: 40,
     mimetypes: ["text/latex", "application/latex"],
     render: (mimeType: MimetypeString, data: PartialJSONObject, metadata: PartialJSONObject) => {
-
-        // const mathJaxTypsetter = new MathJaxTypesetter();
-        // const mathJaxDocument = await mathJaxTypsetter.mathDocument();
-
-        const input = data.toString();
-        // const output = mathJaxDocument.convert(input, {display: false}).outerHTML;
-        const output = "DEBUG TESTING DEADBEEF";
+        // `text/latex` output arrives as a raw TeX string, optionally wrapped in
+        // math delimiters ($$, $, \[ \], \( \)). Strip the wrapper and typeset
+        // with KaTeX, the same engine used for math in markdown.
+        const { text, displayMode } = stripMathDelimiters(data.toString());
+        const output = renderMath(text, displayMode);
         return {
             component: defineComponent(
                 (props) => {
                     return () => {
-                        return h('div', {class: "beaker-latex", innerHTML: props.html, style: {fontSize: "1.5rem"}});
+                        return h('div', {class: "beaker-latex", innerHTML: props.html});
                     }
                     },
                     {

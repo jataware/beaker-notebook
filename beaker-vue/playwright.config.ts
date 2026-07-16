@@ -11,6 +11,12 @@ import { defineConfig, devices } from '@playwright/test'
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
+  // TODO: Move these Playwright e2e tests into a dedicated, secluded path
+  // (e.g. `./e2e`, which the vitest and eslint configs already anticipate).
+  // They are true integration tests: they drive the app against a live server
+  // (see `baseURL` / the commented-out `webServer` block below), so they should
+  // be cleanly separated from vitest unit tests (`src/**/__tests__/`) to avoid
+  // the two runners collecting each other's specs.
   testDir: './tests',
   /* Maximum time one test can run for. */
   timeout: 60 * 1000,
