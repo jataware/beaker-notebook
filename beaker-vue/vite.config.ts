@@ -8,7 +8,14 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import { globSync } from 'glob';
 
 export const entryPoints: {[key: string]: string} = Object.fromEntries(
-  globSync("src/**/*.{vue,ts}").flatMap(file => {
+  // Test files (vitest unit tests under `__tests__/`, plus any stray
+  // co-located `*.spec`/`*.test` files) must never become library entry points.
+  globSync("src/**/*.{vue,ts}", {
+    ignore: [
+      "src/**/__tests__/**",
+      "src/**/*.{spec,test}.{ts,tsx}",
+    ],
+  }).flatMap(file => {
     const importPath = path.relative(
       'src',
       file.slice(0, file.length - path.extname(file).length)

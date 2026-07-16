@@ -13,6 +13,7 @@ import { vAutoScroll } from './directives/autoscroll';
 import BeakerThemePlugin from './plugins/theme';
 import BeakerAppConfigPlugin from './plugins/appconfig';
 import { fetch, client } from './util/fetch';
+import './util/markdown';
 import * as cookie from 'cookie';
 
 import App from './App.vue';
