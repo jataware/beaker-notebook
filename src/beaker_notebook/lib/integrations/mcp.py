@@ -48,6 +48,7 @@ import threading
 import yaml
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, ClassVar, Literal, Mapping, Optional, TypeVar
 from typing_extensions import Self
@@ -61,7 +62,7 @@ from pydantic import AnyUrl
 
 from beaker_notebook.lib.autodiscovery import find_resource_dirs
 from beaker_notebook.lib.integrations.types import Integration, Resource
-from .base import BaseIntegrationProvider
+from .base import BaseIntegrationProvider, MutableBaseIntegrationProvider
 
 if TYPE_CHECKING:
     from beaker_notebook.lib.agent import BeakerAgent
@@ -69,44 +70,6 @@ if TYPE_CHECKING:
     from mcp.types import InitializeResult
 
 logger = logging.getLogger(__name__)
-
-_T = TypeVar("_T")
-
-
-def _run_coroutine_sync(coro_factory: Callable[[], Awaitable[_T]]) -> _T:
-    """Run an async coroutine to completion from synchronous code.
-
-    Providers are constructed inside ``BeakerContext.__init__`` (see
-    ``context.py``), which runs on the kernel's already-active event loop.
-    We therefore cannot ``asyncio.run`` on the calling thread. Instead we run
-    the coroutine in a dedicated worker thread with its own fresh event loop,
-    which is safe regardless of whether the caller has a running loop and does
-    not touch it. The MCP transports create their own subprocesses / sockets
-    and are fully opened and closed within that loop, so nothing leaks across.
-
-    ``coro_factory`` is a zero-arg callable returning a fresh coroutine; it is
-    invoked inside the worker thread so the coroutine is bound to that loop.
-    """
-    box: dict[str, Any] = {}
-
-    def _runner() -> None:
-        try:
-            box["value"] = asyncio.run(coro_factory())
-        except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
-            box["error"] = exc
-
-    thread = threading.Thread(target=_runner, name="mcp-provider-init", daemon=True)
-    thread.start()
-    thread.join()
-    if "error" in box:
-        raise box["error"]
-    return box.get("value")  # type: ignore[return-value]
-
-
-def _indent(text: str, spaces: int) -> str:
-    """Indent every non-empty line of ``text`` by ``spaces`` spaces."""
-    pad = " " * spaces
-    return "\n".join(pad + line if line else line for line in text.splitlines())
 
 
 def _json_schema_type(spec: dict[str, Any]) -> str:
@@ -171,10 +134,11 @@ class MCPServerConfig:
     # explicit override; otherwise inferred from command/url
     transport: Optional[MCPTransport] = None
     disabled: bool = False
+    config_file: Optional[str] = None
+    cached_resources: Optional[dict[str, list[str]]] = None
 
     description: Optional[str] = None
     metadata: dict = field(default_factory=dict)
-
 
     @property
     def resolved_transport(self) -> MCPTransport:
@@ -187,13 +151,11 @@ class MCPServerConfig:
         raise ValueError(f"MCP server '{self.name}' has neither command nor url")
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> "MCPServerConfig":
+    def from_dict(cls, name: str, data: dict, config_file: Optional[str] = None) -> "MCPServerConfig":
         metadata = data.get("x-beaker-notebook") or {}
-        # Left unset when not explicitly configured; the integration's display
-        # name then falls back to the slug (the config key). See
-        # _build_integration.
         title = data.get("title") or metadata.get("title")
         description = data.get("description") or metadata.get("description") or None
+        cached_resources = data.get("known_resources", None)
         return cls(
             name=name,
             title=title,
@@ -204,9 +166,66 @@ class MCPServerConfig:
             headers=dict(data.get("headers") or {}),
             transport=data.get("type") or data.get("transport"),
             disabled=bool(data.get("disabled", False)),
+            config_file=config_file,
+            cached_resources=cached_resources,
             description=description,
             metadata=metadata,
         )
+
+    def to_config_dict(self):
+        data = dict(
+            name=self.name,
+            title=self.title,
+            cached_resources=self.cached_resources,
+            description=self.description,
+        )
+        if self.command:
+            data["command"] = self.command
+        if self.args:
+            data["args"] = self.args
+        if self.env:
+            data["env"] = self.env
+        if self.url:
+            data["url"] = self.url
+        if self.headers:
+            data["headers"] = self.headers
+        if self.transport:
+            data["transport"] = self.transport
+        if self.disabled:
+            data["disabled"] = self.disabled
+        if self.metadata:
+            data["x-beaker-notebook"] = self.metadata
+        return data
+
+    def update(self, data: dict|Self) -> None:
+        if isinstance(data, dict):
+            data = self.from_dict(self.name, data)
+        for key in ("name", "title", "command", "args", "description", "cached_resources", "env", "url", "transport"):
+            if not hasattr(data, key):
+                continue
+            data_val = getattr(data, key, None)
+            if data_val != getattr(self, key, None):
+                setattr(self, key, data_val)
+
+    def update_config_file(self):
+        config_path = self.config_file
+        if not config_path or not os.path.isfile(self.config_file):
+            raise FileNotFoundError(f"Unable to update file {self.config_file} as it cannot be found.")
+        with open(config_path, "r+") as f:
+            if config_path.name.endswith('.json'):
+                data = json.load(f)
+            elif config_path.name.endswith(('.yaml', '.yml')):
+                data = yaml.safe_load(f.read())
+
+            root_name = "servers" if "servers" in data else "mcpServers" if "mcpServers" in data else "servers"
+            root = data.setdefault(root_name, {})
+            root[self.name] = self.to_config_dict()
+
+            f.seek(0)
+            if config_path.name.endswith('.json'):
+                json.dump(data, f, indent=2)
+            elif config_path.name.endswith(('.yaml', '.yml')):
+                yaml.safe_dump(data, f)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +296,7 @@ class MCPIntegration(Integration):
 # Provider
 # ---------------------------------------------------------------------------
 
-class MCPIntegrationProvider(BaseIntegrationProvider):
+class MCPIntegrationProvider(MutableBaseIntegrationProvider):
     """Provides MCP servers as Beaker integrations.
 
     Servers are discovered from ``mcp.json`` config files (conventional
@@ -290,8 +309,6 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
     provider_type: ClassVar[str] = "mcp"
     display_name: ClassVar[str] = "MCP Servers"
     slug: ClassVar[str] = "mcp"
-    mutable: ClassVar[bool] = False
-    icon = "mcp.webp"
 
     def __init__(
         self,
@@ -301,18 +318,13 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         super().__init__(id=id)
         logger.debug(f"Initializing MCPIntegrationProvider {self.display_name} ({self.id})")
         self._servers: list[MCPIntegration] = list(
-            self.discover_integrations(paths=config_paths).values()
+            self.discover_integrations(paths=config_paths, corpus=self.id).values()
         )
         # Live sessions keyed by integration uuid, each paired with the
         # AsyncExitStack that owns its transport + session context managers.
         # An entry exists only while a connection is open; steady state is
         # empty. See `connect`/`disconnect`/`_session_scope`.
-        self._sessions: dict[str, tuple[ClientSession, AsyncExitStack]] = {}
-
-        # Eagerly connect to every server, fetch its catalog, and disconnect.
-        # Blocking on purpose for now (see module docstring); moving this to a
-        # background task is a known follow-up.
-        self._load_all_catalogs()
+        self._sessions: dict[str, tuple[ClientSession, AsyncExitStack, InitializeResult]] = {}
 
     # --- Discovery -------------------------------------------------------
 
@@ -321,7 +333,7 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         context_dir_path = Path(inspect.getabsfile(context.__class__)).parent
         integration_paths = cls.discover_integration_paths(root_paths=[context_dir_path])
         if integration_paths:
-            return [cls(config_paths=integration_paths)]
+            return [cls(id=f"context-{context.slug}", config_paths=integration_paths)]
         else:
             return []
 
@@ -383,7 +395,7 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
 
     @classmethod
     def discover_integrations(
-        cls, *, paths: Optional[list[str | os.PathLike]] = None, **kwargs
+        cls, *, paths: Optional[list[str | os.PathLike]] = None, corpus: Optional[str] = None, **kwargs
     ) -> Mapping[str, MCPIntegration]:
         """Discover MCP servers from ``mcp.json`` files under each root.
 
@@ -418,10 +430,10 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
                     logger.debug("Skipping duplicate MCP server '%s' from %s", name, config_path)
                     continue
                 try:
-                    server_config = MCPServerConfig.from_dict(name, server_data)
+                    server_config = MCPServerConfig.from_dict(name, server_data, config_file=config_path)
                     if server_config.disabled:
                         continue
-                    integration = cls._build_integration(server_config)
+                    integration = cls._build_integration(server_config, corpus=corpus)
                     seen_names.add(name)
                     integrations[integration.uuid] = integration
                 except Exception:
@@ -430,20 +442,23 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         return integrations
 
     @classmethod
-    def _build_integration(cls, server_config: MCPServerConfig) -> MCPIntegration:
+    def _build_integration(cls, server_config: MCPServerConfig, corpus: Optional[str] = None) -> MCPIntegration:
         """Build the (unconnected) integration shell for a server config.
 
         Resources are populated later, on connect(), from the server's
         tools/list, resources/list, and prompts/list responses.
         """
         display_name = server_config.title or server_config.name
+        provider_ref = f"{cls.provider_type}:{cls.slug}"
+        description = server_config.description or f"MCP server '{server_config.name}'"
         return MCPIntegration(
             slug=server_config.name,
             server_title=server_config.title,
             name=display_name,
-            description=server_config.description or f"MCP server '{server_config.name}'",
-            provider=f"{cls.provider_type}:{cls.slug}",
+            description=description,
+            provider=provider_ref,
             server_config=server_config,
+            corpus=corpus,
         )
 
     @classmethod
@@ -509,23 +524,49 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
             await stack.aclose()
             raise
 
-        # The initialize handshake reports the server's identity, instructions,
-        # and capabilities. Capture them onto the integration; idempotent, so
-        # re-connecting for a later tool call simply refreshes them.
-        self._apply_server_info(integration, init_result)
-
-        self._sessions[integration_id] = (session, stack)
+        self._sessions[integration_id] = (session, stack, init_result)
         integration.connected = True
         return session
 
-    @staticmethod
-    def _apply_server_info(integration: MCPIntegration, init_result: "InitializeResult") -> None:
+    async def disconnect(self, integration_id: str) -> None:
+        """Tear down the live session for an integration, if any."""
+        entry = self._sessions.pop(integration_id, None)
+        if entry is not None:
+            _, stack, _ = entry
+            await stack.aclose()
+        try:
+            self.get_integration(integration_id).connected = False
+        except KeyError:
+            pass
+
+    @asynccontextmanager
+    async def _session_scope(self, integration_id: str) -> AsyncIterator[ClientSession]:
+        """Connect for the duration of the block, then disconnect.
+
+        This is the "disconnect until use" model: every operation opens a fresh
+        session and closes it on exit. Connect and disconnect happen on the same
+        task, satisfying anyio's cancel-scope constraints. Holding sessions open
+        across calls is a deferred optimization (see OPEN QUESTIONS).
+        """
+        session = await self.connect(integration_id)
+        try:
+            yield session
+        finally:
+            await self.disconnect(integration_id)
+
+    # --- Catalog population ----------------------------------------------
+
+    async def _populate_server_info(self, integration: MCPIntegration) -> None:
         """Populate integration identity from a session.initialize() result.
 
         MCP exposes no generic server "description"; when the server provides
         top-level ``instructions`` we adopt them as the integration's
         description (leaving the config-derived default in place otherwise).
         """
+        _, _, init_result = self._sessions.get(integration.uuid, (None, None, None))
+        if init_result is None:
+            raise ValueError("Error loading server information from MCP server.")
+
         info = init_result.serverInfo
         # Don't overwrite a curated title even if one is provided by the service
         if info.title and not integration.server_title:
@@ -551,59 +592,16 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         if init_result.meta:
             integration.extra_metadata["init_meta"] = init_result.meta
 
-    async def disconnect(self, integration_id: str) -> None:
-        """Tear down the live session for an integration, if any."""
-        entry = self._sessions.pop(integration_id, None)
-        if entry is not None:
-            _, stack = entry
-            await stack.aclose()
-        try:
-            self.get_integration(integration_id).connected = False
-        except KeyError:
-            pass
-
-    @asynccontextmanager
-    async def _session_scope(self, integration_id: str) -> AsyncIterator[ClientSession]:
-        """Connect for the duration of the block, then disconnect.
-
-        This is the "disconnect until use" model: every operation opens a fresh
-        session and closes it on exit. Connect and disconnect happen on the same
-        task, satisfying anyio's cancel-scope constraints. Holding sessions open
-        across calls is a deferred optimization (see OPEN QUESTIONS).
-        """
-        session = await self.connect(integration_id)
-        try:
-            yield session
-        finally:
-            await self.disconnect(integration_id)
-
-    # --- Catalog loading ------------------------------------------------
-
-    def _load_all_catalogs(self) -> None:
-        """Eagerly fetch every server's catalog at startup (blocking)."""
-        if not self._servers:
-            return
-
-        async def _load_all() -> None:
-            for integration in self._servers:
-                try:
-                    async with self._session_scope(integration.uuid) as session:
-                        await self._load_catalog(session, integration)
-                except Exception:
-                    logger.exception(
-                        "Failed to load catalog for MCP server '%s'", integration.name
-                    )
-                    logger.warning("Continuing")
-
-        _run_coroutine_sync(lambda: _load_all())
-
-    async def _load_catalog(self, session: ClientSession, integration: MCPIntegration) -> None:
+    async def _populate_resources(self, integration: MCPIntegration) -> None:
         """Fetch tools/resources/prompts from a live session into the integration.
 
         Each primitive family is fetched independently: servers commonly
         implement only a subset (e.g. tools but not prompts), and unsupported
         families surface as errors we can safely skip.
         """
+        session, _, _ = self._sessions.get(integration.uuid, (None, None, None))
+        if session is None:
+            raise ValueError(f"Error initiating session with MCP integration '{integration.name} ({integration.slug})'")
         try:
             tools_result = await session.list_tools()
             for mcp_tool in tools_result.tools:
@@ -664,9 +662,10 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         # here so the UI can either display the catalog or surface a failure. A
         # failed connect propagates to the caller, which distinguishes it from a
         # reachable server that simply advertises nothing.
-        if not server.resources_loaded:
-            async with self._session_scope(integration_id) as session:
-                await self._load_catalog(session, server)
+        if not server.resources:
+            await self.connect(integration_id)
+            await self._populate_server_info(server)
+            await self._populate_resources(server)
         resources = list(server.resources.values())
         if resource_type:
             resources = [r for r in resources if r.resource_type == resource_type]
@@ -678,6 +677,52 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
             raise KeyError(f"Resource not found: {resource_id}")
         return server.resources[resource_id]
 
+
+    # --- Mutation method implementations --------------------------------
+    # These methods only ever modify local MCP files.
+
+    def add_integration(self, **payload) -> Integration:
+        logger.warning(f"{payload=}")
+        pass
+
+    def update_integration(self, integration_id: str, **payload) -> Integration:
+        logger.warning(f"{integration_id=}\n    {payload=}")
+        config_dict = payload.get("server_config", None)
+        if not config_dict:
+            raise ValueError("Cannot save integration as server config not found.")
+        server = self.get_integration(integration_id)
+        server_config = server.server_config
+        server_config.update(config_dict)
+        cached_resources = defaultdict(list)
+        for _res_id, resource in payload.get("resources", {}).items():
+            res_type = resource.get("resource_type")
+            match res_type:
+                case "mcp_tool":
+                    name = resource.get("tool_name")
+                case "mcp_resource":
+                    name = resource.get("name")
+                case "mcp_prompt":
+                    name = resource.get("prompt_name")
+                case _:
+                    pass
+            if name:
+                cached_resources[res_type].append(name)
+        if cached_resources:
+            server_config.cached_resources = dict(cached_resources)
+        server_config.update_config_file()
+
+    def remove_integration(self, integration_id: str, **payload) -> None:
+        raise NotImplementedError()
+
+    def add_resource(self, integration_id: str, **payload) -> Resource:
+        raise NotImplementedError()
+
+    def update_resource(self, integration_id: str, resource_id: str, **payload) -> Resource:
+        raise NotImplementedError()
+
+    def remove_resource(self, integration_id: str, resource_id: str, **payload) -> None:
+        raise NotImplementedError()
+
     # --- Prompt (Tier 1: server + catalog listing, as YAML) ------------
 
     @property
@@ -685,6 +730,7 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         if not self._servers:
             return ""
         usage = [
+            "Use connect_to_mcp_server(server_slug) to connect to a MCP server and retreive full server details and resources.",
             "Use call_mcp_tool(server_slug, tool_name, arguments) to invoke a tool.",
             "Use read_mcp_resource(server_slug, uri) to read a resource. ",
             "Use list_mcp_tools(server_slug) to re-lists a server's tools on demand.",
@@ -711,8 +757,6 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         if server.server_version:
             entry["version"] = server.server_version
         entry["description"] = server.description or ""
-        if not server.resources_loaded:
-            entry["status"] = "catalog unavailable; server could not be reached at startup"
 
         tools = [r for r in server.resources.values() if isinstance(r, MCPToolResource)]
         resources = [r for r in server.resources.values() if isinstance(r, MCPResourceResource)]
@@ -825,6 +869,29 @@ class MCPIntegrationProvider(BaseIntegrationProvider):
         return "\n".join(parts)
 
     # --- Tools (generic dispatch) ---------------------------------------
+
+    @tool(internal=True)
+    async def connect_to_mcp_server(self, server_slug: str, agent: AgentRef) -> str:
+        """
+        Connects to a server and returns full information about the MCP server and its capabilities.
+
+        Call this once you have selected a MCP server to use, prior to using it, to load the relevent
+        details into context.
+        You may also call this to
+
+        Args:
+            server_slug: The slug of the MCP server (as shown in the provider listing).
+
+        Returns:
+            str: A full description of the server with full instructions, tools, and resources enumerated.
+        """
+        server = self._find_server_by_slug(server_slug)
+        await self.connect(server.uuid)
+        await self._populate_server_info(server)
+        await self._populate_resources(server)
+        return f"""
+"""
+
 
     @tool(internal=True)
     async def list_mcp_tools(self, server_slug: str, agent: AgentRef) -> str:

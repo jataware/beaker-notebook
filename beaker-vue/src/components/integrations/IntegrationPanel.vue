@@ -92,10 +92,10 @@
                                 <span v-if="expandedIntegration === integration.uuid">
                                     <RouterLink
                                         :to="`/integrations?selected=${integration?.uuid}${sessionIdParam}`"
-                                        :aria-label="(getIntegrationProviderType(integration) === 'adhoc' ? 'Edit' : 'View') + ' ' + integration?.name"
+                                        :aria-label="(isEditableType(integration) ? 'Edit' : 'View') + ' ' + integration?.name"
                                     >
                                         <Button
-                                            v-if="getIntegrationProviderType(integration) === 'adhoc'"
+                                            v-if="isEditableType(integration)"
                                             style="
                                                 width: fit-content;
                                                 height: 32px;
@@ -143,7 +143,7 @@ import InputText from "primevue/inputtext";
 import Card from "primevue/card";
 import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
-import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType, getIntegrationIcon, getIntegrationTypeLabel } from "@/util/integration";
+import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType, getIntegrationIcon, getIntegrationTypeLabel, isContextProvidedIntegration } from "@/util/integration";
 import { RouterLink } from "vue-router";
 import { read } from "fs";
 
@@ -183,6 +183,18 @@ const processIntegrations = (integrations: Integration[]) =>
 //     Object.keys(providers)
 //         .filter((name) => processIntegrations(providers[name].integrations).length >= 1)
 //         .reduce((result, key) => (result[key] = providers[key], result), {})
+
+// Whether a card opens into an editor ("Edit") rather than a read-only viewer
+// ("View"). MCP servers are editable unless provided by a context (see
+// isContextProvidedIntegration); adhoc integrations are always editable; every
+// other type is view-only.
+const isEditableType = (integration: Integration): boolean => {
+    const type = getIntegrationProviderType(integration);
+    if (type === 'mcp') {
+        return !isContextProvidedIntegration(integration);
+    }
+    return type === 'adhoc';
+};
 
 const allIntegrations = computed<Integration[]>(() => Object.values(integrations.value))
 

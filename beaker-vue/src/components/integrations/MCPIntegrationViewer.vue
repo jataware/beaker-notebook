@@ -10,8 +10,12 @@
 
             <Fieldset legend="Server" v-if="hasServerInfo">
                 <div class="mcp-metadata-grid">
+                    <div class="mcp-metadata-row" v-if="selectedIntegration?.slug">
+                        <span class="mcp-metadata-label">Key</span>
+                        <span class="mcp-metadata-value" style="font-family: monospace;">{{ selectedIntegration.slug }}</span>
+                    </div>
                     <div class="mcp-metadata-row" v-if="selectedIntegration?.server_title">
-                        <span class="mcp-metadata-label">Title</span>
+                        <span class="mcp-metadata-label">Reported title</span>
                         <span class="mcp-metadata-value">{{ selectedIntegration.server_title }}</span>
                     </div>
                     <div class="mcp-metadata-row" v-if="selectedIntegration?.server_version">
@@ -63,6 +67,16 @@
                 <div class="mcp-description" v-html="renderedDescription"></div>
             </Fieldset>
 
+            <Fieldset legend="Instructions">
+                <p>
+                    Usage instructions reported by the server during connection.
+                </p>
+                <div v-if="renderedInstructions" class="mcp-description" v-html="renderedInstructions"></div>
+                <p v-else class="mcp-blank-note">
+                    <i>This server does not provide any instructions.</i>
+                </p>
+            </Fieldset>
+
             <div v-if="catalogLoading" class="mcp-catalog-status mcp-catalog-loading">
                 <ProgressSpinner style="width: 1.5rem; height: 1.5rem;" />
                 <span>Loading this server's catalog&hellip;</span>
@@ -73,24 +87,14 @@
                 <span>Unable to load this server's catalog. The server may be unavailable or misconfigured.</span>
             </div>
 
-            <Fieldset :legend="`Tools (${toolResources.length})`" v-if="!catalogLoading && !catalogError && toolResources.length > 0">
-                <p>
-                    Tools this server advertises to the agent. They are invoked on demand when the server is active.
-                </p>
-                <div class="mcp-resource-list">
-                    <div
-                        class="mcp-resource-item"
-                        v-for="tool in toolResources"
-                        :key="tool.resource_id"
-                    >
-                        <i class="pi pi-wrench"></i>
-                        <div class="mcp-resource-info">
-                            <span class="mcp-resource-name">{{ tool.tool_name }}</span>
-                            <span class="mcp-resource-desc" v-if="tool.description">{{ tool.description }}</span>
-                        </div>
-                    </div>
-                </div>
-            </Fieldset>
+            <p class="mcp-catalog-hint" v-if="!catalogLoading && !catalogError && toolResources.length > 0">
+                <i class="pi pi-wrench"></i>
+                <span>
+                    This server advertises {{ toolResources.length }}
+                    {{ toolResources.length === 1 ? 'tool' : 'tools' }}; see the
+                    <b>Tools</b> panel for details.
+                </span>
+            </p>
 
             <Fieldset :legend="`Resources (${resourceResources.length})`" v-if="!catalogLoading && !catalogError && resourceResources.length > 0">
                 <p>
@@ -196,6 +200,11 @@ const serverConfig = computed<MCPServerConfig | undefined>(() =>
 
 const renderedDescription = computed<string>(() =>
     marked.parse(selectedIntegration.value?.description ?? "") as string);
+
+const renderedInstructions = computed<string>(() => {
+    const instructions = selectedIntegration.value?.instructions;
+    return instructions ? marked.parse(instructions) as string : "";
+});
 
 const hasServerInfo = computed<boolean>(() =>
     !!(selectedIntegration.value?.server_title
@@ -311,6 +320,10 @@ const catalogEmpty = computed<boolean>(() =>
     margin-bottom: 0;
 }
 
+.mcp-blank-note {
+    color: var(--p-text-muted-color);
+}
+
 .mcp-resource-list {
     display: flex;
     flex-direction: column;
@@ -344,6 +357,14 @@ const catalogEmpty = computed<boolean>(() =>
 .mcp-resource-desc {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
+}
+
+.mcp-catalog-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--p-text-muted-color);
+    margin: 0 0 1rem 0;
 }
 
 .mcp-catalog-status {

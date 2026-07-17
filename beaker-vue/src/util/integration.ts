@@ -88,6 +88,9 @@ export interface Integration {
     url: string
     provider: string
     datatype?: string
+    // Slug of the parent corpus, if declared inside one. MCP servers provided
+    // by a context are namespaced under a "context-<slug>" corpus.
+    corpus?: string
     // important: resources are loaded via a second API call and may not exist or be filled on the object
     resources?: IntegrationResourceMap;
 }
@@ -106,6 +109,7 @@ export interface MCPServerConfig {
     transport?: "stdio" | "http" | "sse"
     disabled?: boolean
     description?: string
+    instructions?: string
     metadata?: Record<string, any>
 }
 
@@ -173,6 +177,11 @@ async function integrationApiWrapper<T>(
 
 export const getIntegrationProviderType = (integration: Integration) => integration.provider.split(":")[0];
 
+// MCP servers provided by a context are read-only and namespaced under a
+// "context-<slug>" corpus; locally-configured servers are user-editable.
+export const isContextProvidedIntegration = (integration: Integration): boolean =>
+    (integration?.corpus ?? "").startsWith("context-");
+
 export const getIntegrationProviderSlug = (integration: Integration) => integration.provider.split(":")[1]
 
 // Per-datatype display metadata. Single source of truth for how each
@@ -190,7 +199,7 @@ const DATATYPE_DISPLAY: {[datatype in string]: DatatypeDisplay} = {
     api: { label: "API" },
     database: { label: "Database" },
     dataset: { label: "Dataset" },
-    mcp: { label: "MCP Server", icon: "mcp.webp" },
+    mcp: { label: "MCP Server", icon: "mcp.png" },
     skill: { label: "Agent Skill", icon: "skill.png" },
 };
 

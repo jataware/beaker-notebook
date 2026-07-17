@@ -295,15 +295,15 @@ class BeakerContext:
         # first makes that outcome deterministic.
 
         # Load global default skills
-        default_providers = [cls() for cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES]
+        default_providers = [provider_cls(id="default") for provider_cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES]
 
         return default_providers
 
     @property
     def context_integration_providers(self) -> list[BaseIntegrationProvider]:
         result = []
-        for provider in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES:
-            result.extend(provider.from_context(self))
+        for provider_cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES:
+            result.extend(provider_cls.from_context(self))
         return result
 
     @classmethod

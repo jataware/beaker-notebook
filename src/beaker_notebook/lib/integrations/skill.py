@@ -209,7 +209,6 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     display_name: ClassVar[str] = "Agent Skills"
     slug: ClassVar[str] = "agent-skill"
     mutable: ClassVar[bool] = False
-    icon = "skill.png"
 
     def __init__(self, id: Optional[str] = None, skill_paths: Optional[list[str|os.PathLike]] = None):
         super().__init__(id=id)
