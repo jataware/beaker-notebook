@@ -41,11 +41,13 @@ skill provider they'd likely move into ``integrations/types.py`` alongside the
 
 import asyncio
 import inspect
+import io
 import json
 import logging
 import os
+import tempfile
 import yaml
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
@@ -56,7 +58,7 @@ from archytas.tool_utils import tool, AgentRef
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 from pydantic import AnyUrl
 
 from beaker_notebook.lib.autodiscovery import find_resource_dirs
@@ -64,6 +66,7 @@ from beaker_notebook.lib.integrations.types import Integration, Resource
 from .base import BaseIntegrationProvider, MutableBaseIntegrationProvider
 
 if TYPE_CHECKING:
+    import httpx
     from beaker_notebook.lib.agent import BeakerAgent
     from beaker_notebook.lib.context import BeakerContext
     from mcp.types import InitializeResult
@@ -88,6 +91,23 @@ def _json_schema_type(spec: dict[str, Any]) -> str:
     if "enum" in spec:
         return "enum"
     return "any"
+
+
+@asynccontextmanager
+async def _streamable_http_transport(url: str, client: "httpx.AsyncClient"):
+    """Adapt ``streamable_http_client`` to a caller-owned httpx client.
+
+    The current ``streamable_http_client`` no longer accepts ``headers``/``auth``/
+    ``timeout`` kwargs (that shape is the deprecated ``streamablehttp_client``);
+    HTTP settings are configured on an ``httpx.AsyncClient`` handed in via
+    ``http_client``. It also does not close a client passed to it, so the caller
+    that created the client owns its lifecycle. Wrapping both in one context
+    manager keeps the client and the transport entered/exited together on the
+    owner task (see ``_ServerConnection``'s same-task invariant).
+    """
+    async with client:
+        async with streamable_http_client(url, http_client=client) as streams:
+            yield streams
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +349,9 @@ class _ServerConnection:
         self._task: Optional[asyncio.Task] = None
         self._ready: asyncio.Future = asyncio.get_running_loop().create_future()
         self.init_result: Optional["InitializeResult"] = None
+        # stderr capture for the subprocess (stdio transport); set once the
+        # transport is opened. Stays None if we fail before opening it.
+        self.logfile = None
 
     @property
     def running(self) -> bool:
@@ -340,9 +363,16 @@ class _ServerConnection:
         Propagates any connect/initialize error to the caller (via ``_ready``).
         """
         self._task = asyncio.create_task(
-            self._run(), name=f"mcp-session:{self._integration.slug}"
+            self._run(),
+            name=f"mcp-session:{self._integration.slug}"
         )
-        await self._ready
+
+        try:
+            await asyncio.wait_for(self._ready, timeout=120)
+        except TimeoutError:
+            # Cancel task and running service if we are not ready in time
+            self._task.cancel()
+            raise
 
 
     async def _run(self) -> None:
@@ -350,9 +380,30 @@ class _ServerConnection:
         config = self._integration.server_config
         try:
             async with AsyncExitStack() as stack:  # entered on THIS task
-                streams = await stack.enter_async_context(self._provider._open_transport(config))
-                session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
-                self.init_result = await session.initialize()
+                # Connect + handshake. Catch failures here, before they unwind
+                # *through* the transport/ClientSession context managers with an
+                # active exception in flight -- anyio's task-group teardown under
+                # an in-flight exception is where the original error can get
+                # masked or wrapped. Instead we record the failure on `_ready`
+                # and return, so the stack exits via the normal (no-exception)
+                # path and `start()` sees the real cause.
+                try:
+                    transport, logfile = self._provider._open_transport(config)
+                    self.logfile = logfile
+                    streams = await stack.enter_async_context(transport)
+                    session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+                    self.init_result = await session.initialize()
+                except BaseException as exc:  # noqa: BLE001 - relayed via _ready
+                    # We may have failed before the transport (and thus the
+                    # stderr capture) was opened -- e.g. an invalid config -- so
+                    # only surface captured stderr when we actually have some.
+                    if self.logfile is not None:
+                        self.logfile.seek(0)
+                        proc_stderr = self.logfile.read().decode(errors="replace")
+                        if proc_stderr:
+                            exc.add_note(f"Subprocess stderr:\n{proc_stderr}")
+                    self._ready.set_exception(exc)
+                    return  # -> stack unwinds cleanly here, on THIS task
                 self._integration.connected = True
                 self._ready.set_result(None)  # handshake done; callers may proceed
 
@@ -370,9 +421,10 @@ class _ServerConnection:
                     else:
                         if not fut.done():
                             fut.set_result(result)
-        except BaseException as exc:  # connect/init failed, or the transport died
-            if not self._ready.done():
-                self._ready.set_exception(exc)
+        except BaseException as exc:  # the transport died mid-loop
+            # Startup failures are handled above (via `_ready`) and return before
+            # reaching here, so at this point `_ready` is always resolved; this
+            # path only covers a session that dies after a successful handshake.
             self._fail_pending(exc)
         finally:
             self._integration.connected = False
@@ -604,16 +656,22 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         if transport == "stdio":
             if not config.command:
                 raise ValueError(f"MCP server '{config.name}' has no command for stdio transport")
+            log_file = tempfile.TemporaryFile()
+            logger.warning(f"Logging to file {log_file=}")
             params = StdioServerParameters(
                 command=config.command,
                 args=config.args,
                 env=config.env or None,
             )
-            return stdio_client(params)
+            return (stdio_client(params, errlog=log_file), log_file)
         if transport == "http":
             if not config.url:
                 raise ValueError(f"MCP server '{config.name}' has no url for http transport")
-            return streamablehttp_client(config.url, headers=config.headers or None)
+            client = create_mcp_http_client(headers=config.headers or None)
+            # Network transports have no subprocess, so there is no captured
+            # stderr; hand back an empty buffer to satisfy the
+            # (transport, logfile) contract expected by _ServerConnection._run.
+            return (_streamable_http_transport(config.url, client), io.BytesIO())
         if transport == "sse":
             if not config.url:
                 raise ValueError(f"MCP server '{config.name}' has no url for sse transport")
@@ -791,7 +849,54 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
     # These methods only ever modify local MCP files.
 
     def add_integration(self, **payload) -> Integration:
-        pass
+        """Persist a new, locally-configured MCP server.
+
+        The frontend sends the connection details under ``server_config`` (with
+        display ``title``/``description`` folded in); we build a
+        :class:`MCPServerConfig`, attach it to a writable config file, register
+        the integration, and write it out. Returns the new integration so the
+        UI can select it.
+        """
+        config_dict = payload.get("server_config")
+        if not config_dict:
+            raise ValueError("Cannot add MCP integration: no server config provided.")
+
+        name = config_dict.get("name") or payload.get("slug") or payload.get("name")
+        if not name:
+            raise ValueError("Cannot add MCP integration: no server name provided.")
+
+        if any(server.slug == name for server in self._servers):
+            raise ValueError(f"An MCP server named '{name}' already exists.")
+
+        server_config = MCPServerConfig.from_dict(name, config_dict)
+        server_config.config_file = self._ensure_writable_config_file()
+
+        integration = self._build_integration(server_config, corpus=self.id)
+        self._servers.append(integration)
+        server_config.update_config_file()
+        return integration
+
+    def _ensure_writable_config_file(self) -> Path:
+        """Resolve (and create, if needed) a config file to persist a new server.
+
+        Prefers a config file this provider already reads from and can write to,
+        so a user's servers stay collected in one place; otherwise falls back to
+        a conventional user-level ``~/.beaker/mcp.json``, scaffolding an empty
+        ``mcpServers`` mapping when the file does not yet exist.
+        """
+        for server in self._servers:
+            cfg = server.server_config
+            if cfg is not None and cfg.config_file:
+                path = Path(cfg.config_file)
+                if path.is_file() and os.access(path, os.W_OK):
+                    return path
+
+        target = Path.home() / ".beaker" / "mcp.json"
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "w") as f:
+                json.dump({"mcpServers": {}}, f, indent=2)
+        return target
 
     def update_integration(self, integration_id: str, **payload) -> Integration:
         config_dict = payload.get("server_config", None)
@@ -828,6 +933,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         if cached_resources:
             server_config.cached_resources = dict(cached_resources)
         server_config.update_config_file()
+        return server
 
     def remove_integration(self, integration_id: str, **payload) -> None:
         raise NotImplementedError()

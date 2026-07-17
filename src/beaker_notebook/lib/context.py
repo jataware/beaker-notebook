@@ -661,12 +661,6 @@ class BeakerContext:
             )
         }
 
-    def _call_message_result_wrapper_inner(self, object):
-        return asdict(object) if dataclasses.is_dataclass(object) else str(object) # type: ignore
-
-    def _call_message_result_wrapper(self, object):
-        return json.loads(json.dumps(object, default=self._call_message_result_wrapper_inner))
-
     @action(scope="internal")
     async def call_in_context(self, message):
         content = message.content
@@ -679,22 +673,20 @@ class BeakerContext:
             # context methods
             case "context":
                 function = getattr(self, content.get("function"))
-                result = await ensure_async(function(*args, **kwargs))
-                result = self._call_message_result_wrapper(result)
+                result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
             # calling directly on a provider itself -- `provider:adhoc:my_adhoc_provider`
             case "provider":
                 if target_id is None:
                     msg = "Provider targets must specify desired provider: e.g. `provider:my_provider`"
                     raise ValueError(msg)
-                _provider_type, provider_id = target_id.split(":", maxsplit=1)
+                provider_type, provider_id = target_id.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.id == provider_id
+                        if provider_id in (provider.id, provider.slug)
                     )
                     function = getattr(provider, content.get("function"))
-                    result = await ensure_async(function(*args, **kwargs))
-                    result = self._call_message_result_wrapper(result)
+                    result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
                 except StopIteration as e:
                     msg = f"Provider not found in integrations. `{provider_id}` not in {[p.slug for p in self.integrations]}"
                     raise KeyError(msg) from e
@@ -721,11 +713,22 @@ class BeakerContext:
                     msg = f"Provider not found: `{provider_id}` in {[provider.slug for provider in self.integrations]}"
                     raise KeyError(msg) from e
                 function = getattr(provider, content.get("function"))
-                result = await ensure_async(function(*args, **kwargs))
-                result = self._call_message_result_wrapper(result)
+                result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
             case _:
                 raise NotImplementedError
         return result
+
+    async def _call_in_context(self, coro):
+        try:
+            result = await coro
+        except Exception as err:
+            logger.exception("Error while calling function from context.")
+            raise
+
+        def _call_message_result_wrapper_inner(object):
+            return asdict(object) if dataclasses.is_dataclass(object) else str(object) # type: ignore
+
+        return json.loads(json.dumps(result, default=_call_message_result_wrapper_inner))
 
     async def get_subkernel_state(self):
         # Prefer the procedure-backed fetch_state path; fall back to the

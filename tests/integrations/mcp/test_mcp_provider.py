@@ -7,6 +7,7 @@ are never contacted: sessions are replaced with in-memory fakes, and the actor
 is exercised against a faked transport + ``ClientSession``.
 """
 
+import io
 import json
 import textwrap
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from beaker_notebook.lib.integrations.mcp import (
     MCPResourceResource,
     MCPServerConfig,
     MCPToolResource,
+    _ServerConnection,
     _json_schema_type,
 )
 
@@ -83,6 +85,7 @@ class FakeSession:
         call_result=None,
         read_result=None,
         init_result=None,
+        init_error=None,
     ):
         self._tools = tools
         self._resources = resources
@@ -90,9 +93,12 @@ class FakeSession:
         self._call_result = call_result
         self._read_result = read_result
         self._init_result = init_result
+        self._init_error = init_error
         self.calls: list[tuple] = []
 
     async def initialize(self):
+        if self._init_error is not None:
+            raise self._init_error
         return self._init_result if self._init_result is not None else _make_init_result()
 
     async def list_tools(self):
@@ -158,9 +164,11 @@ def _install_fake_connection(provider, session, *, slug="filesystem", init_resul
 def _fake_transport_and_session(provider, session):
     """Run the real actor without a live server: fake transport + ClientSession.
 
-    ``_open_transport`` yields dummy streams and the patched ``ClientSession``
-    hands back ``session`` (whose ``initialize()`` returns an InitializeResult),
-    so ``_ServerConnection`` runs end-to-end in-memory on the event loop.
+    ``_open_transport`` returns a ``(transport, logfile)`` pair (matching the
+    real signature): the transport yields dummy streams, and the patched
+    ``ClientSession`` hands back ``session`` (whose ``initialize()`` returns an
+    InitializeResult), so ``_ServerConnection`` runs end-to-end in-memory on
+    the event loop.
     """
 
     class _FakeTransport:
@@ -178,7 +186,7 @@ def _fake_transport_and_session(provider, session):
             return False
 
     with patch.object(
-        provider, "_open_transport", side_effect=lambda config: _FakeTransport()
+        provider, "_open_transport", side_effect=lambda config: (_FakeTransport(), io.BytesIO())
     ), patch(
         "beaker_notebook.lib.integrations.mcp.ClientSession",
         lambda *a, **k: _FakeClientSession(),
@@ -679,6 +687,29 @@ class TestConnectionLifecycle:
             with pytest.raises(RuntimeError, match="unreachable"):
                 await provider._ensure_connected(integ.uuid)
         # A dead handle must not be cached; a later call gets to retry.
+        assert integ.uuid not in provider._connections
+
+    async def test_initialize_error_propagates_and_stops_task(self, json_config: Path):
+        # An error during the handshake (here, session.initialize() raising)
+        # must surface as the real exception and leave no running task behind --
+        # not a silently-dead session that only denies later ops.
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(init_error=RuntimeError("handshake refused"))
+        with _fake_transport_and_session(provider, session):
+            conn = _ServerConnection(provider, integ)
+            with pytest.raises(RuntimeError, match="handshake refused"):
+                await conn.start()
+            # The owner task unwound and stopped rather than lingering.
+            assert not conn.running
+
+    async def test_ensure_connected_initialize_error_not_cached(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(init_error=RuntimeError("handshake refused"))
+        with _fake_transport_and_session(provider, session):
+            with pytest.raises(RuntimeError, match="handshake refused"):
+                await provider._ensure_connected(integ.uuid)
         assert integ.uuid not in provider._connections
 
     async def test_run_after_close_raises(self, json_config: Path):

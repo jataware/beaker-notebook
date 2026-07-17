@@ -215,17 +215,13 @@
 
             <Fieldset legend="Instructions">
                 <p>
-                    Usage instructions given to the agent for this server. Servers may report their own instructions on
-                    connection; you can override or supply them here.
+                    Usage instructions reported by the server during connection. These are provided by the server and
+                    cannot be edited here.
                 </p>
-                <Textarea
-                    class="mcp-instructions-input"
-                    :model-value="selectedIntegration?.instructions"
-                    @update:model-value="(value) => { selectedIntegration.instructions = value; markDirty(); }"
-                    placeholder="This server does not provide any instructions. Add your own to guide the agent, or leave blank."
-                    auto-resize
-                    rows="4"
-                />
+                <div v-if="renderedInstructions" class="mcp-description" v-html="renderedInstructions"></div>
+                <p v-else class="mcp-blank-note">
+                    <i>This server does not provide any instructions.</i>
+                </p>
             </Fieldset>
 
             <template v-if="!isNew">
@@ -322,11 +318,12 @@ import {
 
 import Fieldset from 'primevue/fieldset';
 import InputText from 'primevue/inputtext';
-import Textarea from 'primevue/textarea';
 import Select from 'primevue/select';
 import Checkbox from 'primevue/checkbox';
 import Button from 'primevue/button';
 import ProgressSpinner from 'primevue/progressspinner';
+
+import { marked } from 'marked';
 
 import CodeEditor from '../misc/CodeEditor.vue';
 
@@ -433,6 +430,13 @@ watch(() => selectedIntegration.value?.description, (current) => {
     }
 });
 
+// Instructions are reported by the server during connection; rendered
+// read-only here (see the Instructions fieldset). Not persisted to config.
+const renderedInstructions = computed<string>(() => {
+    const instructions = selectedIntegration.value?.instructions;
+    return instructions ? marked.parse(instructions) as string : "";
+});
+
 const hasServerInfo = computed<boolean>(() =>
     !!(selectedIntegration.value?.server_title
         || selectedIntegration.value?.server_version
@@ -472,7 +476,6 @@ const save = async () => {
     config.transport = activeTransport.value as MCPServerConfig["transport"];
     config.title = integration.name;
     config.description = integration.description;
-    config.instructions = integration.instructions;
     if (!config.name) {
         config.name = integration.slug || integration.name;
     }
@@ -580,9 +583,16 @@ const save = async () => {
     width: fit-content;
 }
 
-.mcp-instructions-input {
-    width: 100%;
-    font-family: 'Ubuntu Mono', 'Courier New', Courier, monospace;
+.mcp-description {
+    h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.2rem; margin-bottom: 0.8rem; }
+    h3 { font-size: 1.15rem; margin-bottom: 0.8rem; }
+    p, ul, li { margin-bottom: 0.8rem; margin-top: 0rem; }
+    > *:first-child { margin-top: 0rem; }
+}
+
+.mcp-blank-note {
+    color: var(--p-text-muted-color);
 }
 
 .mcp-metadata-grid {

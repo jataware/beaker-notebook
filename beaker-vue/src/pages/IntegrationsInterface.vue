@@ -419,11 +419,11 @@ const newIntegrationItems = computed(() => [
         icon: "pi pi-user",
         command: () => { if (confirmUnsavedChanges()) { newIntegration('adhoc'); } },
     },
-//    {
-//        label: "MCP Server",
-//        icon: "pi pi-server",
-//        command: () => { if (confirmUnsavedChanges()) { newIntegration('mcp'); } },
-//    },
+    {
+        label: "MCP Server",
+        icon: "pi pi-server",
+        command: () => { if (confirmUnsavedChanges()) { newIntegration('mcp'); } },
+    },
 ]);
 
 const delayUntil = (condition, retryInterval) => {

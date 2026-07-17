@@ -155,11 +155,27 @@ class BeakerAPIMixin:
                 result = await client.get_shell_msg(timeout=30) # timeout is in seconds, not milliseconds
             else:
                 result = client.get_shell_msg(timeout=30)
+            status = result["content"]["status"]
+            if status == "ok":
+                response = result["content"]["return"]
+            elif status == "error":
+                response = result["content"]
         except Empty as err:
-            raise TimeoutError(err)
+            logger.exception("Timeout waiting for call_in_context response", TimeoutError(err))
+            response = {
+                "status": "error",
+                "ename": "TimeoutError",
+                "evalue": "Request timed out",
+            }
+        except Exception as err:
+            response = {
+                "status": "error",
+                "ename": err.__class__.__name__,
+                "evalue": str(err),
+            }
         finally:
             client.stop_channels()
-        return result["content"]["return"]
+        return response
 
 # Integration Handler
 
