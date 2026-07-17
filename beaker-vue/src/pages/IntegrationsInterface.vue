@@ -203,6 +203,7 @@ import {
     addResource,
     updateIntegration,
     addIntegration,
+    getIntegration,
     deleteResource,
 } from '@/util/integration';
 import { useRoute } from 'vue-router';
@@ -480,17 +481,31 @@ watch(
 );
 
 const modifySelectedIntegration = async (body: object, integrationId?: string) => {
+    let savedId: string | undefined;
     if (integrationId) {
-        integrations.value.integrations[integrationId] = await updateIntegration(
-            sessionId,
-            integrationId,
-            body
-        );
+        await updateIntegration(sessionId, integrationId, body);
+        savedId = integrationId;
     } else {
         const newIntegration = await addIntegration(sessionId, body);
-        integrations.value.integrations[newIntegration.uuid] = newIntegration;
-        integrations.value.selected = newIntegration.uuid;
+        savedId = newIntegration?.uuid;
+        if (savedId) {
+            integrations.value.selected = savedId;
+        }
     }
+    // The POST response is not a reliable source of truth for the saved
+    // integration -- some providers (e.g. MCP) return nothing on update, which
+    // would otherwise clobber the local copy with an empty object. Re-fetch the
+    // authoritative integration from the kernel so the local state reflects what
+    // was actually persisted, preserving any resources already loaded for it.
+    if (!savedId) {
+        return;
+    }
+    const fresh = await getIntegration(sessionId, savedId);
+    const existingResources = integrations.value.integrations[savedId]?.resources;
+    if (fresh.resources === undefined && existingResources !== undefined) {
+        fresh.resources = existingResources;
+    }
+    integrations.value.integrations[savedId] = fresh;
 }
 
 const modifyResourceForSelectedIntegration = async (body: object, resourceId?: string) => {

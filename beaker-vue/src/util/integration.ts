@@ -232,6 +232,10 @@ export const updateIntegration = async (sessionId: string, integrationId: string
     return await integrationApiWrapper<Integration>("POST", {sessionId, integrationId}, body);
 }
 
+export const getIntegration = async (sessionId: string, integrationId: string): Promise<Integration> => {
+    return await integrationApiWrapper<Integration>("GET", {sessionId, integrationId});
+}
+
 export const getResource = async (sessionId: string, integrationId: string, resourceType: string, resourceId: string): Promise<IntegrationResource> => {
     return await integrationApiWrapper<IntegrationResource>("GET", {sessionId, integrationId, resourceType, resourceId});
 }

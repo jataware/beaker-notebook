@@ -1,13 +1,15 @@
 """Tests for the MCPIntegrationProvider and its helpers.
 
-Covers the pure helpers, config parsing, config-file discovery, connection
-lifecycle glue, catalog loading, prompt rendering, and the generic dispatch
-``@tool`` methods. Live MCP servers are never contacted: catalog loading is
-stubbed at construction time and sessions are replaced with in-memory fakes.
+Covers the pure helpers, config parsing, config-file discovery, the kept-open
+connection lifecycle (the ``_ServerConnection`` actor), catalog population,
+prompt rendering, and the generic dispatch ``@tool`` methods. Live MCP servers
+are never contacted: sessions are replaced with in-memory fakes, and the actor
+is exercised against a faked transport + ``ClientSession``.
 """
 
 import json
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -21,9 +23,7 @@ from beaker_notebook.lib.integrations.mcp import (
     MCPResourceResource,
     MCPServerConfig,
     MCPToolResource,
-    _indent,
     _json_schema_type,
-    _run_coroutine_sync,
 )
 
 
@@ -48,6 +48,20 @@ def _prompt_arg(name, description=None, required=False):
     return SimpleNamespace(name=name, description=description, required=required)
 
 
+def _make_init_result(*, serverInfo=None, instructions=None):
+    """Build a real ``InitializeResult`` for tests that assert identity mapping."""
+    from mcp.types import Implementation, InitializeResult, ServerCapabilities
+
+    info_kwargs = {"name": "srv", "version": "1.2.3"}
+    info_kwargs.update(serverInfo or {})
+    return InitializeResult(
+        protocolVersion="2025-06-18",
+        capabilities=ServerCapabilities(),
+        serverInfo=Implementation(**info_kwargs),
+        instructions=instructions,
+    )
+
+
 class _Unsupported:
     """Sentinel: a primitive family the server does not implement."""
 
@@ -68,13 +82,18 @@ class FakeSession:
         prompts=None,
         call_result=None,
         read_result=None,
+        init_result=None,
     ):
         self._tools = tools
         self._resources = resources
         self._prompts = prompts
         self._call_result = call_result
         self._read_result = read_result
+        self._init_result = init_result
         self.calls: list[tuple] = []
+
+    async def initialize(self):
+        return self._init_result if self._init_result is not None else _make_init_result()
 
     async def list_tools(self):
         if self._tools is _Unsupported:
@@ -100,12 +119,71 @@ class FakeSession:
         return self._read_result
 
 
-def _install_fake_session(provider: MCPIntegrationProvider, session: FakeSession):
-    """Patch connect/disconnect so ``_session_scope`` yields ``session``."""
-    return (
-        patch.object(provider, "connect", new=AsyncMock(return_value=session)),
-        patch.object(provider, "disconnect", new=AsyncMock()),
-    )
+class FakeConnection:
+    """Stand-in for ``_ServerConnection`` that runs ops inline against a session.
+
+    Used by the dispatch/catalog tests, which care only that an op is executed
+    against the session and its result flattened -- not about the owner-task
+    machinery (that is covered by ``TestConnectionLifecycle`` against the real
+    actor).
+    """
+
+    def __init__(self, session=None, *, init_result=None):
+        self._session = session
+        self.init_result = init_result if init_result is not None else _make_init_result()
+        self.running = True
+        self.closed = False
+
+    async def run(self, op):
+        return await op(self._session)
+
+    async def close(self):
+        self.closed = True
+        self.running = False
+
+
+def _install_fake_connection(provider, session, *, slug="filesystem", init_result=None):
+    """Register a fake kept-open connection and stub ``_ensure_connected``.
+
+    The connection is placed in ``provider._connections`` (so ``_populate_*``
+    find it) and returned from ``_ensure_connected``; yields the connection.
+    """
+    integ = provider._find_server_by_slug(slug)
+    conn = FakeConnection(session, init_result=init_result)
+    provider._connections[integ.uuid] = conn
+    return patch.object(provider, "_ensure_connected", new=AsyncMock(return_value=conn))
+
+
+@contextmanager
+def _fake_transport_and_session(provider, session):
+    """Run the real actor without a live server: fake transport + ClientSession.
+
+    ``_open_transport`` yields dummy streams and the patched ``ClientSession``
+    hands back ``session`` (whose ``initialize()`` returns an InitializeResult),
+    so ``_ServerConnection`` runs end-to-end in-memory on the event loop.
+    """
+
+    class _FakeTransport:
+        async def __aenter__(self):
+            return (SimpleNamespace(), SimpleNamespace())
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _FakeClientSession:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with patch.object(
+        provider, "_open_transport", side_effect=lambda config: _FakeTransport()
+    ), patch(
+        "beaker_notebook.lib.integrations.mcp.ClientSession",
+        lambda *a, **k: _FakeClientSession(),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +194,10 @@ def _install_fake_session(provider: MCPIntegrationProvider, session: FakeSession
 def _make_provider(config_paths=None, search_roots=None) -> MCPIntegrationProvider:
     """Construct a provider without contacting any server.
 
-    ``_load_all_catalogs`` is stubbed so no connections are opened; catalogs
-    are populated explicitly in the tests that need them.
+    Discovery only parses config; no connections are opened at construction
+    time, so nothing needs stubbing beyond the config search roots.
     """
-    with patch.object(
-        MCPIntegrationProvider, "_load_all_catalogs", return_value=None,
-    ), patch(
+    with patch(
         "beaker_notebook.lib.integrations.mcp.find_resource_dirs", return_value=[],
     ), patch.object(
         MCPIntegrationProvider, "_get_config_search_roots", return_value=list(search_roots or []),
@@ -187,15 +263,6 @@ def yaml_config(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-class TestIndent:
-    def test_indents_nonempty_lines(self):
-        assert _indent("a\nb", 2) == "  a\n  b"
-
-    def test_preserves_blank_lines(self):
-        # Blank lines are not padded.
-        assert _indent("a\n\nb", 2) == "  a\n\n  b"
-
-
 class TestJsonSchemaType:
     def test_plain_type(self):
         assert _json_schema_type({"type": "string"}) == "string"
@@ -216,35 +283,6 @@ class TestJsonSchemaType:
 
     def test_fallback_any(self):
         assert _json_schema_type({}) == "any"
-
-
-class TestRunCoroutineSync:
-    def test_returns_value(self):
-        async def coro():
-            return 42
-
-        assert _run_coroutine_sync(lambda: coro()) == 42
-
-    def test_propagates_exception(self):
-        async def coro():
-            raise ValueError("boom")
-
-        with pytest.raises(ValueError, match="boom"):
-            _run_coroutine_sync(lambda: coro())
-
-    def test_runs_off_caller_loop(self):
-        # Must be callable from inside a running event loop (the case that
-        # motivates the dedicated-thread design). If it tried to reuse the
-        # caller's loop this would raise.
-        async def outer():
-            async def inner():
-                return "ok"
-
-            return _run_coroutine_sync(lambda: inner())
-
-        import asyncio
-
-        assert asyncio.run(outer()) == "ok"
 
 
 class TestFlattenContent:
@@ -469,6 +507,13 @@ class TestDiscovery:
         assert integ.name == "File System"
         assert integ.server_title == "File System"
 
+    def test_build_integration_records_corpus(self):
+        # Context-provided servers are namespaced under a corpus, which drives
+        # the read-only vs editable distinction in the UI.
+        cfg = MCPServerConfig.from_dict("fs", {"command": "npx"})
+        integ = MCPIntegrationProvider._build_integration(cfg, corpus="context-foo")
+        assert integ.corpus == "context-foo"
+
 
 # ---------------------------------------------------------------------------
 # _get_config_search_roots
@@ -489,11 +534,11 @@ class TestConfigSearchRoots:
 
 
 # ---------------------------------------------------------------------------
-# Catalog loading
+# Catalog population
 # ---------------------------------------------------------------------------
 
 
-class TestCatalogLoading:
+class TestCatalogPopulation:
     @pytest.fixture
     def provider(self, json_config: Path) -> MCPIntegrationProvider:
         return _make_provider(config_paths=[json_config])
@@ -510,7 +555,8 @@ class TestCatalogLoading:
                 _prompt("summarize", "sum", [_prompt_arg("topic", "the topic", True)])
             ],
         )
-        await provider._load_catalog(session, integ)
+        provider._connections[integ.uuid] = FakeConnection(session)
+        await provider._populate_resources(integ)
 
         tools = [r for r in integ.resources.values() if isinstance(r, MCPToolResource)]
         resources = [r for r in integ.resources.values() if isinstance(r, MCPResourceResource)]
@@ -533,103 +579,117 @@ class TestCatalogLoading:
             resources=_Unsupported,
             prompts=_Unsupported,
         )
-        await provider._load_catalog(session, integ)
+        provider._connections[integ.uuid] = FakeConnection(session)
+        await provider._populate_resources(integ)
         # Tool loaded, resources/prompts absent, still marked loaded.
         assert integ.resources_loaded is True
         assert any(isinstance(r, MCPToolResource) for r in integ.resources.values())
         assert not any(isinstance(r, MCPResourceResource) for r in integ.resources.values())
         assert not any(isinstance(r, MCPPromptResource) for r in integ.resources.values())
 
-    async def test_load_all_catalogs_iterates_servers(self, json_config: Path):
-        provider = _make_provider(config_paths=[json_config])
-        loaded: list[str] = []
-
-        async def fake_load(session, integration):
-            loaded.append(integration.slug)
-            integration.resources_loaded = True
-
-        # Give _session_scope a session to yield without a real connection.
-        session = FakeSession()
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch, patch.object(
-            provider, "_load_catalog", side_effect=fake_load
-        ):
-            provider._load_all_catalogs()
-
-        assert set(loaded) == {"filesystem", "deepwiki"}
-
-    async def test_load_all_catalogs_continues_after_failure(self, json_config: Path):
-        provider = _make_provider(config_paths=[json_config])
-        seen: list[str] = []
-
-        async def flaky_load(session, integration):
-            seen.append(integration.slug)
-            if integration.slug == "filesystem":
-                raise RuntimeError("cannot reach server")
-            integration.resources_loaded = True
-
-        session = FakeSession()
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch, patch.object(
-            provider, "_load_catalog", side_effect=flaky_load
-        ):
-            provider._load_all_catalogs()
-
-        # Both were attempted despite the first raising.
-        assert set(seen) == {"filesystem", "deepwiki"}
+    async def test_populate_resources_without_connection_raises(self, provider):
+        integ = self._integration(provider)
+        # No connection registered for this server.
+        with pytest.raises(ValueError, match="Error initiating session"):
+            await provider._populate_resources(integ)
 
 
 # ---------------------------------------------------------------------------
-# _apply_server_info
+# _populate_server_info
 # ---------------------------------------------------------------------------
 
 
-class TestApplyServerInfo:
-    def _init_result(self, **overrides):
-        from mcp.types import (
-            Implementation,
-            InitializeResult,
-            ServerCapabilities,
-        )
+class TestPopulateServerInfo:
+    async def _apply(self, integ, init_result):
+        provider = _make_provider(config_paths=[])
+        provider._connections[integ.uuid] = FakeConnection(init_result=init_result)
+        await provider._populate_server_info(integ)
 
-        info_kwargs = {
-            "name": "srv",
-            "version": "1.2.3",
-        }
-        info_kwargs.update(overrides.pop("serverInfo", {}))
-        return InitializeResult(
-            protocolVersion="2025-06-18",
-            capabilities=ServerCapabilities(),
-            serverInfo=Implementation(**info_kwargs),
-            instructions=overrides.pop("instructions", None),
-        )
-
-    def test_populates_version_and_instructions(self):
+    async def test_populates_version_and_instructions(self):
         integ = MCPIntegration(name="s", description="", provider="mcp:mcp")
         # No config-derived description -> instructions adopted as description.
         integ.description = ""
-        result = self._init_result(instructions="Use me wisely")
-        MCPIntegrationProvider._apply_server_info(integ, result)
+        await self._apply(integ, _make_init_result(instructions="Use me wisely"))
         assert integ.server_version == "1.2.3"
         assert integ.instructions == "Use me wisely"
         assert integ.description == "Use me wisely"
         assert integ.extra_metadata["server_info"]["name"] == "srv"
 
-    def test_does_not_overwrite_curated_description(self):
+    async def test_does_not_overwrite_curated_description(self):
         integ = MCPIntegration(name="s", description="curated", provider="mcp:mcp")
-        result = self._init_result(instructions="server instructions")
-        MCPIntegrationProvider._apply_server_info(integ, result)
+        await self._apply(integ, _make_init_result(instructions="server instructions"))
         assert integ.description == "curated"
         # Instructions still captured separately.
         assert integ.instructions == "server instructions"
 
-    def test_does_not_overwrite_curated_title(self):
+    async def test_does_not_overwrite_curated_title(self):
         integ = MCPIntegration(
             name="s", description="d", provider="mcp:mcp", server_title="Curated"
         )
-        result = self._init_result(serverInfo={"title": "From Server"})
-        MCPIntegrationProvider._apply_server_info(integ, result)
+        await self._apply(integ, _make_init_result(serverInfo={"title": "From Server"}))
         assert integ.server_title == "Curated"
+
+    async def test_raises_when_no_connection(self):
+        integ = MCPIntegration(name="s", description="", provider="mcp:mcp")
+        provider = _make_provider(config_paths=[])
+        with pytest.raises(ValueError, match="Error loading server information"):
+            await provider._populate_server_info(integ)
+
+
+# ---------------------------------------------------------------------------
+# Connection lifecycle (the _ServerConnection actor)
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionLifecycle:
+    async def test_ensure_connected_reuses_then_close_all(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(tools=[_tool("t")])
+        with _fake_transport_and_session(provider, session):
+            conn1 = await provider._ensure_connected(integ.uuid)
+            conn2 = await provider._ensure_connected(integ.uuid)
+            # Kept open and reused rather than reconnected per call.
+            assert conn1 is conn2
+            assert conn1.running
+            # Ops run on the owner task against the live session.
+            result = await conn1.run(lambda s: s.list_tools())
+            assert [t.name for t in result.tools] == ["t"]
+            await provider.close_all()
+        assert not conn1.running
+        assert provider._connections == {}
+
+    async def test_disconnect_closes_single_connection(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession()
+        with _fake_transport_and_session(provider, session):
+            conn = await provider._ensure_connected(integ.uuid)
+            assert conn.running
+            await provider.disconnect(integ.uuid)
+        assert not conn.running
+        assert integ.uuid not in provider._connections
+
+    async def test_failed_start_not_cached(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        with patch.object(
+            provider, "_open_transport", side_effect=RuntimeError("unreachable")
+        ):
+            with pytest.raises(RuntimeError, match="unreachable"):
+                await provider._ensure_connected(integ.uuid)
+        # A dead handle must not be cached; a later call gets to retry.
+        assert integ.uuid not in provider._connections
+
+    async def test_run_after_close_raises(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(tools=[_tool("t")])
+        with _fake_transport_and_session(provider, session):
+            conn = await provider._ensure_connected(integ.uuid)
+            await provider.close_all()
+            with pytest.raises(RuntimeError, match="not running"):
+                await conn.run(lambda s: s.list_tools())
 
 
 # ---------------------------------------------------------------------------
@@ -657,12 +717,6 @@ class TestPrompt:
         assert "reads a file" in prompt
         # Usage instructions for the dispatch tools are present.
         assert "call_mcp_tool" in prompt
-
-    def test_marks_unavailable_catalog(self, json_config: Path):
-        provider = _make_provider(config_paths=[json_config])
-        # Leave resources_loaded False (default) -> status note emitted.
-        prompt = provider.prompt
-        assert "catalog unavailable" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -721,8 +775,7 @@ class TestCallMcpTool:
                 content=[SimpleNamespace(text="result text")], isError=False
             )
         )
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             out = await MCPIntegrationProvider.call_mcp_tool(
                 provider,
                 server_slug="filesystem",
@@ -740,8 +793,7 @@ class TestCallMcpTool:
                 content=[SimpleNamespace(text="bad path")], isError=True
             )
         )
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             out = await MCPIntegrationProvider.call_mcp_tool(
                 provider,
                 server_slug="filesystem",
@@ -757,8 +809,7 @@ class TestCallMcpTool:
         session = FakeSession(
             call_result=SimpleNamespace(content=[], isError=False)
         )
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             out = await MCPIntegrationProvider.call_mcp_tool(
                 provider,
                 server_slug="filesystem",
@@ -770,13 +821,16 @@ class TestCallMcpTool:
         # None arguments coerced to an empty mapping on the wire.
         assert session.calls == [("call_tool", "noop", {})]
 
-    async def test_disconnect_called_after_use(self, json_config: Path):
+    async def test_keeps_connection_open_after_call(self, json_config: Path):
+        # Kept-open model: a tool call must not tear the session down.
         provider = _make_provider(config_paths=[json_config])
         session = FakeSession(
             call_result=SimpleNamespace(content=[SimpleNamespace(text="x")], isError=False)
         )
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch as connect_mock, disconnect_patch as disconnect_mock:
+        integ = provider._find_server_by_slug("filesystem")
+        conn = FakeConnection(session)
+        provider._connections[integ.uuid] = conn
+        with patch.object(provider, "_ensure_connected", new=AsyncMock(return_value=conn)):
             await MCPIntegrationProvider.call_mcp_tool(
                 provider,
                 server_slug="filesystem",
@@ -784,8 +838,7 @@ class TestCallMcpTool:
                 arguments={},
                 agent=_agent_ref(),
             )
-        connect_mock.assert_awaited_once()
-        disconnect_mock.assert_awaited_once()
+        assert conn.closed is False
 
 
 class TestReadMcpResource:
@@ -794,8 +847,7 @@ class TestReadMcpResource:
         session = FakeSession(
             read_result=SimpleNamespace(contents=[SimpleNamespace(text="file body")])
         )
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             out = await MCPIntegrationProvider.read_mcp_resource(
                 provider,
                 server_slug="filesystem",
@@ -808,8 +860,7 @@ class TestReadMcpResource:
     async def test_empty_resource_placeholder(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])
         session = FakeSession(read_result=SimpleNamespace(contents=[]))
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             out = await MCPIntegrationProvider.read_mcp_resource(
                 provider,
                 server_slug="filesystem",
@@ -842,8 +893,7 @@ class TestAccessors:
     async def test_list_resources_filtered_by_type(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])
         integ = provider._find_server_by_slug("filesystem")
-        # Already-loaded catalog: list_resources should not attempt a connect.
-        integ.resources_loaded = True
+        # Already-populated catalog: list_resources should not connect.
         integ.add_resources([
             MCPToolResource(integration=integ.uuid, tool_name="t"),
             MCPResourceResource(integration=integ.uuid, uri="u", name="n"),
@@ -852,35 +902,34 @@ class TestAccessors:
         assert len(tools) == 1
         assert isinstance(tools[0], MCPToolResource)
 
-    async def test_list_resources_lazily_loads_when_not_loaded(self, json_config: Path):
+    async def test_list_resources_lazily_loads_when_empty(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])
         integ = provider._find_server_by_slug("filesystem")
-        assert integ.resources_loaded is False
+        assert not integ.resources
         session = FakeSession(tools=[_tool("read_file", "reads")])
-        connect_patch, disconnect_patch = _install_fake_session(provider, session)
-        with connect_patch, disconnect_patch:
+        with _install_fake_connection(provider, session):
             tools = await provider.list_resources(integ.uuid, resource_type="mcp_tool")
         assert integ.resources_loaded is True
         assert len(tools) == 1 and tools[0].tool_name == "read_file"
 
-    async def test_list_resources_does_not_reload_when_already_loaded(self, json_config: Path):
+    async def test_list_resources_does_not_reload_when_populated(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])
         integ = provider._find_server_by_slug("filesystem")
-        integ.resources_loaded = True
-        connect = AsyncMock()
-        with patch.object(provider, "connect", new=connect):
+        integ.add_resources([MCPToolResource(integration=integ.uuid, tool_name="t")])
+        ensure = AsyncMock()
+        with patch.object(provider, "_ensure_connected", new=ensure):
             await provider.list_resources(integ.uuid)
-        connect.assert_not_called()
+        ensure.assert_not_called()
 
     async def test_list_resources_propagates_connect_failure(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])
         integ = provider._find_server_by_slug("filesystem")
         with patch.object(
-            provider, "connect", new=AsyncMock(side_effect=RuntimeError("unreachable"))
+            provider, "_ensure_connected", new=AsyncMock(side_effect=RuntimeError("unreachable"))
         ):
             with pytest.raises(RuntimeError, match="unreachable"):
                 await provider.list_resources(integ.uuid)
-        assert integ.resources_loaded is False
+        assert not integ.resources
 
     def test_get_resource_missing_raises(self, json_config: Path):
         provider = _make_provider(config_paths=[json_config])

@@ -44,13 +44,12 @@ import inspect
 import json
 import logging
 import os
-import threading
 import yaml
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, ClassVar, Literal, Mapping, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Literal, Mapping, Optional
 from typing_extensions import Self
 
 from archytas.tool_utils import tool, AgentRef
@@ -211,6 +210,8 @@ class MCPServerConfig:
         config_path = self.config_file
         if not config_path or not os.path.isfile(self.config_file):
             raise FileNotFoundError(f"Unable to update file {self.config_file} as it cannot be found.")
+
+        # Read, update and write config file in one block to hold lock on file
         with open(config_path, "r+") as f:
             if config_path.name.endswith('.json'):
                 data = json.load(f)
@@ -222,6 +223,7 @@ class MCPServerConfig:
             root[self.name] = self.to_config_dict()
 
             f.seek(0)
+            f.truncate(0)
             if config_path.name.endswith('.json'):
                 json.dump(data, f, indent=2)
             elif config_path.name.endswith(('.yaml', '.yml')):
@@ -293,6 +295,120 @@ class MCPIntegration(Integration):
 
 
 # ---------------------------------------------------------------------------
+# Session ownership
+# ---------------------------------------------------------------------------
+
+# An operation to run against a live session. Callers express "what to do with
+# the session" as a closure; it is awaited on the owner task (see below).
+Op = Callable[[ClientSession], Awaitable[Any]]
+
+
+class _ServerConnection:
+    """Owns a single MCP server's live session on one long-lived task.
+
+    The transport and ``ClientSession`` context managers each open an anyio task
+    group whose cancel scope is pinned to the task that entered it; anyio
+    requires it be exited on that same task. A kept-open session therefore
+    cannot be opened on one task (e.g. an HTTP handler populating the catalog)
+    and torn down on another (e.g. the agent loop invoking a tool) -- doing so
+    raises "Attempted to exit cancel scope in a different task".
+
+    This class confines the entire session lifecycle -- connect, every request,
+    and disconnect -- to a single dedicated task (``_task``). Callers on any
+    task submit an :data:`Op` via :meth:`run` and await its result over a
+    per-request future; the queue and futures are loop-bound but task-agnostic,
+    so cross-task hand-off is safe as long as everyone shares one event loop.
+
+    Requests are serialized: one op runs to completion before the next starts.
+    """
+
+    def __init__(self, provider: "MCPIntegrationProvider", integration: MCPIntegration):
+        self._provider = provider
+        self._integration = integration
+        self._queue: "asyncio.Queue[tuple[Optional[Op], asyncio.Future]]" = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+        self._ready: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.init_result: Optional["InitializeResult"] = None
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    async def start(self) -> None:
+        """Spawn the owner task and return once the handshake succeeds.
+
+        Propagates any connect/initialize error to the caller (via ``_ready``).
+        """
+        self._task = asyncio.create_task(
+            self._run(), name=f"mcp-session:{self._integration.slug}"
+        )
+        await self._ready
+
+
+    async def _run(self) -> None:
+        """Own the session end-to-end on this task until asked to close."""
+        config = self._integration.server_config
+        try:
+            async with AsyncExitStack() as stack:  # entered on THIS task
+                streams = await stack.enter_async_context(self._provider._open_transport(config))
+                session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+                self.init_result = await session.initialize()
+                self._integration.connected = True
+                self._ready.set_result(None)  # handshake done; callers may proceed
+
+                while True:
+                    op, fut = await self._queue.get()
+                    if op is None:  # shutdown sentinel
+                        if not fut.done():
+                            fut.set_result(None)
+                        break  # -> stack unwinds here, on THIS task
+                    try:
+                        result = await op(session)
+                    except Exception as exc:  # noqa: BLE001 - relayed to the caller
+                        if not fut.done():
+                            fut.set_exception(exc)
+                    else:
+                        if not fut.done():
+                            fut.set_result(result)
+        except BaseException as exc:  # connect/init failed, or the transport died
+            if not self._ready.done():
+                self._ready.set_exception(exc)
+            self._fail_pending(exc)
+        finally:
+            self._integration.connected = False
+            # Nothing can run these now (the session is gone); don't let a
+            # caller that raced past the shutdown sentinel await forever.
+            self._fail_pending(RuntimeError(
+                f"MCP session for '{self._integration.slug}' is closed"
+            ))
+
+    def _fail_pending(self, exc: BaseException) -> None:
+        """Fail any queued (and not-yet-run) requests once the session is gone."""
+        while not self._queue.empty():
+            _op, fut = self._queue.get_nowait()
+            if not fut.done():
+                fut.set_exception(exc)
+
+    async def run(self, op: Op) -> Any:
+        """Submit ``op`` to the owner task and await its result."""
+        if not self.running:
+            raise RuntimeError(
+                f"MCP session for '{self._integration.slug}' is not running"
+            )
+        fut = asyncio.get_running_loop().create_future()
+        self._queue.put_nowait((op, fut))
+        return await fut
+
+    async def close(self) -> None:
+        """Ask the owner task to tear the session down, and wait for it."""
+        if not self.running:
+            return
+        fut = asyncio.get_running_loop().create_future()
+        self._queue.put_nowait((None, fut))  # sentinel; drains the stack on the owner task
+        await self._task
+
+
+# ---------------------------------------------------------------------------
 # Provider
 # ---------------------------------------------------------------------------
 
@@ -320,13 +436,16 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         self._servers: list[MCPIntegration] = list(
             self.discover_integrations(paths=config_paths, corpus=self.id).values()
         )
-        # Live sessions keyed by integration uuid, each paired with the
-        # AsyncExitStack that owns its transport + session context managers.
-        # An entry exists only while a connection is open; steady state is
-        # empty. See `connect`/`disconnect`/`_session_scope`.
-        self._sessions: dict[str, tuple[ClientSession, AsyncExitStack, InitializeResult]] = {}
+        # Kept-open sessions keyed by integration uuid. Each entry is an actor
+        # that owns one server's session on a dedicated task; connections are
+        # established lazily on first use and reused thereafter. See
+        # `_ServerConnection`, `_ensure_connected`, and `disconnect`.
+        self._connections: dict[str, _ServerConnection] = {}
 
     # --- Discovery -------------------------------------------------------
+
+    async def cleanup(self):
+        await self.close_all()
 
     @classmethod
     def from_context(cls, context: "BeakerContext") -> list[Self]:
@@ -448,10 +567,13 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         Resources are populated later, on connect(), from the server's
         tools/list, resources/list, and prompts/list responses.
         """
+
+        uuid = f"{cls.slug}:{corpus}:{server_config.name}"
         display_name = server_config.title or server_config.name
         provider_ref = f"{cls.provider_type}:{cls.slug}"
         description = server_config.description or f"MCP server '{server_config.name}'"
         return MCPIntegration(
+            uuid=uuid,
             slug=server_config.name,
             server_title=server_config.title,
             name=display_name,
@@ -498,61 +620,47 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             return sse_client(config.url, headers=config.headers or None)
         raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
-    async def connect(self, integration_id: str) -> ClientSession:
-        """Open a live session to the server and return it.
+    async def _ensure_connected(self, integration_id: str) -> _ServerConnection:
+        """Return a live, kept-open connection for a server, starting it lazily.
 
-        Enters the transport and ``ClientSession`` context managers on an
-        ``AsyncExitStack`` stored in ``self._sessions`` so that
-        :meth:`disconnect` can tear them down. Must be paired with a
-        ``disconnect`` on the *same* task (see :meth:`_session_scope`), since
-        the underlying anyio cancel scopes are task-bound.
+        The first call spins up the server's owner task and blocks until the
+        initialize handshake completes; subsequent calls reuse the same warm
+        connection. A failed/exited connection is not cached, so a later call
+        retries a fresh one.
         """
+        conn = self._connections.get(integration_id)
+        if conn is not None and conn.running:
+            return conn
+
         integration = self.get_integration(integration_id)
-        existing = self._sessions.get(integration_id)
-        if existing is not None:
-            return existing[0]
         if integration.server_config is None:
             raise ValueError(f"MCP integration '{integration.name}' has no server config")
 
-        stack = AsyncExitStack()
+        conn = _ServerConnection(self, integration)
+        self._connections[integration_id] = conn
         try:
-            streams = await stack.enter_async_context(self._open_transport(integration.server_config))
-            read_stream, write_stream = streams[0], streams[1]
-            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-            init_result = await session.initialize()
+            await conn.start()
         except BaseException:
-            await stack.aclose()
+            # Don't leave a dead handle cached; the next call will retry.
+            self._connections.pop(integration_id, None)
             raise
-
-        self._sessions[integration_id] = (session, stack, init_result)
-        integration.connected = True
-        return session
+        return conn
 
     async def disconnect(self, integration_id: str) -> None:
-        """Tear down the live session for an integration, if any."""
-        entry = self._sessions.pop(integration_id, None)
-        if entry is not None:
-            _, stack, _ = entry
-            await stack.aclose()
-        try:
-            self.get_integration(integration_id).connected = False
-        except KeyError:
-            pass
+        """Tear down the kept-open session for an integration, if any."""
+        conn = self._connections.pop(integration_id, None)
+        if conn is not None:
+            await conn.close()
 
-    @asynccontextmanager
-    async def _session_scope(self, integration_id: str) -> AsyncIterator[ClientSession]:
-        """Connect for the duration of the block, then disconnect.
+    async def close_all(self) -> None:
+        """Tear down every open session. Call on provider/context shutdown."""
+        conns = list(self._connections.values())
+        self._connections.clear()
+        results = await asyncio.gather(*(asyncio.wait_for(c.close(), timeout=3) for c in conns), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) or (isinstance(result, type) and issubclass(result, BaseException)):
+                logger.exception("There was an error when attempting to close an MCP connection", exc_info=result)
 
-        This is the "disconnect until use" model: every operation opens a fresh
-        session and closes it on exit. Connect and disconnect happen on the same
-        task, satisfying anyio's cancel-scope constraints. Holding sessions open
-        across calls is a deferred optimization (see OPEN QUESTIONS).
-        """
-        session = await self.connect(integration_id)
-        try:
-            yield session
-        finally:
-            await self.disconnect(integration_id)
 
     # --- Catalog population ----------------------------------------------
 
@@ -563,7 +671,8 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         top-level ``instructions`` we adopt them as the integration's
         description (leaving the config-derived default in place otherwise).
         """
-        _, _, init_result = self._sessions.get(integration.uuid, (None, None, None))
+        conn = self._connections.get(integration.uuid)
+        init_result = conn.init_result if conn is not None else None
         if init_result is None:
             raise ValueError("Error loading server information from MCP server.")
 
@@ -599,11 +708,11 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         implement only a subset (e.g. tools but not prompts), and unsupported
         families surface as errors we can safely skip.
         """
-        session, _, _ = self._sessions.get(integration.uuid, (None, None, None))
-        if session is None:
+        conn = self._connections.get(integration.uuid)
+        if conn is None or not conn.running:
             raise ValueError(f"Error initiating session with MCP integration '{integration.name} ({integration.slug})'")
         try:
-            tools_result = await session.list_tools()
+            tools_result = await conn.run(lambda s: s.list_tools())
             for mcp_tool in tools_result.tools:
                 integration.add_resources([MCPToolResource(
                     integration=integration.uuid,
@@ -615,7 +724,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             logger.debug("MCP server '%s' tools/list failed", integration.name, exc_info=True)
 
         try:
-            resources_result = await session.list_resources()
+            resources_result = await conn.run(lambda s: s.list_resources())
             for mcp_resource in resources_result.resources:
                 integration.add_resources([MCPResourceResource(
                     integration=integration.uuid,
@@ -628,7 +737,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             logger.debug("MCP server '%s' resources/list failed", integration.name, exc_info=True)
 
         try:
-            prompts_result = await session.list_prompts()
+            prompts_result = await conn.run(lambda s: s.list_prompts())
             for mcp_prompt in prompts_result.prompts:
                 integration.add_resources([MCPPromptResource(
                     integration=integration.uuid,
@@ -663,7 +772,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         # failed connect propagates to the caller, which distinguishes it from a
         # reachable server that simply advertises nothing.
         if not server.resources:
-            await self.connect(integration_id)
+            await self._ensure_connected(integration_id)
             await self._populate_server_info(server)
             await self._populate_resources(server)
         resources = list(server.resources.values())
@@ -682,14 +791,23 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
     # These methods only ever modify local MCP files.
 
     def add_integration(self, **payload) -> Integration:
-        logger.warning(f"{payload=}")
         pass
 
     def update_integration(self, integration_id: str, **payload) -> Integration:
-        logger.warning(f"{integration_id=}\n    {payload=}")
         config_dict = payload.get("server_config", None)
         if not config_dict:
             raise ValueError("Cannot save integration as server config not found.")
+
+        def disconnnect_callback(task: asyncio.Task):
+            err = task.exception()
+            if err:
+                logger.exception(f"Error shutting down integration '{integration_id}", exc_info=err)
+
+        # Disconnect any running connection so that it will reconnect using the new configuration at next use
+        loop = asyncio.get_event_loop()
+        disconnect_task = loop.create_task(self.disconnect(integration_id))
+        disconnect_task.add_done_callback(disconnnect_callback)
+
         server = self.get_integration(integration_id)
         server_config = server.server_config
         server_config.update(config_dict)
@@ -886,7 +1004,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             str: A full description of the server with full instructions, tools, and resources enumerated.
         """
         server = self._find_server_by_slug(server_slug)
-        await self.connect(server.uuid)
+        await self._ensure_connected(server.uuid)
         await self._populate_server_info(server)
         await self._populate_resources(server)
         return f"""
@@ -929,8 +1047,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
     ) -> str:
         """Invoke a tool on an MCP server and return its result.
 
-        Opens a connection to the server for the duration of the call and
-        closes it afterward.
+        Reuses the server's kept-open session, connecting on first use.
 
         Args:
             server_slug: The slug of the MCP server.
@@ -943,8 +1060,8 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             str: The tool's result content.
         """
         server = self._find_server_by_slug(server_slug)
-        async with self._session_scope(server.uuid) as session:
-            result = await session.call_tool(tool_name, arguments or {})
+        conn = await self._ensure_connected(server.uuid)
+        result = await conn.run(lambda s: s.call_tool(tool_name, arguments or {}))
         text = self._flatten_content(result.content)
         if getattr(result, "isError", False):
             return f"MCP tool '{tool_name}' on '{server.name}' returned an error:\n{text}"
@@ -954,8 +1071,7 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
     async def read_mcp_resource(self, server_slug: str, uri: str, agent: AgentRef) -> str:
         """Read a resource (by URI) from an MCP server.
 
-        Opens a connection to the server for the duration of the read and
-        closes it afterward.
+        Reuses the server's kept-open session, connecting on first use.
 
         Args:
             server_slug: The name of the MCP server.
@@ -965,8 +1081,8 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             str: The resource contents.
         """
         server = self._find_server_by_slug(server_slug)
-        async with self._session_scope(server.uuid) as session:
-            result = await session.read_resource(AnyUrl(uri))
+        conn = await self._ensure_connected(server.uuid)
+        result = await conn.run(lambda s: s.read_resource(AnyUrl(uri)))
         return self._flatten_resource_contents(result.contents) or "(resource is empty)"
 
 

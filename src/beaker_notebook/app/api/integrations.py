@@ -294,6 +294,6 @@ class IntegrationResourceHandler(BeakerAPIMixin, JupyterHandler):
             raise tornado.web.HTTPError(status_code=500, log_message=str(e))
 
 handlers = [
-    (r'integrations/(?P<session_id>[\w\d-]+)/?(?P<integration_id>[\w\d-]+)?', IntegrationHandler),
-    (r'integrations/(?P<session_id>[\w\d-]+)/(?P<integration_id>[\w\d-]+)/(?P<resource_type>\w+)/?(?P<resource_id>[\w\d-]+)?', IntegrationResourceHandler),
+    (r'integrations/(?P<session_id>[\w\d-]+)/?(?P<integration_id>[\w\d\:-]+)?', IntegrationHandler),
+    (r'integrations/(?P<session_id>[\w\d-]+)/(?P<integration_id>[\w\d\:-]+)/(?P<resource_type>\w+)/?(?P<resource_id>[\w\d-]+)?', IntegrationResourceHandler),
 ]

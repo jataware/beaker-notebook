@@ -434,10 +434,18 @@ class BeakerContext:
         await self.refresh_system_preamble()
         self.agent.chat_history.set_user_preamble_text(user_preamble)
 
-    def cleanup(self):
-        self.subkernel.cleanup()
+    async def cleanup(self):
+        cleanups = [
+            self.subkernel.cleanup(),
+        ]
         for msg_type, intercept_func, stream in self.intercepts:
             self.beaker_kernel.remove_intercept(msg_type=msg_type, func=intercept_func, stream=stream)
+        cleanups.extend([integration.cleanup() for integration in self.integrations if hasattr(integration, "cleanup")])
+        results = await asyncio.gather(*cleanups, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) or (isinstance(result, type) and issubclass(result, BaseException)):
+                logger.exception(f"There was an error cleaning up context '{self.SHORT_NAME}'", exc_info=result)
+
         if hasattr(self, "agent"):
             del self.agent
 

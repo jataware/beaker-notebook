@@ -102,6 +102,12 @@ class BaseIntegrationProvider(ABC):
             return a
         return cls._merge(a, b)
 
+    async def cleanup(self):
+        """
+        Override in subclass for class specific cleanup.
+        """
+        pass
+
     @classmethod
     @abstractmethod
     def discover_integrations(cls, **kwargs) -> Mapping[str, Integration]:

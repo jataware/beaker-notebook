@@ -571,17 +571,11 @@ class BeakerSubkernel(abc.ABC):
         except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
             return False
 
-    def cleanup(self):
-        def finish_cleanup(task: asyncio.Task):
-            success = task.result()
+    async def cleanup(self):
+        if self.kernel_id is not None:
+            success = await self.shutdown(self.kernel_id)
             if success:
                 self.kernel_id = None
-            self.tasks.discard(task)
-
-        if self.kernel_id is not None:
-            task = asyncio.create_task(self.shutdown(self.kernel_id))
-            self.tasks.add(task)
-            task.add_done_callback(finish_cleanup)
 
     def format_kernel_state(self, state: dict) -> dict:
         return state
@@ -665,8 +659,8 @@ class CheckpointableBeakerSubkernel(BeakerSubkernel):
     add_checkpoint_action._default_payload = "{}"
 
 
-    def cleanup(self):
-        super().cleanup()
+    async def cleanup(self):
+        await super().cleanup()
         if self.checkpoints_enabled:
             shutil.rmtree(self.storage_prefix, ignore_errors=True)
             self.checkpoints = []
