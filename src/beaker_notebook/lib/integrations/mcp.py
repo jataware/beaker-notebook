@@ -153,7 +153,7 @@ class MCPServerConfig:
     # explicit override; otherwise inferred from command/url
     transport: Optional[MCPTransport] = None
     disabled: bool = False
-    config_file: Optional[str] = None
+    config_file: Optional[Path] = None
     cached_resources: Optional[dict[str, list[str]]] = None
 
     description: Optional[str] = None
@@ -169,8 +169,14 @@ class MCPServerConfig:
             return "http"
         raise ValueError(f"MCP server '{self.name}' has neither command nor url")
 
+    def __post_init__(self, *args, **kwargs):
+        if isinstance(self.config_file, str):
+            self.config_file = Path(self.config_file)
+
     @classmethod
-    def from_dict(cls, name: str, data: dict, config_file: Optional[str] = None) -> "MCPServerConfig":
+    def from_dict(cls, name: str, data: dict, config_file: Optional[str|Path] = None) -> "MCPServerConfig":
+        if isinstance(config_file, str):
+            config_file = Path(config_file)
         metadata = data.get("x-beaker-notebook") or {}
         title = data.get("title") or metadata.get("title")
         description = data.get("description") or metadata.get("description") or None
@@ -228,7 +234,7 @@ class MCPServerConfig:
 
     def update_config_file(self):
         config_path = self.config_file
-        if not config_path or not os.path.isfile(self.config_file):
+        if not config_path or not self.config_file.is_file():
             raise FileNotFoundError(f"Unable to update file {self.config_file} as it cannot be found.")
 
         # Read, update and write config file in one block to hold lock on file
@@ -428,6 +434,8 @@ class _ServerConnection:
             self._fail_pending(exc)
         finally:
             self._integration.connected = False
+            if self.logfile and not self.logfile.closed:
+                self.logfile.close()
             # Nothing can run these now (the session is gone); don't let a
             # caller that raced past the shutdown sentinel await forever.
             self._fail_pending(RuntimeError(
@@ -493,6 +501,10 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         # established lazily on first use and reused thereafter. See
         # `_ServerConnection`, `_ensure_connected`, and `disconnect`.
         self._connections: dict[str, _ServerConnection] = {}
+        # Per-integration locks serializing connection establishment, so two
+        # coroutines racing on `_ensure_connected` don't each spawn a session
+        # (and, for stdio, an orphaned subprocess). Keyed by integration uuid.
+        self._connection_locks: dict[str, asyncio.Lock] = {}
 
     # --- Discovery -------------------------------------------------------
 
@@ -612,6 +624,20 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
 
         return integrations
 
+    @staticmethod
+    def _apply_display_fields(integration: MCPIntegration, server_config: MCPServerConfig) -> None:
+        """Derive an integration's UI-facing display fields from its config.
+
+        These are the fields ``list_integrations`` / ``get_integration`` return
+        to the front-end. They are derived (not stored on the config) so both
+        initial discovery and ``update_integration`` must run through here,
+        otherwise an edited server keeps stale display fields in-memory until a
+        new session re-discovers it from disk.
+        """
+        integration.name = server_config.title or server_config.name
+        integration.server_title = server_config.title
+        integration.description = server_config.description or f"MCP server '{server_config.name}'"
+
     @classmethod
     def _build_integration(cls, server_config: MCPServerConfig, corpus: Optional[str] = None) -> MCPIntegration:
         """Build the (unconnected) integration shell for a server config.
@@ -621,19 +647,20 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         """
 
         uuid = f"{cls.slug}:{corpus}:{server_config.name}"
-        display_name = server_config.title or server_config.name
         provider_ref = f"{cls.provider_type}:{cls.slug}"
-        description = server_config.description or f"MCP server '{server_config.name}'"
-        return MCPIntegration(
+        integration = MCPIntegration(
             uuid=uuid,
             slug=server_config.name,
-            server_title=server_config.title,
-            name=display_name,
-            description=description,
+            name=server_config.name,
+            # Placeholder; the real value is derived in _apply_display_fields
+            # below (Integration requires description at construction time).
+            description="",
             provider=provider_ref,
             server_config=server_config,
             corpus=corpus,
         )
+        cls._apply_display_fields(integration, server_config)
+        return integration
 
     @classmethod
     def _merge(cls, a: Self, b: Self) -> Self:
@@ -657,7 +684,6 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
             if not config.command:
                 raise ValueError(f"MCP server '{config.name}' has no command for stdio transport")
             log_file = tempfile.TemporaryFile()
-            logger.warning(f"Logging to file {log_file=}")
             params = StdioServerParameters(
                 command=config.command,
                 args=config.args,
@@ -675,7 +701,9 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         if transport == "sse":
             if not config.url:
                 raise ValueError(f"MCP server '{config.name}' has no url for sse transport")
-            return sse_client(config.url, headers=config.headers or None)
+            # As with http: no subprocess, so an empty buffer satisfies the
+            # (transport, logfile) contract expected by _ServerConnection._run.
+            return (sse_client(config.url, headers=config.headers or None), io.BytesIO())
         raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
     async def _ensure_connected(self, integration_id: str) -> _ServerConnection:
@@ -690,19 +718,29 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         if conn is not None and conn.running:
             return conn
 
-        integration = self.get_integration(integration_id)
-        if integration.server_config is None:
-            raise ValueError(f"MCP integration '{integration.name}' has no server config")
+        # setdefault is atomic on the single loop thread (no await between the
+        # get and the set), so racing callers share one lock per integration.
+        lock = self._connection_locks.setdefault(integration_id, asyncio.Lock())
+        async with lock:
+            # Re-check under the lock: a concurrent caller may have connected
+            # while we were waiting to acquire it.
+            conn = self._connections.get(integration_id)
+            if conn is not None and conn.running:
+                return conn
 
-        conn = _ServerConnection(self, integration)
-        self._connections[integration_id] = conn
-        try:
-            await conn.start()
-        except BaseException:
-            # Don't leave a dead handle cached; the next call will retry.
-            self._connections.pop(integration_id, None)
-            raise
-        return conn
+            integration = self.get_integration(integration_id)
+            if integration.server_config is None:
+                raise ValueError(f"MCP integration '{integration.name}' has no server config")
+
+            conn = _ServerConnection(self, integration)
+            self._connections[integration_id] = conn
+            try:
+                await conn.start()
+            except BaseException:
+                # Don't leave a dead handle cached; the next call will retry.
+                self._connections.pop(integration_id, None)
+                raise
+            return conn
 
     async def disconnect(self, integration_id: str) -> None:
         """Tear down the kept-open session for an integration, if any."""
@@ -916,6 +954,10 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         server = self.get_integration(integration_id)
         server_config = server.server_config
         server_config.update(config_dict)
+        # Re-derive the UI-facing display fields so the in-memory integration
+        # (what get_integration/list_integrations return this session) matches
+        # what a fresh discovery from the updated file would produce.
+        self._apply_display_fields(server, server_config)
         cached_resources = defaultdict(list)
         for _res_id, resource in payload.get("resources", {}).items():
             res_type = resource.get("resource_type")
@@ -1099,9 +1141,8 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         """
         Connects to a server and returns full information about the MCP server and its capabilities.
 
-        Call this once you have selected a MCP server to use, prior to using it, to load the relevent
-        details into context.
-        You may also call this to
+        Call this once you have selected a MCP server to use, prior to using it, to load the relevant
+        details into context. It may also be called again to refresh a server's catalog.
 
         Args:
             server_slug: The slug of the MCP server (as shown in the provider listing).
@@ -1113,8 +1154,12 @@ class MCPIntegrationProvider(MutableBaseIntegrationProvider):
         await self._ensure_connected(server.uuid)
         await self._populate_server_info(server)
         await self._populate_resources(server)
-        return f"""
-"""
+
+        entry = self._server_to_dict(server)
+        if server.instructions:
+            entry["instructions"] = server.instructions
+        yaml_text = yaml.safe_dump({"server": entry}, sort_keys=False, default_flow_style=False).rstrip("\n")
+        return f"```yaml\n{yaml_text}\n```"
 
 
     @tool(internal=True)

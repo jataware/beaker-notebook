@@ -7,6 +7,7 @@ are never contacted: sessions are replaced with in-memory fakes, and the actor
 is exercised against a faked transport + ``ClientSession``.
 """
 
+import asyncio
 import io
 import json
 import textwrap
@@ -541,6 +542,29 @@ class TestConfigSearchRoots:
         assert str(tmp_path / ".agents") not in root_strs
 
 
+class TestOpenTransport:
+    """Every transport must return the (transport_cm, logfile) pair that
+    _ServerConnection._run unpacks; a bare context manager would crash on
+    connect (regression guard for the sse branch)."""
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            MCPServerConfig(name="s", command="echo", transport="stdio"),
+            MCPServerConfig(name="h", url="https://example.com/mcp", transport="http"),
+            MCPServerConfig(name="e", url="https://example.com/sse", transport="sse"),
+        ],
+        ids=["stdio", "http", "sse"],
+    )
+    def test_returns_transport_logfile_pair(self, config):
+        provider = _make_provider()
+        transport, logfile = provider._open_transport(config)
+        assert hasattr(transport, "__aenter__")
+        # logfile must be a readable buffer the failure handler can drain.
+        logfile.seek(0)
+        assert isinstance(logfile.read(), bytes)
+
+
 # ---------------------------------------------------------------------------
 # Catalog population
 # ---------------------------------------------------------------------------
@@ -721,6 +745,57 @@ class TestConnectionLifecycle:
             await provider.close_all()
             with pytest.raises(RuntimeError, match="not running"):
                 await conn.run(lambda s: s.list_tools())
+
+
+# ---------------------------------------------------------------------------
+# Update / mutation
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateIntegration:
+    async def test_update_refreshes_in_memory_display_fields(self, json_config: Path):
+        # Regression: updating a server must refresh the derived display fields
+        # (name/server_title/description) on the in-memory integration, not just
+        # rewrite the config file. Otherwise get_integration/list_integrations
+        # return stale data until a new session re-discovers from disk.
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+
+        provider.update_integration(
+            integ.uuid,
+            server_config={
+                "name": integ.slug,
+                "title": "Renamed FS",
+                "description": "A freshly edited description.",
+                "command": "npx",
+                "transport": "stdio",
+            },
+        )
+        await asyncio.sleep(0)  # let the scheduled disconnect task settle
+
+        refreshed = provider.get_integration(integ.uuid)
+        assert refreshed.name == "Renamed FS"
+        assert refreshed.server_title == "Renamed FS"
+        assert refreshed.description == "A freshly edited description."
+
+    async def test_update_falls_back_to_name_when_no_title(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+
+        provider.update_integration(
+            integ.uuid,
+            server_config={
+                "name": integ.slug,
+                "title": None,
+                "command": "npx",
+                "transport": "stdio",
+            },
+        )
+        await asyncio.sleep(0)
+
+        refreshed = provider.get_integration(integ.uuid)
+        assert refreshed.name == integ.slug
+        assert refreshed.description == f"MCP server '{integ.slug}'"
 
 
 # ---------------------------------------------------------------------------

@@ -171,8 +171,14 @@ async function integrationApiWrapper<T>(
     if (!response.ok) {
       throw new Error(response.statusText);
     }
-    const json = await response.json() as T;
-    return json
+    const json = await response.json();
+    // The call-in-context bridge returns structured errors ({status, ename,
+    // evalue}) with a 200 rather than an HTTP error status, so an error body
+    // would otherwise read as success. Surface it as a thrown error here.
+    if (json && typeof json === "object" && json.status === "error") {
+        throw new Error(json.evalue || json.ename || "Integration request failed");
+    }
+    return json as T;
 }
 
 export const getIntegrationProviderType = (integration: Integration) => integration.provider.split(":")[0];

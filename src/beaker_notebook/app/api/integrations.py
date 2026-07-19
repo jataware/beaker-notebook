@@ -158,10 +158,16 @@ class BeakerAPIMixin:
             status = result["content"]["status"]
             if status == "ok":
                 response = result["content"]["return"]
-            elif status == "error":
+            else:
+                # Any non-ok status (error, aborted, ...) carries the structured
+                # error/abort content; surface it rather than leaving `response`
+                # unbound.
                 response = result["content"]
         except Empty as err:
-            logger.exception("Timeout waiting for call_in_context response", TimeoutError(err))
+            # Record this as a timeout: the underlying `Empty` (the shell queue
+            # being empty after the wait) is opaque unless you know the transport
+            # internals, so log it with a TimeoutError via the exc_info keyword.
+            logger.error("Timeout waiting for call_in_context response", exc_info=TimeoutError(err))
             response = {
                 "status": "error",
                 "ename": "TimeoutError",
