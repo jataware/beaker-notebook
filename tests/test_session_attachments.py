@@ -1,6 +1,7 @@
 import hashlib
 import io
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -214,3 +215,78 @@ def test_runtime_cleanup_removes_attachments_from_all_sessions(manager):
 
     assert manager.list_attachments("session-one") == []
     assert manager.list_attachments("session-two") == []
+
+
+def _limits() -> AttachmentLimits:
+    return AttachmentLimits(
+        max_upload_bytes=1024 * 1024,
+        max_session_bytes=4 * 1024 * 1024,
+        max_extracted_bytes=2 * 1024 * 1024,
+        max_archive_entries=10,
+        max_archive_ratio=100,
+    )
+
+
+def test_local_mode_stores_under_shared_data_dir_ignoring_working_dir(tmp_path, monkeypatch):
+    from beaker_notebook.services.auth import BeakerUser
+
+    data_dir = tmp_path / "beaker-data"
+    working_dir = tmp_path / "cwd"
+    monkeypatch.setattr(
+        "beaker_notebook.services.attachments.BEAKER_LOCAL_DATA_PATH", data_dir
+    )
+    parent = SimpleNamespace(
+        root_dir=str(working_dir),
+        virtual_home_root=str(working_dir),
+        local_mode=True,
+    )
+    manager = SessionAttachmentManager(parent, limits=_limits())
+
+    # Even a request carrying a BeakerUser must not scatter files into a home/working dir.
+    user = BeakerUser(username="alice")
+    attachment = manager.create_attachment("session-one", "one.txt", "text/plain", b"one", user)
+
+    stored = Path(attachment["path"])
+    assert data_dir.resolve() / "session-attachments" in stored.resolve().parents
+    assert working_dir not in stored.resolve().parents
+
+
+def test_server_mode_namespaces_attachments_under_the_user_home(tmp_path):
+    from beaker_notebook.services.auth import BeakerUser
+
+    home_root = tmp_path / "homes"
+    parent = SimpleNamespace(
+        root_dir=str(tmp_path / "cwd"),
+        virtual_home_root=str(home_root),
+        local_mode=False,
+    )
+    manager = SessionAttachmentManager(parent, limits=_limits())
+
+    user = BeakerUser(username="alice")
+    attachment = manager.create_attachment("session-one", "one.txt", "text/plain", b"one", user)
+
+    stored = Path(attachment["path"]).resolve()
+    expected_base = (home_root / user.home_dir / ".beaker" / "session-attachments").resolve()
+    assert expected_base in stored.parents
+
+
+def test_local_mode_cleanup_preserves_the_shared_data_dir(tmp_path, monkeypatch):
+    data_dir = tmp_path / "beaker-data"
+    # A sibling artifact the local data dir is expected to also hold.
+    (data_dir / "notebooks").mkdir(parents=True)
+    monkeypatch.setattr(
+        "beaker_notebook.services.attachments.BEAKER_LOCAL_DATA_PATH", data_dir
+    )
+    parent = SimpleNamespace(
+        root_dir=str(tmp_path / "cwd"),
+        virtual_home_root=str(tmp_path / "cwd"),
+        local_mode=True,
+    )
+    manager = SessionAttachmentManager(parent, limits=_limits())
+    manager.create_attachment("session-one", "one.txt", "text/plain", b"one")
+
+    manager.cleanup()
+
+    assert manager.list_attachments("session-one") == []
+    assert data_dir.is_dir()
+    assert (data_dir / "notebooks").is_dir()

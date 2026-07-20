@@ -18,5 +18,9 @@ class BeakerNotebookApp(BaseBeakerApp):
         }
     }
 
+    @property
+    def local_mode(self) -> bool:
+        return True
+
 if __name__ == "__main__":
     BeakerNotebookApp.launch_instance()

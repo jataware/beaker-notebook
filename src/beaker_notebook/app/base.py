@@ -274,6 +274,16 @@ class BaseBeakerApp(ServerApp):
     def _default_root_dir(self):
         return self.working_dir or super()._default_root_dir()
 
+    @property
+    def local_mode(self) -> bool:
+        """Whether this app runs as a single-user local notebook rather than a multi-user server.
+
+        Server deployments keep per-user state namespaced under each user's virtual home;
+        local deployments centralize it under the shared Beaker data directory. Subclasses
+        that represent a local launch (e.g. ``BeakerNotebookApp``) override this to ``True``.
+        """
+        return False
+
     def stop(self, from_signal = False, **kwargs):
         print("Shutting down Beaker server...")
         attachment_manager = getattr(self, "attachment_manager", None)

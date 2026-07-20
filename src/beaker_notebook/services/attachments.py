@@ -15,6 +15,7 @@ from typing import Any
 
 from beaker_notebook.lib.config import config
 from beaker_notebook.services.auth import BeakerUser
+from beaker_notebook.services.storage import BEAKER_LOCAL_DATA_PATH
 
 
 class AttachmentError(ValueError):
@@ -69,8 +70,21 @@ class SessionAttachmentManager:
             return (Path(self.parent.virtual_home_root) / user.home_dir).resolve()
         return Path(self.parent.root_dir).resolve()
 
+    def _attachments_base(self, user: Any = None) -> Path:
+        """Root under which this runtime stores session attachments.
+
+        In local mode all attachments live beneath the shared Beaker data directory,
+        independent of the requesting identity, so a ``beaker notebook`` launched in any
+        working directory keeps its temporary files in one predictable place. In server
+        mode they are namespaced under the owning user's virtual home to preserve per-user
+        isolation.
+        """
+        if getattr(self.parent, "local_mode", False):
+            return Path(BEAKER_LOCAL_DATA_PATH).resolve() / "session-attachments"
+        return self._user_root(user) / ".beaker" / "session-attachments"
+
     def _session_root(self, session_id: str, user: Any = None) -> Path:
-        instance_root = self._user_root(user) / ".beaker" / "session-attachments" / self.instance_id
+        instance_root = self._attachments_base(user) / self.instance_id
         self._instance_roots.add(instance_root)
         return instance_root / self._session_key(session_id)
 
@@ -335,14 +349,17 @@ class SessionAttachmentManager:
     def cleanup(self) -> None:
         """Remove every temporary attachment directory created by this server runtime."""
         with self._mutation_lock:
-            attachment_parents = {instance_root.parent for instance_root in self._instance_roots}
+            session_attachment_dirs = {instance_root.parent for instance_root in self._instance_roots}
             for instance_root in self._instance_roots:
                 shutil.rmtree(instance_root, ignore_errors=True)
             self._instance_roots.clear()
-            for attachment_parent in attachment_parents:
+            for session_attachment_dir in session_attachment_dirs:
+                # Prune the shared "session-attachments" directory only if this was the last
+                # runtime using it. Never climb higher: in local mode its parent is the shared
+                # Beaker data directory, and in server mode it is the user's ".beaker" — neither
+                # is ours to remove.
                 try:
-                    attachment_parent.rmdir()
-                    attachment_parent.parent.rmdir()
+                    session_attachment_dir.rmdir()
                 except OSError:
-                    # Another server runtime or another .beaker service still owns this directory.
+                    # Another server runtime still owns it, or it is not empty.
                     pass
