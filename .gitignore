@@ -80,3 +80,9 @@ src/beaker_notebook/**/ui/*
 
 beaker-ts/package-lock.json
 beaker-vue/package-lock.json
+
+# Personal integrations
+.mcp.yaml
+.mcp.yml
+.mcp.json
+.skills.json

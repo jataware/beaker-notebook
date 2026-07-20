@@ -1,9 +1,10 @@
+import inspect
 import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Optional, Mapping, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, Mapping, cast
 from typing_extensions import Self
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from beaker_notebook.lib.integrations.types import (
 from .base import BaseIntegrationProvider
 if TYPE_CHECKING:
     from beaker_notebook.lib.agent import BeakerAgent
+    from beaker_notebook.lib.context import BeakerContext
     from archytas.chat_history import ChatHistory
     from archytas.models.base import BaseArchytasModel
     from langchain_core.messages import ToolMessage
@@ -204,12 +206,13 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
     """
 
     provider_type: ClassVar[str] = "agent-skill"
+    display_name: ClassVar[str] = "Agent Skills"
     slug: ClassVar[str] = "agent-skill"
     mutable: ClassVar[bool] = False
 
-    def __init__(self, display_name: str = "Agent Skills", id: Optional[str] = None, skill_paths: Optional[list[str|os.PathLike]] = None):
-        super().__init__(display_name, id=id)
-        logger.debug(f"Initializing SkillIntegrationProvider {display_name} ({self.id})")
+    def __init__(self, id: Optional[str] = None, skill_paths: Optional[list[str|os.PathLike]] = None):
+        super().__init__(id=id)
+        logger.debug(f"Initializing SkillIntegrationProvider {self.display_name} ({self.id})")
         self._skills: list[SkillIntegration] = list(self.discover_integrations(paths=skill_paths).values())
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 
@@ -258,6 +261,50 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return roots
 
     @classmethod
+    def from_context(cls, context: "BeakerContext") -> list[Self]:
+        # Check for a skills.json file a the same level as the context.py and load it if it exists.
+        context_dir_path = Path(inspect.getabsfile(context.__class__)).parent
+        integration_paths = cls.discover_integration_paths(root_paths=[context_dir_path])
+        if integration_paths:
+            return [cls(skill_paths=integration_paths)]
+        else:
+            return []
+
+
+    @classmethod
+    def discover_integration_paths(
+        cls, root_paths: Optional[list[str|os.PathLike]] = None
+    ) -> list[Path]:
+        """Locate ``skills.json`` config files within the given roots.
+
+        Each root directory is checked for a ``skills.json`` manifest; a root
+        that points directly at a ``skills.json`` file is returned as-is. When
+        ``root_paths`` is ``None`` the conventional skill search roots are used.
+        Returns the config file paths in root order; does not read them.
+
+        Note: this locates only ``skills.json`` manifests. Skills installed
+        under a root's ``skills/`` convention directory are not config-file
+        driven and are handled directly in :meth:`discover_integrations`.
+        """
+        roots = cls._get_skill_search_roots() if root_paths is None else [Path(p) for p in root_paths]
+
+        config_files: list[Path] = []
+        for root in roots:
+            if root.is_file() and root.name == "skills.json":
+                config_files.append(root)
+            elif root.is_dir():
+                if root.name == "skills":
+                    config_files.append(root)
+                else:
+                    candidate_file = root / "skills.json"
+                    if candidate_file.is_file():
+                        config_files.append(candidate_file)
+                    candidate_dir = root / "skills"
+                    if candidate_dir.is_dir() and any(child.is_dir() for child in candidate_dir.iterdir()):
+                        config_files.append(candidate_dir)
+        return config_files
+
+    @classmethod
     def discover_integrations(cls, *, paths: Optional[list[str|os.PathLike]] = None, **kwargs) -> Mapping[str, SkillIntegration]:
         """Discover and load skills from ``skills.json`` files and ``skills/``
         directories under each search root.
@@ -280,44 +327,26 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             except Exception:
                 logger.exception("Failed to load skill from source: %s", source)
 
-        # Normalize each input path to a (root_dir, explicit_config_path) pair.
-        # A path may point directly at a skills.json file, in which case its
-        # parent serves as the root and only that file is consulted (no
-        # implicit skills/ scan from the parent).
-        roots: list[tuple[Path, Optional[Path]]] = []
-        if paths is None:
-            roots = [(root, None) for root in cls._get_skill_search_roots()]
-        else:
-            for raw in paths:
-                p = Path(raw)
-                if p.is_file() and p.name == "skills.json":
-                    roots.append((p.parent, p))
-                elif p.is_dir():
-                    roots.append((p, None))
-
-        for root, explicit_config in roots:
-            config_path = explicit_config if explicit_config is not None else root / "skills.json"
+        # 1) skills.json manifests. Processed before the skills/ scan so a
+        #    manifest entry wins on slug conflicts.
+        for config_path in cls.discover_integration_paths(paths):
+            logger.debug("Found skills.json at %s", config_path)
             if config_path.is_file():
-                logger.debug("Found skills.json at %s", config_path)
                 try:
                     with open(config_path) as f:
                         data = json.load(f)
-                    if not isinstance(data, list):
-                        logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
-                    else:
-                        for source in data:
-                            _load_deduped(source, base_path=str(root))
                 except Exception:
                     logger.exception("Failed to read skills.json at %s", config_path)
-
-            # Only scan skills/ when the caller didn't pin us to a specific
-            # skills.json file.
-            if explicit_config is None:
-                skills_dir = root / "skills"
-                if skills_dir.is_dir():
-                    logger.debug("Scanning skills directory: %s", skills_dir)
-                    for skill_md in skills_dir.glob("*/SKILL.md"):
-                        _load_deduped(str(skill_md.parent), base_path=str(skills_dir))
+                    continue
+                if not isinstance(data, list):
+                    logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
+                    continue
+                for source in data:
+                    _load_deduped(source, base_path=str(config_path.parent))
+            elif config_path.is_dir():
+                logger.debug("Scanning skills directory: %s", config_path)
+                for skill_md in config_path.glob("*/SKILL.md"):
+                    _load_deduped(str(skill_md.parent), base_path=str(config_path))
 
         return skills
 
@@ -507,13 +536,13 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             resource.content = self._fetch_file_content(skill, f"examples/{resource.filename}")
         return resource
 
-    # --- Prompt (Tier 1: metadata only) ---
+    # --- Prompt (Tier 1: metadata only, as YAML) ---
 
     @property
     def prompt(self) -> str:
         if not self._skills:
             return ""
-        parts = [f"Skills available via the {self.display_name} provider:\n"]
+        skills: list[dict[str, Any]] = []
         for skill in self._skills:
             metadata = next(
                 (r for r in skill.resources.values() if isinstance(r, SkillMetadataResource)),
@@ -521,40 +550,39 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             )
             if not metadata:
                 continue
-            parts.append(f"Skill: {metadata.skill_name}")
-            parts.append(f"  Slug: {metadata.skill_slug}")
-            parts.append(f"  Description: {metadata.description}")
-            if skill.base_path:
-                parts.append(f"  Location: {skill.base_path}")
-            elif skill.base_url:
-                parts.append(f"  Location: {skill.base_url}")
-            if metadata.compatibility:
-                parts.append(f"  Compatibility: {metadata.compatibility}")
+            entry: dict[str, Any] = {
+                "name": metadata.skill_name,
+                "slug": metadata.skill_slug,
+                "description": metadata.description,
+            }
+            entry["compatibility"] = metadata.compatibility or None
             file_resources = [
                 r for r in skill.resources.values() if isinstance(r, SkillFileResource)
             ]
-            if file_resources:
-                paths = ", ".join(r.relative_path for r in file_resources)
-                parts.append(f"  Available resources: {paths}")
+            entry["available_resources"] = [r.relative_path for r in file_resources]
             example_resources = [
                 r for r in skill.resources.values() if isinstance(r, SkillExampleResource)
             ]
-            if example_resources:
-                parts.append(f"  Code examples: {len(example_resources)}")
-            parts.append("")
-        parts.append(
-            "Use `load_skill_instructions(skill_slug)` to load a skill's full "
-            "instructions before using it."
-        )
-        parts.append(
-            "Use `load_skill_resource(skill_slug, relative_path)` to load a "
-            "skill's reference files or scripts."
-        )
-        parts.append(
-            "Use `load_skill_examples(skill_slug, filenames)` to load code "
-            "examples for a skill. Available examples are listed when instructions are loaded."
-        )
-        return "\n".join(parts)
+            entry["has_code_examples"] = bool(len(example_resources))
+            skills.append(entry)
+        data = {
+            "usage": [
+                "Use load_skill_instructions(skill_slug) to load a skill's full "
+                "instructions before using it.",
+                "Use load_skill_resource(skill_slug, relative_path) to load a "
+                "skill's reference files or scripts.",
+                "Use load_skill_examples(skill_slug, filenames) to load code "
+                "examples for a skill. Available examples are listed when instructions are loaded.",
+            ],
+            "provider": self.display_name,
+            "skills": skills,
+        }
+        yaml_string = yaml.safe_dump(data, sort_keys=False, default_flow_style=False).rstrip("\n")
+        return f"""
+```yaml
+{yaml_string}
+```
+        """.strip()
 
     # --- Deduplication ---
 

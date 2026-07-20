@@ -139,6 +139,11 @@ class BeakerAgent(ReActAgent):
         if tools is None:
             tools = []
         if context.integrations:
+            # Each provider is registered as a tool container: its @tool methods
+            # become agent tools. Because those tools are named by class/method,
+            # there must be exactly one instance per provider class here — which
+            # is precisely what IntegrationProviderRegistry guarantees by folding
+            # same-class providers. Iterating it yields the folded instances.
             for integration in self.context.integrations:
                 tools.append(integration)
 

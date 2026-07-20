@@ -1,14 +1,32 @@
 from collections.abc import Iterable, Iterator
 
 from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.utils import ensure_async
 
 
 class IntegrationProviderRegistry:
-    """Iterable container of providers that folds same-class providers via cls.merge.
+    """Iterable container of integration providers, folded to one instance per class.
 
-    Iteration order reflects insertion order; the first-added instance of a class
-    is the merge winner (its id, display_name, and other non-mergeable state
-    survive), and subsequent instances of the same class are absorbed into it.
+    Every consumer treats a provider *class* as a single logical provider, so
+    the registry keeps exactly one instance per class and folds any extras into
+    it via ``cls.merge``.
+
+    The binding reason for that invariant is tool registration: the agent adds
+    each provider instance as a tool container (see ``BeakerAgent.__init__``),
+    and a provider's ``@tool`` methods are named by class/method. Two live
+    instances of the same class would therefore expose duplicate,
+    identically-named tools bound to *different* catalogs, leaving the agent no
+    way to know which to call. Folding collapses them into one instance whose
+    tools span the merged catalog. (Slug uniqueness, which ``list_providers``
+    and ``call_in_context`` rely on, falls out of the same invariant but is not
+    the driver.) This is why several config sources of the same kind — e.g. the
+    default skills plus a context's own skills — are constructed as separate
+    instances yet surface as one provider.
+
+    Iteration order reflects insertion order; the first-added instance of a
+    class is the merge winner (its ``id`` and other non-mergeable state survive)
+    and later same-class instances are absorbed into it. ``display_name`` is
+    class-level, so the resulting label does not depend on which instance wins.
     """
 
     def __init__(self, providers: Iterable[BaseIntegrationProvider] = ()):
@@ -41,12 +59,11 @@ class IntegrationProviderRegistry:
     async def system_preamble(self) -> str | None:
         if not self._by_class:
             return None
-        from beaker_notebook.lib.utils import ensure_async
-        parts: list[str] = []
-        for provider in self._by_class.values():
+        integrations_by_provider: list[tuple[str, str]] = []
+        for cls, provider in self._by_class.items():
             result = await ensure_async(provider.system_preamble())
             if result:
-                parts.append(result)
-        if not parts:
+                integrations_by_provider.append((cls.display_name or provider.slug, result))
+        if not integrations_by_provider:
             return None
-        return "Here are integrations that you have access to:\n" + "---".join(parts)
+        return "## Integrations\n\n" + "\n\n".join(f"### {provider_name}\n\n{content}" for provider_name, content in integrations_by_provider)

@@ -7,7 +7,7 @@ from uuid import uuid4
 from beaker_notebook.lib.utils import slugify
 
 
-IntegrationTypes: TypeAlias = Literal["api", "database", "dataset", "skill"]
+IntegrationTypes: TypeAlias = Literal["api", "database", "dataset", "skill", "mcp"]
 
 
 @dataclass(kw_only=True)

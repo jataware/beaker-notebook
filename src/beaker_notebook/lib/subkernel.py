@@ -1,14 +1,15 @@
 import abc
 import asyncio
+import hashlib
 import inspect
 import json
-from typing import Any, Callable, Optional, TYPE_CHECKING, ClassVar
-import hashlib
-import shutil
-from tempfile import mkdtemp
 import os
 import os.path
+import shutil
 import requests
+import yaml
+from tempfile import mkdtemp
+from typing import Any, Callable, Optional, TYPE_CHECKING, ClassVar
 
 from archytas.tool_utils import AgentRef, tool, statetool, LoopControllerRef, ReactContextRef
 
@@ -174,7 +175,25 @@ class BeakerSubkernel(abc.ABC):
         ]
         if doc:
             parts.append(doc)
-        return "\n".join(parts)
+        data = {
+            "usage": [
+                "This is information regarding the Jupyter kernel environment that your notebook, ",
+                "and the code you write, are running in."
+            ],
+            "subkernel": {
+                "name": self.DISPLAY_NAME,
+                "language": self.JUPYTER_LANGUAGE,
+                "docstring": doc or None,
+            },
+        }
+        yaml_text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False).rstrip("\n")
+        return f"""
+## Runtime environment
+
+```yaml
+{yaml_text}
+```
+        """.strip()
 
     @classmethod
     @abc.abstractmethod
@@ -552,17 +571,11 @@ class BeakerSubkernel(abc.ABC):
         except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as err:
             return False
 
-    def cleanup(self):
-        def finish_cleanup(task: asyncio.Task):
-            success = task.result()
+    async def cleanup(self):
+        if self.kernel_id is not None:
+            success = await self.shutdown(self.kernel_id)
             if success:
                 self.kernel_id = None
-            self.tasks.discard(task)
-
-        if self.kernel_id is not None:
-            task = asyncio.create_task(self.shutdown(self.kernel_id))
-            self.tasks.add(task)
-            task.add_done_callback(finish_cleanup)
 
     def format_kernel_state(self, state: dict) -> dict:
         return state
@@ -646,8 +659,8 @@ class CheckpointableBeakerSubkernel(BeakerSubkernel):
     add_checkpoint_action._default_payload = "{}"
 
 
-    def cleanup(self):
-        super().cleanup()
+    async def cleanup(self):
+        await super().cleanup()
         if self.checkpoints_enabled:
             shutil.rmtree(self.storage_prefix, ignore_errors=True)
             self.checkpoints = []

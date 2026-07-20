@@ -236,8 +236,10 @@ def _find_integration_providers(
     INTEGRATION_PROVIDERS attribute.
     """
     from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
+    from beaker_notebook.lib.integrations.mcp import MCPIntegrationProvider
 
-    providers: list[BaseIntegrationProvider] = [SkillIntegrationProvider("Default Skills")]
+
+    providers: list[BaseIntegrationProvider] = [SkillIntegrationProvider(), MCPIntegrationProvider()]
 
     try:
         providers.extend(context_cls.extra_integration_providers())

@@ -1,27 +1,31 @@
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Callable, ClassVar, Optional, Generator, Mapping
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Generator, Mapping
 from typing_extensions import Self
 from uuid import uuid4
 
 from beaker_notebook.lib.integrations.types import Integration, Resource
 from beaker_notebook.lib.autodiscovery import find_resource_dirs
 
+
+if TYPE_CHECKING:
+    from beaker_notebook.lib.context import BeakerContext
+
+
 class BaseIntegrationProvider(ABC):
 
     provider_type: ClassVar[str]
     mutable: ClassVar[bool] = False
-    display_name: ClassVar[str]
     slug: ClassVar[str]
+    display_name: ClassVar[str] = "Integrations"
+    icon: ClassVar[Optional[str]] = None  # Optional icon hint provided to front-end
 
     id: str
 
     prompt_instructions: Optional[str]
 
-    def __init__(self, display_name: Optional[str] = None, id: Optional[str] = None):
-        if display_name is not None:
-            self.__class__.display_name = display_name
+    def __init__(self, id: Optional[str] = None):
         self.id = id if id is not None else str(uuid4())
         self.prompt_instructions = None
 
@@ -60,6 +64,13 @@ class BaseIntegrationProvider(ABC):
 
     @classmethod
     def _merge(cls, a: Self, b: Self) -> Self:
+        """Opt-in hook: fold ``b``'s catalog into ``a`` and return the survivor.
+
+        Override to allow more than one instance of this provider class to be
+        registered in a single context (they will be folded into one). Not
+        overriding means at most one instance may exist per context; a second
+        registration raises. See ``merge`` for why the fold is required.
+        """
         raise NotImplementedError(
             f"{cls.__name__} does not support merging; registering two "
             f"instances in the same context is ambiguous."
@@ -67,7 +78,20 @@ class BaseIntegrationProvider(ABC):
 
     @classmethod
     def merge(cls, a: Self, b: Self) -> Self:
-        """Combine two providers of this class into one. Default refuses; override to opt in."""
+        """Fold two providers of the same class into a single instance.
+
+        The registry keeps at most one instance per provider class; this is how
+        it collapses extras. The constraint exists because the agent registers
+        each provider *instance* as a tool container, and a provider's ``@tool``
+        methods are named by class/method — so two live instances of one class
+        would register duplicate, identically-named tools bound to *different*
+        catalogs, with no way for the agent to disambiguate. Folding guarantees
+        one tool-bearing instance per class whose tools operate over the merged
+        catalog.
+
+        Default refuses (see ``_merge``); a class opts in by overriding
+        ``_merge`` to define how two of its catalogs combine.
+        """
         if type(a) is not cls or type(b) is not cls:
             raise TypeError(
                 f"{cls.__name__}.merge requires both arguments to be {cls.__name__} "
@@ -77,6 +101,12 @@ class BaseIntegrationProvider(ABC):
             # It's the same object, so just return either of them
             return a
         return cls._merge(a, b)
+
+    async def cleanup(self):
+        """
+        Override in subclass for class specific cleanup.
+        """
+        pass
 
     @classmethod
     @abstractmethod
@@ -141,6 +171,10 @@ class BaseIntegrationProvider(ABC):
         # This allows user to overwrite defaults
         data_dirs.reverse()
         return data_dirs
+
+    @classmethod
+    def from_context(cls, context: "BeakerContext") -> list[Self]:
+        return []
 
     @property
     def data_basedirs(self):

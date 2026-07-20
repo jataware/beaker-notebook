@@ -123,7 +123,7 @@ class handle_message(AbstractAsyncContextManager):
 
     async def __aexit__(self, exc_type, exc_value, traceback_value):
         """Raise any exception triggered within the runtime context."""
-        match exc_type:
+        match exc_value:
             case asyncio.CancelledError():
                 reply_content = {
                     "status": "aborted",

@@ -155,11 +155,33 @@ class BeakerAPIMixin:
                 result = await client.get_shell_msg(timeout=30) # timeout is in seconds, not milliseconds
             else:
                 result = client.get_shell_msg(timeout=30)
+            status = result["content"]["status"]
+            if status == "ok":
+                response = result["content"]["return"]
+            else:
+                # Any non-ok status (error, aborted, ...) carries the structured
+                # error/abort content; surface it rather than leaving `response`
+                # unbound.
+                response = result["content"]
         except Empty as err:
-            raise TimeoutError(err)
+            # Record this as a timeout: the underlying `Empty` (the shell queue
+            # being empty after the wait) is opaque unless you know the transport
+            # internals, so log it with a TimeoutError via the exc_info keyword.
+            logger.error("Timeout waiting for call_in_context response", exc_info=TimeoutError(err))
+            response = {
+                "status": "error",
+                "ename": "TimeoutError",
+                "evalue": "Request timed out",
+            }
+        except Exception as err:
+            response = {
+                "status": "error",
+                "ename": err.__class__.__name__,
+                "evalue": str(err),
+            }
         finally:
             client.stop_channels()
-        return result["content"]["return"]
+        return response
 
 # Integration Handler
 
@@ -294,6 +316,6 @@ class IntegrationResourceHandler(BeakerAPIMixin, JupyterHandler):
             raise tornado.web.HTTPError(status_code=500, log_message=str(e))
 
 handlers = [
-    (r'integrations/(?P<session_id>[\w\d-]+)/?(?P<integration_id>[\w\d-]+)?', IntegrationHandler),
-    (r'integrations/(?P<session_id>[\w\d-]+)/(?P<integration_id>[\w\d-]+)/(?P<resource_type>\w+)/?(?P<resource_id>[\w\d-]+)?', IntegrationResourceHandler),
+    (r'integrations/(?P<session_id>[\w\d-]+)/?(?P<integration_id>[\w\d\:-]+)?', IntegrationHandler),
+    (r'integrations/(?P<session_id>[\w\d-]+)/(?P<integration_id>[\w\d\:-]+)/(?P<resource_type>\w+)/?(?P<resource_id>[\w\d-]+)?', IntegrationResourceHandler),
 ]

@@ -40,14 +40,15 @@
                             v-model="integrations.selected"
                         />
 
-                        <Button
+                        <SplitButton
                             v-if="!readOnly"
+                            label="New Integration"
+                            :model="newIntegrationItems"
                             @click="() => {
                                 if (confirmUnsavedChanges()) {
-                                    newIntegration();
+                                    newIntegration('adhoc');
                                 }
                             }"
-                            label="New Integration"
                         />
                     </div>
 
@@ -179,11 +180,14 @@ import type { IBeakerTheme } from '../plugins/theme';
 import DebugPanel from '../components/panels/DebugPanel.vue'
 
 import Select from 'primevue/select';
-import Button from "primevue/button";
+import SplitButton from "primevue/splitbutton";
 import ProgressSpinner from 'primevue/progressspinner';
 
 import AdhocIntegrationEditor from '../components/integrations/AdhocIntegrationEditor.vue';
 import SkillIntegrationViewer from '../components/integrations/SkillIntegrationViewer.vue';
+import MCPIntegrationViewer from '../components/integrations/MCPIntegrationViewer.vue';
+import MCPIntegrationEditor from '../components/integrations/MCPIntegrationEditor.vue';
+import MCPToolsPanel from '../components/integrations/MCPToolsPanel.vue';
 import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
 import ExamplesPanel from '../components/integrations/ExamplesPanel.vue';
 import ResourceViewer from '../components/integrations/ResourceViewer.vue';
@@ -194,10 +198,12 @@ import {
     type IntegrationMap,
     type Integration,
     getIntegrationProviderType,
+    isContextProvidedIntegration,
     updateResource,
     addResource,
     updateIntegration,
     addIntegration,
+    getIntegration,
     deleteResource,
 } from '@/util/integration';
 import { useRoute } from 'vue-router';
@@ -283,6 +289,13 @@ const integrationMapping: {[integrationType: string]: any} = {
         rightPanelLabel: 'Example Editor',
         rightPanelIcon: 'pi pi-list-check',
     },
+    mcp: {
+        readOnly: false,
+        centerComponent: MCPIntegrationViewer,
+        rightPanelComponent: MCPToolsPanel,
+        rightPanelLabel: 'Tools',
+        rightPanelIcon: 'pi pi-wrench',
+    },
     default: {
         readOnly: false,
         centerComponent: null,
@@ -301,15 +314,24 @@ const integrations = ref<IntegrationInterfaceState>({
 
 // --- Integration type detection ---
 
+const selectedIntegration = computed<Integration | undefined>(() =>
+    integrations.value.integrations?.[integrations.value?.selected]);
+
 const selectedIntegrationType = computed<string | undefined>(() => {
-    const selected = integrations.value.integrations?.[integrations.value?.selected];
-    if (!selected) return undefined;
-    return getIntegrationProviderType(selected);
+    if (!selectedIntegration.value) return undefined;
+    return getIntegrationProviderType(selectedIntegration.value);
 });
 
 // --- Dynamic component switching ---
 
 const centerComponent = computed<Component>(() => {
+    // MCP servers get a read-only viewer when provided by a context, and the
+    // full editor otherwise; all other types use their fixed mapping entry.
+    if (selectedIntegrationType.value === 'mcp') {
+        return isContextProvidedIntegration(selectedIntegration.value)
+            ? MCPIntegrationViewer
+            : MCPIntegrationEditor;
+    }
     return integrationMapping[selectedIntegrationType.value]?.centerComponent || integrationMapping.default?.centerComponent;
 });
 
@@ -344,23 +366,65 @@ const confirmUnsavedChanges = () => {
     return true;
 };
 
-const newIntegration = () => {
-    const defaultProvider = (Object.keys(integrations.value?.integrations).length
-        ? Object.values(integrations.value.integrations).find(i => getIntegrationProviderType(i) === 'adhoc')?.provider
-        : "adhoc:specialist_agents") ?? "adhoc:specialist_agents";
-    const integration: Integration = {
-        name: "New Integration",
-        source: "This is the prompt information that the agent will consult when using the integration. Include API details or how to find datasets here.",
-        description: "This is the description that the agent will use to determine when this integration should be used.",
-        provider: defaultProvider,
-        slug: "new_integration",
-        uuid: "new",
-        url: ""
-    };
+// Finds the provider string for an existing integration of the given type so
+// new integrations attach to the same provider, falling back to a sensible
+// default when none is loaded yet.
+const providerForType = (providerType: string, fallback: string): string =>
+    Object.values(integrations.value?.integrations ?? {})
+        .find(i => getIntegrationProviderType(i) === providerType)?.provider ?? fallback;
+
+const newIntegration = (providerType: string = 'adhoc') => {
+    let integration: Integration;
+    if (providerType === 'mcp') {
+        integration = {
+            name: "New MCP Server",
+            source: "",
+            description: "",
+            provider: providerForType('mcp', "mcp:mcp"),
+            datatype: "mcp",
+            slug: "new_mcp_server",
+            uuid: "new",
+            url: "",
+            server_config: {
+                name: "new_mcp_server",
+                transport: "stdio",
+                command: "",
+                args: [],
+                env: {},
+                headers: {},
+                disabled: false,
+            },
+        } as Integration;
+    } else {
+        integration = {
+            name: "New Integration",
+            source: "This is the prompt information that the agent will consult when using the integration. Include API details or how to find datasets here.",
+            description: "This is the description that the agent will use to determine when this integration should be used.",
+            provider: providerForType('adhoc', "adhoc:specialist_agents"),
+            slug: "new_integration",
+            uuid: "new",
+            url: ""
+        };
+    }
     integrations.value.integrations["new"] = integration;
     integrations.value.selected = "new";
     integrations.value.unsavedChanges = true;
 };
+
+// Menu items for the "New Integration" split button; each guards unsaved
+// changes before starting a fresh integration of the chosen type.
+const newIntegrationItems = computed(() => [
+    {
+        label: "Specialist Agent",
+        icon: "pi pi-user",
+        command: () => { if (confirmUnsavedChanges()) { newIntegration('adhoc'); } },
+    },
+    {
+        label: "MCP Server",
+        icon: "pi pi-server",
+        command: () => { if (confirmUnsavedChanges()) { newIntegration('mcp'); } },
+    },
+]);
 
 const delayUntil = (condition, retryInterval) => {
     const poll = resolve => {
@@ -376,11 +440,12 @@ const delayUntil = (condition, retryInterval) => {
 const route = useRoute();
 watch(() => route, (newRoute) => {
     if (newRoute.query?.selected === "new") {
+        const providerType = (newRoute.query?.type as string | undefined) ?? 'adhoc';
         if (integrations.value.finishedInitialLoad) {
-            newIntegration();
+            newIntegration(providerType);
         } else {
             delayUntil(() => integrations.value.finishedInitialLoad, 100)
-                .then(() => newIntegration());
+                .then(() => newIntegration(providerType));
         }
     } else {
         integrations.value.selected = newRoute.query?.selected as string | undefined ?? integrations.value.selected;
@@ -416,17 +481,31 @@ watch(
 );
 
 const modifySelectedIntegration = async (body: object, integrationId?: string) => {
+    let savedId: string | undefined;
     if (integrationId) {
-        integrations.value.integrations[integrationId] = await updateIntegration(
-            sessionId,
-            integrationId,
-            body
-        );
+        await updateIntegration(sessionId, integrationId, body);
+        savedId = integrationId;
     } else {
         const newIntegration = await addIntegration(sessionId, body);
-        integrations.value.integrations[newIntegration.uuid] = newIntegration;
-        integrations.value.selected = newIntegration.uuid;
+        savedId = newIntegration?.uuid;
+        if (savedId) {
+            integrations.value.selected = savedId;
+        }
     }
+    // The POST response is not a reliable source of truth for the saved
+    // integration -- some providers (e.g. MCP) return nothing on update, which
+    // would otherwise clobber the local copy with an empty object. Re-fetch the
+    // authoritative integration from the kernel so the local state reflects what
+    // was actually persisted, preserving any resources already loaded for it.
+    if (!savedId) {
+        return;
+    }
+    const fresh = await getIntegration(sessionId, savedId);
+    const existingResources = integrations.value.integrations[savedId]?.resources;
+    if (fresh.resources === undefined && existingResources !== undefined) {
+        fresh.resources = existingResources;
+    }
+    integrations.value.integrations[savedId] = fresh;
 }
 
 const modifyResourceForSelectedIntegration = async (body: object, resourceId?: string) => {

@@ -26,7 +26,9 @@ from beaker_notebook.lib.chat_history import BeakerChatHistoryDoc
 from beaker_notebook.lib.utils import action, get_socket, ExecutionTask, get_execution_context, get_parent_message, ExecutionError, ensure_async, normalize_notebook, url_path_join
 from beaker_notebook.lib.config import config as beaker_config
 from beaker_notebook.lib.integrations.base import BaseIntegrationProvider
+from beaker_notebook.lib.integrations.mcp import MCPIntegrationProvider
 from beaker_notebook.lib.integrations.registry import IntegrationProviderRegistry
+from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
 from beaker_notebook.lib.integrations.types import Integration
 from beaker_notebook.lib.workflow import Workflow, WorkflowRegistry, WorkflowState, WorkflowStageProgress
 
@@ -66,6 +68,11 @@ class BeakerContext:
     RENDERERS: ClassVar[Optional[Dict[str, Dict[str, str]]]] = None
     INTEGRATION_PROVIDERS: ClassVar[list[tuple[type[BaseIntegrationProvider], tuple, dict[str, Any]]]] = []
 
+    DEFAULT_INTEGRATION_PROVIDER_CLASSES: ClassVar[tuple[type[BaseIntegrationProvider]]] = (
+        SkillIntegrationProvider,
+        MCPIntegrationProvider,
+    )
+
     beaker_kernel: "BeakerKernel"
     subkernel: "BeakerSubkernel"
     config: Dict[str, Any]
@@ -99,7 +106,7 @@ class BeakerContext:
             integrations = []
         if agent_cls is None:
             agent_cls = self.AGENT_CLS
-        integrations.extend((*self.default_integration_providers, *self.extra_integration_providers()))
+        integrations.extend((*self.default_integration_providers, *self.context_integration_providers, *self.extra_integration_providers()))
 
 
         self.intercepts = []
@@ -280,28 +287,24 @@ class BeakerContext:
             self._notebook_state = None
 
     @property
-    def default_integration_providers(self) -> set[BaseIntegrationProvider]:
-        from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
+    def default_integration_providers(self) -> list[BaseIntegrationProvider]:
+        # Returns a list, not a set: order matters. When two providers of the
+        # same class appear (e.g. the default skills below and the context's own
+        # skills further down), the registry folds them into one and the
+        # first-added instance is the merge winner. Keeping the default instance
+        # first makes that outcome deterministic.
 
         # Load global default skills
-        default_providers = { SkillIntegrationProvider("Default Skills"), }
-
-        # Check for a skills.json file a the same level as the context.py and load it if it exists.
-        context_dir_path = Path(inspect.getabsfile(self.__class__)).parent
-        context_skills = []
-        skill_file = context_dir_path / "skills.json"
-        skill_dir = context_dir_path / "skills"
-        if skill_file.is_file():
-            context_skills.append(str(skill_file))
-        if skill_dir.is_dir() and any((child.is_dir() for child in skill_dir.iterdir())):
-            context_skills.append(str(skill_dir))
-
-        if context_skills:
-            context_skill_integration = SkillIntegrationProvider(f"{self.__class__.__name__} Skills", skill_paths=context_skills)
-            default_providers.add(context_skill_integration)
+        default_providers = [provider_cls(id="default") for provider_cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES]
 
         return default_providers
 
+    @property
+    def context_integration_providers(self) -> list[BaseIntegrationProvider]:
+        result = []
+        for provider_cls in self.DEFAULT_INTEGRATION_PROVIDER_CLASSES:
+            result.extend(provider_cls.from_context(self))
+        return result
 
     @classmethod
     def extra_integration_providers(cls) -> set[BaseIntegrationProvider]:
@@ -431,10 +434,18 @@ class BeakerContext:
         await self.refresh_system_preamble()
         self.agent.chat_history.set_user_preamble_text(user_preamble)
 
-    def cleanup(self):
-        self.subkernel.cleanup()
+    async def cleanup(self):
+        cleanups = [
+            self.subkernel.cleanup(),
+        ]
         for msg_type, intercept_func, stream in self.intercepts:
             self.beaker_kernel.remove_intercept(msg_type=msg_type, func=intercept_func, stream=stream)
+        cleanups.extend([integration.cleanup() for integration in self.integrations if hasattr(integration, "cleanup")])
+        results = await asyncio.gather(*cleanups, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) or (isinstance(result, type) and issubclass(result, BaseException)):
+                logger.exception(f"There was an error cleaning up context '{self.SHORT_NAME}'", exc_info=result)
+
         if hasattr(self, "agent"):
             del self.agent
 
@@ -650,12 +661,6 @@ class BeakerContext:
             )
         }
 
-    def _call_message_result_wrapper_inner(self, object):
-        return asdict(object) if dataclasses.is_dataclass(object) else str(object) # type: ignore
-
-    def _call_message_result_wrapper(self, object):
-        return json.loads(json.dumps(object, default=self._call_message_result_wrapper_inner))
-
     @action(scope="internal")
     async def call_in_context(self, message):
         content = message.content
@@ -668,22 +673,20 @@ class BeakerContext:
             # context methods
             case "context":
                 function = getattr(self, content.get("function"))
-                result = await ensure_async(function(*args, **kwargs))
-                result = self._call_message_result_wrapper(result)
+                result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
             # calling directly on a provider itself -- `provider:adhoc:my_adhoc_provider`
             case "provider":
                 if target_id is None:
                     msg = "Provider targets must specify desired provider: e.g. `provider:my_provider`"
                     raise ValueError(msg)
-                _provider_type, provider_id = target_id.split(":", maxsplit=1)
+                provider_type, provider_id = target_id.split(":", maxsplit=1)
                 try:
                     provider = next(
                         provider for provider in self.integrations
-                        if provider.id == provider_id
+                        if provider_id in (provider.id, provider.slug)
                     )
                     function = getattr(provider, content.get("function"))
-                    result = await ensure_async(function(*args, **kwargs))
-                    result = self._call_message_result_wrapper(result)
+                    result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
                 except StopIteration as e:
                     msg = f"Provider not found in integrations. `{provider_id}` not in {[p.slug for p in self.integrations]}"
                     raise KeyError(msg) from e
@@ -698,7 +701,7 @@ class BeakerContext:
                         if integration.uuid == target_id
                     )
                 except StopIteration as e:
-                    msg = f"Integration `{target_id}` not found in {[i.slug for i in all_integrations]}"
+                    msg = f"Integration `{target_id}` not found in {[i.uuid for i in all_integrations]}"
                     raise KeyError(msg) from e
                 _provider_type, provider_id = integration.provider.split(":", maxsplit=1)
                 try:
@@ -710,11 +713,22 @@ class BeakerContext:
                     msg = f"Provider not found: `{provider_id}` in {[provider.slug for provider in self.integrations]}"
                     raise KeyError(msg) from e
                 function = getattr(provider, content.get("function"))
-                result = await ensure_async(function(*args, **kwargs))
-                result = self._call_message_result_wrapper(result)
+                result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
             case _:
                 raise NotImplementedError
         return result
+
+    async def _call_in_context(self, coro):
+        try:
+            result = await coro
+        except Exception as err:
+            logger.exception("Error while calling function from context.")
+            raise
+
+        def _call_message_result_wrapper_inner(object):
+            return asdict(object) if dataclasses.is_dataclass(object) else str(object) # type: ignore
+
+        return json.loads(json.dumps(result, default=_call_message_result_wrapper_inner))
 
     async def get_subkernel_state(self):
         # Prefer the procedure-backed fetch_state path; fall back to the

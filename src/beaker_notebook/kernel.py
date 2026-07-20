@@ -386,7 +386,7 @@ class BeakerKernel(KernelProxyManager):
 
         # Cleanup the old context, then create and setup the new context
         if self.context:
-            self.context.cleanup()
+            await self.context.cleanup()
 
         if context_info is None:
             default_payload = context_cls.default_payload()
@@ -523,13 +523,11 @@ class BeakerKernel(KernelProxyManager):
 
     @message_handler
     async def shutdown(self, message):
-        def stop_loop(loop: ioloop.IOLoop):
-            loop.stop()
-        self.context.cleanup()
+        await self.context.cleanup()
         self.context = None
-        # Stop loop after short delay to allow cleanup to run.
+        # Stop current loop, causing kernel to fully exit
         loop = ioloop.IOLoop.current()
-        loop.call_later(0.2, stop_loop, loop)
+        loop.add_callback(loop.stop)
         return None
 
     async def prompt_user(self, query, parent_message=None, format: Optional[Literal['workflow_confirmation']]=None):
@@ -850,10 +848,10 @@ class BeakerKernel(KernelProxyManager):
 LLMKernel = BeakerKernel
 
 
-def cleanup(kernel: BeakerKernel):
+async def cleanup(kernel: BeakerKernel):
     try:
         if kernel.context is not None:
-            kernel.context.cleanup()
+            await kernel.context.cleanup()
     except requests.exceptions.ConnectionError:
         print("Unable to connect to server. Possible server shutdown.")
     except Exception as err:
@@ -877,9 +875,14 @@ def start(connection_file):
         loop.start()
     finally:
         # Perform shutdown cleanup here
-        cleanup(kernel)
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        sys.exit(0)
+        try:
+            cleanup_task = partial(cleanup, kernel)
+            ioloop.IOLoop.current().run_sync(cleanup_task)
+        except Exception as err:
+            logger.exception(f"Error while shutting down kernel.")
+        finally:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            sys.exit(0)
 
 
 def main():
