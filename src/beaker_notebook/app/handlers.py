@@ -615,5 +615,5 @@ def register_handlers(app: "BaseBeakerApp"):
     app.handlers.append(("/stats", StatsHandler))
     app.handlers.append((r"/(favicon.ico|beaker.svg)$", StaticFileHandler, {"path": Path(app.ui_path)}))
     app.handlers.append((r"/export/(?P<format>\w+)", ExportAsHandler)),
-    app.handlers.append((r"/((?:static|themes)/.*)", StaticFileHandler, {"path": Path(app.ui_path)})),
+    app.handlers.append((r"/((?:static|themes|icons)/.*)", StaticFileHandler, {"path": Path(app.ui_path)})),
     app.handlers.append((page_regex, PageHandler))

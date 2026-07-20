@@ -527,7 +527,7 @@ class BeakerKernel(KernelProxyManager):
         self.context = None
         # Stop current loop, causing kernel to fully exit
         loop = ioloop.IOLoop.current()
-        loop.call_soon(loop.stop)
+        loop.add_callback(loop.stop)
         return None
 
     async def prompt_user(self, query, parent_message=None, format: Optional[Literal['workflow_confirmation']]=None):
