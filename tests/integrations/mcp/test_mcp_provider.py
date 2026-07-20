@@ -748,6 +748,57 @@ class TestConnectionLifecycle:
 
 
 # ---------------------------------------------------------------------------
+# Cached-catalog persistence (background refresh on connect)
+# ---------------------------------------------------------------------------
+
+
+class TestCachedCatalogRefresh:
+    async def test_connect_writes_cached_catalog_to_config(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(
+            tools=[_tool("t1"), _tool("t2")],
+            resources=[_resource("u://r", "r1")],
+            prompts=[_prompt("p1")],
+        )
+        with _fake_transport_and_session(provider, session):
+            await provider._ensure_connected(integ.uuid)
+            # Drain the fire-and-forget refresh task before asserting.
+            await asyncio.gather(*provider._cache_tasks, return_exceptions=True)
+            await provider.close_all()
+
+        entry = json.loads(json_config.read_text())["mcpServers"]["filesystem"]
+        assert entry["cached_resources"] == {
+            "mcp_tool": ["t1", "t2"],
+            "mcp_resource": ["r1"],
+            "mcp_prompt": ["p1"],
+        }
+
+    async def test_connect_skips_when_no_writable_config(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        integ.server_config.config_file = None  # nothing writable to persist to
+        session = FakeSession(tools=[_tool("t1")])
+        with _fake_transport_and_session(provider, session):
+            await provider._ensure_connected(integ.uuid)
+            await asyncio.gather(*provider._cache_tasks, return_exceptions=True)
+            await provider.close_all()
+
+        entry = json.loads(json_config.read_text())["mcpServers"]["filesystem"]
+        assert "cached_resources" not in entry
+
+    async def test_refresh_task_cancelled_on_close_all(self, json_config: Path):
+        provider = _make_provider(config_paths=[json_config])
+        integ = provider._find_server_by_slug("filesystem")
+        session = FakeSession(tools=[_tool("t1")])
+        with _fake_transport_and_session(provider, session):
+            await provider._ensure_connected(integ.uuid)
+            # close_all cancels/drains outstanding cache tasks; none should leak.
+            await provider.close_all()
+        assert provider._cache_tasks == set()
+
+
+# ---------------------------------------------------------------------------
 # Update / mutation
 # ---------------------------------------------------------------------------
 
