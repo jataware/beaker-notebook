@@ -125,3 +125,4 @@ export function atEndOfInput(input: object) {
 export * from './annotations';
 export * from './autocomplete';
 export * from './integration';
+export * from './attachments';

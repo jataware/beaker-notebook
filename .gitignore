@@ -70,6 +70,7 @@ shell.nix
 **/.jekyll-cache
 
 .beaker.conf
+.beaker/session-attachments/
 beaker_config.py
 beaker_*_config.py
 src/beaker_notebook/**/ui/*

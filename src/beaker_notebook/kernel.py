@@ -9,6 +9,7 @@ import signal
 import sys
 import traceback
 import uuid
+import urllib.parse
 from functools import partial
 from typing import Literal, Optional, ClassVar, Awaitable
 
@@ -173,6 +174,52 @@ class BeakerKernel(KernelProxyManager):
         hash_value = hashlib.sha256(hash_source).hexdigest()
 
         return f"{preamble}:{kernel_id}:{nonce}:{hash_value}"
+
+    def get_session_attachments(self, current_attachment_ids: list[str] | None = None) -> list[dict]:
+        """Fetch attachment metadata after the server validates kernel/session ownership."""
+        current_ids = set(current_attachment_ids or [])
+        session_id = self.beaker_session or self.session_id
+        url = url_path_join(
+            self.jupyter_server,
+            "/beaker/attachments/",
+            urllib.parse.quote(str(session_id), safe=""),
+        )
+        response = requests.get(
+            url,
+            params=[("current", attachment_id) for attachment_id in current_ids],
+            headers={"X-AUTH-BEAKER": self.api_auth()},
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Unable to load session attachments (status {response.status_code}): {response.text}"
+            )
+        attachments = response.json()
+        available_ids = {item.get("id") for item in attachments}
+        missing = current_ids - available_ids
+        if missing:
+            raise ValueError(f"Session attachments are no longer available: {sorted(missing)}")
+        for item in attachments:
+            item["current"] = item.get("id") in current_ids
+        return attachments
+
+    def clear_session_attachments(self) -> None:
+        """Delete every temporary attachment owned by the current notebook session."""
+        session_id = self.beaker_session or self.session_id
+        url = url_path_join(
+            self.jupyter_server,
+            "/beaker/attachments/",
+            urllib.parse.quote(str(session_id), safe=""),
+        )
+        response = requests.delete(
+            url,
+            headers={"X-AUTH-BEAKER": self.api_auth()},
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Unable to clear session attachments (status {response.status_code}): {response.text}"
+            )
 
     async def handle_magic_word(self, server, target_stream, data):
         message = JupyterMessage.parse(data)
@@ -601,9 +648,16 @@ class BeakerKernel(KernelProxyManager):
         request = content.get("request", None)
         if not request:
             return
+
+        attachment_ids = content.get("attachments", []) or []
+        if not isinstance(attachment_ids, list) or not all(isinstance(item, str) for item in attachment_ids):
+            raise ValueError("attachments must be a list of attachment IDs")
+        session_attachments = self.get_session_attachments(attachment_ids)
+
         if not self.context:
             raise Exception("Context has not been set")
         setattr(self.context, "current_llm_query", request)
+        self.context.session_attachments = session_attachments
 
         notebook_state = message.metadata.get("notebook_state", None)
         if notebook_state is not None:
@@ -803,6 +857,8 @@ class BeakerKernel(KernelProxyManager):
     @message_handler
     async def reset_kernel(self, message):
         reset_config()
+        self.clear_session_attachments()
+        self.context.session_attachments = []
         await self.set_context(
             self.context.SLUG,
             self.context.config,

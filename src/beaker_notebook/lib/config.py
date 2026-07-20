@@ -294,6 +294,41 @@ class ConfigClass:
         sensitive=False,
         label="describe_variables sample budget (0 = use subkernel default)"
     )
+    attachment_max_upload_bytes: int = configfield(
+        description="Maximum size, in bytes, of one temporary chat attachment.",
+        env_var="ATTACHMENT_MAX_UPLOAD_BYTES",
+        default=25 * 1024 * 1024,
+        normalize_function=int,
+        label="Maximum chat attachment size (bytes)",
+    )
+    attachment_max_session_bytes: int = configfield(
+        description="Maximum combined stored size, in bytes, of temporary chat attachments in one session.",
+        env_var="ATTACHMENT_MAX_SESSION_BYTES",
+        default=250 * 1024 * 1024,
+        normalize_function=int,
+        label="Maximum session attachment storage (bytes)",
+    )
+    attachment_max_extracted_bytes: int = configfield(
+        description="Maximum total uncompressed size, in bytes, extracted from one ZIP chat attachment.",
+        env_var="ATTACHMENT_MAX_EXTRACTED_BYTES",
+        default=100 * 1024 * 1024,
+        normalize_function=int,
+        label="Maximum extracted ZIP size (bytes)",
+    )
+    attachment_max_archive_entries: int = configfield(
+        description="Maximum number of files that may be extracted from one ZIP chat attachment.",
+        env_var="ATTACHMENT_MAX_ARCHIVE_ENTRIES",
+        default=1000,
+        normalize_function=int,
+        label="Maximum ZIP entry count",
+    )
+    attachment_max_archive_ratio: int = configfield(
+        description="Maximum allowed uncompressed-to-compressed size ratio for automatic ZIP extraction.",
+        env_var="ATTACHMENT_MAX_ARCHIVE_RATIO",
+        default=100,
+        normalize_function=int,
+        label="Maximum ZIP compression ratio",
+    )
 
     @property
     def checkpoint_storage_path(self):

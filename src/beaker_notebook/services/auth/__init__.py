@@ -1,15 +1,16 @@
 import contextvars
-import inspect
-import os
 import hashlib
+import hmac
+import inspect
 import logging
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache, update_wrapper, wraps
-from traitlets import Unicode, Bool
 from typing import Optional
 
 from jupyter_server.auth.authorizer import Authorizer
 from jupyter_server.auth.identity import IdentityProvider, User
+from traitlets import Bool, Unicode
 from tornado import web
 
 from jupyter_server.services.config.manager import ConfigManager
@@ -26,8 +27,8 @@ class BeakerIdentityProvider(IdentityProvider):
         config=True
     )
 
-    def _is_authorized_beaker_kernel(self, handler: web.RequestHandler):
-        """Validate Beaker kernel authentication token.
+    def authenticated_beaker_kernel_id(self, handler: web.RequestHandler) -> Optional[str]:
+        """Return the kernel ID from a valid Beaker kernel authentication token.
 
         Checks for a valid Beaker kernel authentication token in the request
         headers and validates it against the kernel's session key using SHA256 hash.
@@ -39,28 +40,34 @@ class BeakerIdentityProvider(IdentityProvider):
 
         Returns
         -------
-        bool
-            True if the token is valid, False otherwise
+        Optional[str]
+            The authenticated kernel ID, or ``None`` when the token is absent
+            or invalid.
         """
         auth_token = handler.request.headers.get(self.beaker_kernel_header, None)
         if not auth_token:
-            return False
+            return None
 
         try:
             preamble, kernel_id, nonce, hash_value = auth_token.split(':')
             if preamble != "beaker-kernel" or not kernel_id or not hash_value:
-                return False
+                return None
             kernel = handler.kernel_manager.get_kernel(kernel_id)
             key = kernel.session.key.decode()
 
             payload = f"{kernel_id}{nonce}{key}".encode()
             reconstructed_hash_value = hashlib.sha256(payload).hexdigest()
-            valid = reconstructed_hash_value == hash_value
-            return valid
+            if not hmac.compare_digest(reconstructed_hash_value, hash_value):
+                return None
+            return kernel_id
 
         except Exception as err:
             logging.error(err)
-            return False
+            return None
+
+    def _is_authorized_beaker_kernel(self, handler: web.RequestHandler):
+        """Validate a Beaker kernel authentication token."""
+        return self.authenticated_beaker_kernel_id(handler) is not None
 
 
     @classmethod

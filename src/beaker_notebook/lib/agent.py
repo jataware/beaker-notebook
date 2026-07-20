@@ -1,6 +1,7 @@
 import json
 import logging
 import mimetypes
+from pathlib import Path
 import typing
 import urllib.parse
 
@@ -309,6 +310,45 @@ class BeakerAgent(ReActAgent):
     def _send_notebook_state(self) -> bool:
         return bool(config.send_notebook_state and self.context and self.context.notebook_state)
 
+    def _has_session_attachments(self) -> bool:
+        return bool(self.context and self.context.session_attachments)
+
+    @statetool(condition=_has_session_attachments, name="session_attachments")
+    async def session_attachments(self) -> str:
+        """Provides the temporary files available in the current notebook session.
+
+        Returns:
+            str: JSON attachment metadata and exact paths suitable for get_session_attachment or run_code.
+        """
+        attachments = []
+        for item in self.context.session_attachments:
+            files = item.get("files", [])
+            attachments.append({
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "mimetype": item.get("mimetype"),
+                "size": item.get("size"),
+                "kind": item.get("kind"),
+                "current": bool(item.get("current")),
+                "path": item.get("path"),
+                "root_path": item.get("root_path"),
+                "original_path": item.get("original_path"),
+                "archive_status": item.get("archive_status"),
+                "archive_error": item.get("archive_error"),
+                "file_count": item.get("file_count", len(files)),
+                "files": files[:100],
+                "manifest_truncated": len(files) > 100,
+            })
+        return json.dumps({
+            "instructions": (
+                "These are temporary session attachments supplied by the user. "
+                "Items with current=true were attached to the current request. Use the exact path with run_code; "
+                "for extracted archives, files are beneath root_path. Use get_session_attachment when direct "
+                "text or multimedia inspection is more appropriate. Do not claim a file is permanent."
+            ),
+            "attachments": attachments,
+        })
+
 
     @statetool(condition=_send_notebook_state, name="notebook_state")
     async def notebook_state(self) -> str:
@@ -349,6 +389,59 @@ class BeakerAgent(ReActAgent):
         nbstate = self.context.notebook_state
         cell = next((cell for cell in nbstate["cells"] if cell["id"] == cell_id), None)
         return format_cell(cell, truncate_content=False, truncate_outputs=False, exclude_media=True)
+
+    @tool(autosummarize=True, summarizer=succinct_tool_summarizer(), internal=True)
+    async def get_session_attachment(self, attachment_id: str, relative_path: str | None = None) -> MultiModalResponse | str:
+        """Reads a temporary session attachment or a file within an extracted ZIP.
+
+        Args:
+            attachment_id: The attachment ID supplied by the session_attachments state.
+            relative_path: For an extracted archive, an optional path beneath its root_path.
+
+        Returns:
+            Multimedia content for image/audio/video files, a bounded preview for text files, or file metadata
+            instructing the agent to use run_code for structured or binary processing.
+        """
+        attachment = next(
+            (item for item in self.context.session_attachments if item.get("id") == attachment_id),
+            None,
+        )
+        if attachment is None:
+            raise ValueError(f"Unknown session attachment ID: {attachment_id!r}")
+
+        if relative_path:
+            root = Path(attachment["root_path"]).resolve()
+            target = (root / relative_path).resolve()
+            if not target.is_relative_to(root):
+                raise ValueError("relative_path must remain inside the extracted attachment directory")
+        else:
+            path = attachment.get("path") or attachment.get("original_path")
+            if not path:
+                return json.dumps(attachment)
+            target = Path(path).resolve()
+
+        if not target.is_file():
+            raise ValueError(f"Attachment file not found: {target}")
+        mimetype = mimetypes.guess_type(target.name)[0] or attachment.get("mimetype") or "application/octet-stream"
+        if is_multimedia_mimetype(mimetype):
+            return MultiModalResponse.from_file(target, mimetype=mimetype)
+
+        text_suffixes = {".csv", ".tsv", ".json", ".jsonl", ".md", ".txt", ".log", ".xml", ".yaml", ".yml"}
+        if mimetype.startswith("text/") or target.suffix.lower() in text_suffixes:
+            preview_limit = 50_000
+            text = target.read_text(errors="replace")
+            truncated = len(text) > preview_limit
+            preview = text[:preview_limit]
+            if truncated:
+                preview += f"\n\n[Preview truncated; use run_code with {str(target)!r} for the complete file.]"
+            return preview
+
+        return json.dumps({
+            "attachment": attachment,
+            "selected_path": str(target),
+            "mimetype": mimetype,
+            "instructions": "Use run_code with selected_path to inspect or process this binary/structured file.",
+        })
 
 
     @tool(autosummarize=True, summarizer=succinct_tool_summarizer(), internal=True)

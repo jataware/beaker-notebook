@@ -158,6 +158,8 @@ class BaseBeakerApp(ServerApp):
         self.notebook_manager = self.notebook_manager_class(
             parent=self,
         )
+        from beaker_notebook.services.attachments import SessionAttachmentManager
+        self.attachment_manager = SessionAttachmentManager(parent=self)
         from beaker_notebook.services.context.manager import BeakerContextManager
         self.context_manager: BeakerContextManager = self.context_manager_class(parent=self)
 
@@ -272,8 +274,21 @@ class BaseBeakerApp(ServerApp):
     def _default_root_dir(self):
         return self.working_dir or super()._default_root_dir()
 
+    @property
+    def local_mode(self) -> bool:
+        """Whether this app runs as a single-user local notebook rather than a multi-user server.
+
+        Server deployments keep per-user state namespaced under each user's virtual home;
+        local deployments centralize it under the shared Beaker data directory. Subclasses
+        that represent a local launch (e.g. ``BeakerNotebookApp``) override this to ``True``.
+        """
+        return False
+
     def stop(self, from_signal = False, **kwargs):
         print("Shutting down Beaker server...")
+        attachment_manager = getattr(self, "attachment_manager", None)
+        if attachment_manager is not None:
+            attachment_manager.cleanup()
         return super().stop(from_signal, **kwargs)
 
     @property

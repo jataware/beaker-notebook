@@ -15,6 +15,7 @@ class BeakerSessionManager(SessionManager):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._sessions: dict[str, dict] = {}
+        self._session_attachment_owners: dict[str, BeakerUser] = {}
 
     @property
     def cursor(self):
@@ -208,6 +209,11 @@ class BeakerSessionManager(SessionManager):
             a dictionary of the session model
         """
         self._sessions[session_id] = {"session_id": session_id, "started_at": datetime.datetime.now(), **kwargs}
+        kernel_id = kwargs.get("kernel_id")
+        kernel_manager = self.kernel_manager.get_kernel(kernel_id) if kernel_id else None
+        owner = getattr(kernel_manager, "user", None)
+        if isinstance(owner, BeakerUser):
+            self._session_attachment_owners[session_id] = owner
         result = await self.get_session(session_id=session_id)
         return result
 
@@ -240,6 +246,14 @@ class BeakerSessionManager(SessionManager):
         """Delete a session and shut down its kernel."""
         session = await self.get_session(session_id=session_id)
         kernel_id = session["kernel"]["id"] if session.get("kernel") else None
-        if kernel_id:
-            await ensure_async(self.kernel_manager.shutdown_kernel(kernel_id))
-        self._sessions.pop(session_id, None)
+        kernel_manager = self.kernel_manager.get_kernel(kernel_id) if kernel_id else None
+        owner = getattr(kernel_manager, "user", None) or self._session_attachment_owners.get(session_id)
+        try:
+            if kernel_id:
+                await ensure_async(self.kernel_manager.shutdown_kernel(kernel_id))
+        finally:
+            attachment_manager = getattr(self.parent, "attachment_manager", None)
+            if attachment_manager is not None and session.get("path"):
+                attachment_manager.delete_session(session["path"], owner)
+            self._session_attachment_owners.pop(session_id, None)
+            self._sessions.pop(session_id, None)
