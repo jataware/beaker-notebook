@@ -217,6 +217,16 @@ class TestExtractFileReferences:
         assert "examples/basic.md" not in refs
         assert "references/guide.md" in refs
 
+    def test_leading_dot_slash_normalized(self):
+        # A "./x" link normalizes to "x" so it matches on-disk / enumerated paths.
+        refs = extract_file_references("See [node](./reference/node.md).")
+        assert refs == ["reference/node.md"]
+
+    def test_singular_reference_backtick(self):
+        # The backtick form also recognizes the singular "reference/" directory.
+        refs = extract_file_references("Use `reference/patterns.md` here.")
+        assert "reference/patterns.md" in refs
+
 
 # ---------------------------------------------------------------------------
 # SkillIntegrationProvider — local loading

@@ -113,6 +113,21 @@ export interface MCPServerConfig {
     metadata?: Record<string, any>
 }
 
+export interface SkillIntegration extends Integration {
+    datatype: "skill";
+    // "local" skills are fully editable; "remote" skills are defined by a URL
+    // and their fetched content is read-only.
+    source_type: "local" | "remote";
+    base_path?: string
+    base_url?: string
+    extra_instructions?: string
+    // Client-only, transient: resources enumerated from an uploaded SKILL.md/zip
+    // that will be created (via resource CRUD) once the new skill is saved.
+    pendingResources?: object[]
+    // Client-only: paths skipped during upload (e.g. binary assets).
+    pendingSkipped?: string[]
+}
+
 export interface MCPIntegration extends Integration {
     datatype: "mcp";
     server_config?: MCPServerConfig
@@ -238,8 +253,26 @@ export const updateIntegration = async (sessionId: string, integrationId: string
     return await integrationApiWrapper<Integration>("POST", {sessionId, integrationId}, body);
 }
 
+// Fetch and parse a remote skill (SKILL.md at `url`) without persisting it, so
+// the editor can populate its form before the user commits. Uses the same add
+// route; the `preview` flag tells the provider to build-and-return only.
+export const previewRemoteSkill = async (sessionId: string, body: { provider: string, url: string }): Promise<SkillIntegration> => {
+    return await integrationApiWrapper<SkillIntegration>("POST", {sessionId}, { ...body, source_type: "remote", preview: true });
+}
+
+// Parse raw SKILL.md text (from an uploaded file/archive) into a built,
+// unsaved skill so the editor can prefill its form. Same route/flag as the
+// remote preview, but the SKILL.md is supplied directly rather than fetched.
+export const previewSkillFromContent = async (sessionId: string, body: { provider: string, content: string }): Promise<SkillIntegration> => {
+    return await integrationApiWrapper<SkillIntegration>("POST", {sessionId}, { ...body, source_type: "local", preview: true });
+}
+
 export const getIntegration = async (sessionId: string, integrationId: string): Promise<Integration> => {
     return await integrationApiWrapper<Integration>("GET", {sessionId, integrationId});
+}
+
+export const deleteIntegration = async (sessionId: string, integrationId: string): Promise<{}> => {
+    return await integrationApiWrapper<{}>("DELETE", {sessionId, integrationId});
 }
 
 export const getResource = async (sessionId: string, integrationId: string, resourceType: string, resourceId: string): Promise<IntegrationResource> => {

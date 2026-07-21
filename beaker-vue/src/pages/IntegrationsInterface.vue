@@ -15,7 +15,7 @@
         @session-status-changed="statusChanged"
     >
         <div class="integration-container">
-            <div class="beaker-notebook">
+            <div class="integration-main">
                 <div class="integration-loading" v-if="beakerSession?.status === 'connecting'">
                     <ProgressSpinner></ProgressSpinner>
                     Loading integrations...
@@ -46,7 +46,7 @@
                             :model="newIntegrationItems"
                             @click="() => {
                                 if (confirmUnsavedChanges()) {
-                                    newIntegration('adhoc');
+                                    newIntegration('skill');
                                 }
                             }"
                         />
@@ -57,15 +57,18 @@
                         <p>Select an integration to view or edit, or create a new one to get started.</p>
                     </div>
 
-                    <component
-                        v-else
-                        :is="centerComponent"
-                        v-model="integrations"
-                        :deleteResource="deleteResourceOnSelectedIntegration"
-                        :modifyResource="modifyResourceForSelectedIntegration"
-                        :modifyIntegration="modifySelectedIntegration"
-                        :fetchResources="fetchResourcesForSelectedIntegration"
-                    />
+                    <div v-else class="integration-center">
+                        <component
+                            :is="centerComponent"
+                            v-model="integrations"
+                            :sessionId="sessionId"
+                            :deleteResource="deleteResourceOnSelectedIntegration"
+                            :modifyResource="modifyResourceForSelectedIntegration"
+                            :modifyIntegration="modifySelectedIntegration"
+                            :deleteIntegration="deleteIntegrationById"
+                            :fetchResources="fetchResourcesForSelectedIntegration"
+                        />
+                    </div>
                 </div>
             </div>
         </div>
@@ -95,6 +98,7 @@
                     <IntegrationPanel
                         v-model="integrations.integrations"
                         :read-only="readOnly"
+                        @upload="handleSkillUpload"
                     ></IntegrationPanel>
                 </SideMenuPanel>
                 <SideMenuPanel
@@ -183,14 +187,13 @@ import Select from 'primevue/select';
 import SplitButton from "primevue/splitbutton";
 import ProgressSpinner from 'primevue/progressspinner';
 
-import AdhocIntegrationEditor from '../components/integrations/AdhocIntegrationEditor.vue';
 import SkillIntegrationViewer from '../components/integrations/SkillIntegrationViewer.vue';
+import SkillIntegrationEditor from '../components/integrations/SkillIntegrationEditor.vue';
+import SkillResourcePanel from '../components/integrations/SkillResourcePanel.vue';
 import MCPIntegrationViewer from '../components/integrations/MCPIntegrationViewer.vue';
 import MCPIntegrationEditor from '../components/integrations/MCPIntegrationEditor.vue';
 import MCPToolsPanel from '../components/integrations/MCPToolsPanel.vue';
 import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
-import ExamplesPanel from '../components/integrations/ExamplesPanel.vue';
-import ResourceViewer from '../components/integrations/ResourceViewer.vue';
 import {
     listResources,
     listIntegrations,
@@ -204,9 +207,13 @@ import {
     updateIntegration,
     addIntegration,
     getIntegration,
+    deleteIntegration,
     deleteResource,
+    previewSkillFromContent,
 } from '@/util/integration';
+import { parseSkillUpload } from '@/util/skillArchive';
 import { useRoute } from 'vue-router';
+import { useIntegrationUpload } from '../composables/useIntegrationUpload';
 
 const beakerNotebookRef = ref<BeakerNotebookComponentType>();
 const beakerInterfaceRef = ref();
@@ -246,6 +253,7 @@ const saveAsFilename = ref<string>(null);
 const isMaximized = ref(false);
 const { theme, toggleDarkMode } = inject<IBeakerTheme>('theme');
 const beakerApp = inject<any>("beakerAppConfig");
+const showToast = inject<any>('show_toast');
 
 beakerApp.setPage("integrations");
 
@@ -276,18 +284,11 @@ const beakerSession = computed<BeakerSessionComponentType>(() => {
 
 const integrationMapping: {[integrationType: string]: any} = {
     'agent-skill': {
-        readOnly: true,
-        centerComponent: SkillIntegrationViewer,
-        rightPanelComponent: ResourceViewer,
+        readOnly: false,
+        centerComponent: SkillIntegrationEditor,
+        rightPanelComponent: SkillResourcePanel,
         rightPanelLabel: 'Resources',
         rightPanelIcon: 'pi pi-folder-open',
-    },
-    adhoc: {
-        readOnly: false,
-        centerComponent: AdhocIntegrationEditor,
-        rightPanelComponent: ExamplesPanel,
-        rightPanelLabel: 'Example Editor',
-        rightPanelIcon: 'pi pi-list-check',
     },
     mcp: {
         readOnly: false,
@@ -325,12 +326,18 @@ const selectedIntegrationType = computed<string | undefined>(() => {
 // --- Dynamic component switching ---
 
 const centerComponent = computed<Component>(() => {
-    // MCP servers get a read-only viewer when provided by a context, and the
-    // full editor otherwise; all other types use their fixed mapping entry.
+    // MCP servers and skills get a read-only viewer when provided by a context
+    // (context-bundled integrations are not editable) and the full editor
+    // otherwise; all other types use their fixed mapping entry.
     if (selectedIntegrationType.value === 'mcp') {
         return isContextProvidedIntegration(selectedIntegration.value)
             ? MCPIntegrationViewer
             : MCPIntegrationEditor;
+    }
+    if (selectedIntegrationType.value === 'agent-skill') {
+        return isContextProvidedIntegration(selectedIntegration.value)
+            ? SkillIntegrationViewer
+            : SkillIntegrationEditor;
     }
     return integrationMapping[selectedIntegrationType.value]?.centerComponent || integrationMapping.default?.centerComponent;
 });
@@ -354,7 +361,7 @@ const readOnly = computed<boolean>(() => {
 // --- Integration selector logic (moved from IntegrationEditor) ---
 
 const sortIntegrations = (integrations: IntegrationMap): Integration[] =>
-    Object.values(integrations).toSorted((a, b) => a?.name.localeCompare(b?.name));
+    Object.values(integrations).toSorted((a, b) => (a?.name ?? '').localeCompare(b?.name ?? ''));
 
 const sortedIntegrations = computed<Integration[]>(() =>
     sortIntegrations(integrations.value.integrations ?? {}));
@@ -373,7 +380,7 @@ const providerForType = (providerType: string, fallback: string): string =>
     Object.values(integrations.value?.integrations ?? {})
         .find(i => getIntegrationProviderType(i) === providerType)?.provider ?? fallback;
 
-const newIntegration = (providerType: string = 'adhoc') => {
+const newIntegration = (providerType: string = 'skill') => {
     let integration: Integration;
     if (providerType === 'mcp') {
         integration = {
@@ -397,27 +404,76 @@ const newIntegration = (providerType: string = 'adhoc') => {
         } as Integration;
     } else {
         integration = {
-            name: "New Integration",
-            source: "This is the prompt information that the agent will consult when using the integration. Include API details or how to find datasets here.",
-            description: "This is the description that the agent will use to determine when this integration should be used.",
-            provider: providerForType('adhoc', "adhoc:specialist_agents"),
-            slug: "new_integration",
+            name: "New Skill",
+            source: "",
+            description: "A short description the agent uses to decide when this skill is relevant.",
+            provider: providerForType('agent-skill', "agent-skill:agent-skill"),
+            datatype: "skill",
+            slug: "new_skill",
             uuid: "new",
-            url: ""
-        };
+            url: "",
+            source_type: "local",
+            resources: {},
+        } as Integration;
     }
     integrations.value.integrations["new"] = integration;
     integrations.value.selected = "new";
     integrations.value.unsavedChanges = true;
 };
 
+// Import a skill from an uploaded SKILL.md or .zip: parse it in the browser,
+// prefill a new (unsaved) skill from the SKILL.md via the backend parser, and
+// stash the enumerated resource files so Save can upload them.
+const handleSkillUpload = async (file: File) => {
+    if (!confirmUnsavedChanges()) {
+        return;
+    }
+    const provider = providerForType('agent-skill', 'agent-skill:agent-skill');
+    try {
+        const parsed = await parseSkillUpload(file);
+        const preview = await previewSkillFromContent(sessionId, {
+            provider,
+            content: parsed.skillMd,
+        });
+        integrations.value.integrations["new"] = {
+            ...preview,
+            uuid: "new",
+            provider,
+            datatype: "skill",
+            source_type: "local",
+            url: "",
+            pendingResources: parsed.resources,
+            pendingSkipped: parsed.skipped,
+        } as Integration;
+        integrations.value.selected = "new";
+        integrations.value.unsavedChanges = true;
+
+        const skippedNote = parsed.skipped.length
+            ? ` ${parsed.skipped.length} non-text file(s) skipped.`
+            : '';
+        showToast?.({
+            title: 'Skill loaded',
+            detail: `Loaded "${preview.name}" with ${parsed.resources.length} resource(s).${skippedNote} Review and Save to import.`,
+            severity: 'success',
+            life: 5000,
+        });
+    } catch (e) {
+        showToast?.({
+            title: 'Upload failed',
+            detail: (e as Error)?.message ?? 'Could not read the uploaded skill.',
+            severity: 'error',
+            life: 6000,
+        });
+    }
+};
+
 // Menu items for the "New Integration" split button; each guards unsaved
 // changes before starting a fresh integration of the chosen type.
 const newIntegrationItems = computed(() => [
     {
-        label: "Specialist Agent",
-        icon: "pi pi-user",
-        command: () => { if (confirmUnsavedChanges()) { newIntegration('adhoc'); } },
+        label: "Skill",
+        icon: "pi pi-book",
+        command: () => { if (confirmUnsavedChanges()) { newIntegration('skill'); } },
     },
     {
         label: "MCP Server",
@@ -437,10 +493,35 @@ const delayUntil = (condition, retryInterval) => {
     return new Promise(poll);
 };
 
+const { takePendingUpload } = useIntegrationUpload();
+
 const route = useRoute();
-watch(() => route, (newRoute) => {
-    if (newRoute.query?.selected === "new") {
-        const providerType = (newRoute.query?.type as string | undefined) ?? 'adhoc';
+// Watch only the `selected` query value (not the whole route object) so a
+// single navigation fires this exactly once. A deep watch on the route re-fired
+// as the route settled, letting a later fire clobber a just-filled-in upload
+// with a blank `newIntegration`.
+watch(() => route.query?.selected, (selected) => {
+    if (selected === "upload") {
+        // Hand-off from another page's upload (e.g. the notebook): consume the
+        // stashed file and run the full parse/preview flow. Falls back to a
+        // blank new skill if there is no pending file (e.g. a reload of this
+        // URL, where the module-level stash is empty).
+        const pendingFile = takePendingUpload();
+        const start = () => {
+            if (pendingFile) {
+                handleSkillUpload(pendingFile);
+            } else {
+                newIntegration('skill');
+            }
+        };
+        if (integrations.value.finishedInitialLoad) {
+            start();
+        } else {
+            delayUntil(() => integrations.value.finishedInitialLoad, 100)
+                .then(start);
+        }
+    } else if (selected === "new") {
+        const providerType = (route.query?.type as string | undefined) ?? 'skill';
         if (integrations.value.finishedInitialLoad) {
             newIntegration(providerType);
         } else {
@@ -448,9 +529,23 @@ watch(() => route, (newRoute) => {
                 .then(() => newIntegration(providerType));
         }
     } else {
-        integrations.value.selected = newRoute.query?.selected as string | undefined ?? integrations.value.selected;
+        integrations.value.selected = selected as string | undefined ?? integrations.value.selected;
     }
-}, {immediate: true, deep: true});
+}, {immediate: true});
+
+// Whenever selection moves off an unsaved "new" entry, drop it so it doesn't
+// linger in the list. This covers every path that changes the selection (route
+// navigation, the Select dropdown, the New Integration button), not just route
+// changes. A successful save removes "new" via its own path; by the time this
+// fires the save has already captured what it needs, so the extra delete is a
+// harmless no-op. `newIntegration` keeps selection on "new" (overwriting the
+// entry), so it does not trigger this.
+watch(() => integrations.value.selected, (newSelected, oldSelected) => {
+    if (oldSelected === "new" && newSelected !== "new" && integrations.value.integrations?.["new"]) {
+        delete integrations.value.integrations["new"];
+        integrations.value.unsavedChanges = false;
+    }
+});
 
 // --- API operations ---
 
@@ -471,7 +566,14 @@ const fetchResourcesForSelectedIntegration = async () => {
 }
 
 const fetchIntegrations = async () => {
-    integrations.value.integrations = await listIntegrations(sessionId);
+    const fetched = await listIntegrations(sessionId);
+    // Preserve any unsaved, client-only "new" entry (an in-progress upload or a
+    // blank new integration). It has no server-side counterpart, so replacing
+    // the map wholesale would wipe it -- which is what caused an uploaded skill
+    // to flash in and then vanish when a refetch (triggered by session/context
+    // changes) landed after the upload populated it.
+    const unsaved = integrations.value.integrations?.["new"];
+    integrations.value.integrations = unsaved ? { ...fetched, new: unsaved } : fetched;
     integrations.value.finishedInitialLoad = true;
 }
 
@@ -529,6 +631,15 @@ const modifyResourceForSelectedIntegration = async (body: object, resourceId?: s
 
 const deleteResourceOnSelectedIntegration = async (resourceId: string) => {
     await deleteResource(sessionId, integrations.value.selected, resourceId);
+}
+
+const deleteIntegrationById = async (integrationId: string) => {
+    await deleteIntegration(sessionId, integrationId);
+    delete integrations.value.integrations[integrationId];
+    if (integrations.value.selected === integrationId) {
+        integrations.value.selected = undefined;
+    }
+    integrations.value.unsavedChanges = false;
 }
 
 watch(beakerSession, async () => fetchIntegrations());
@@ -652,14 +763,24 @@ const restartSession = async () => {
     max-width: 100%;
 }
 
-.beaker-notebook {
+.integration-main {
+    // Self-contained: previously relied on the notebook's global `.beaker-notebook`
+    // rule leaking in these three properties, which is exactly the kind of
+    // cross-page overlap that breaks once this page is nested in a router-view.
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
     flex: 2 0 calc(50vw - 2px);
     border: 2px solid var(--p-surface-border);
     border-radius: 0;
     border-top: 0;
     max-width: 100%;
     padding-top: 1rem;
-    overflow: auto;
+    // The header and each center component's action bar stay pinned; only the
+    // content between them scrolls (see .integration-center and the per-editor
+    // *-content rules). So this outer box must not scroll as a whole.
+    overflow: hidden;
 
     .p-fieldset {
         input {
@@ -711,7 +832,23 @@ const restartSession = async () => {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
     padding: 0 0.4rem;
+}
+
+// Fills the space between the pinned header and the box edge, and gives the
+// center component a bounded height so it can scroll its own content while
+// keeping its action bar pinned.
+.integration-center {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+
+    > * {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 }
 
 .integration-content-header {

@@ -259,6 +259,8 @@ const catalogEmpty = computed<boolean>(() =>
     height: 100%;
 
     .mcp-viewer-content {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow: auto;
         display: flex;
         flex-direction: column;

@@ -120,6 +120,7 @@
                 >
                     <IntegrationPanel
                         v-model="integrations"
+                        @upload="handleIntegrationUpload"
                     >
                     </IntegrationPanel>
                 </SideMenuPanel>
@@ -214,6 +215,7 @@ import BeakerQueryCell from '../components/cell/BeakerQueryCell.vue';
 import BeakerRawCell from '../components/cell/BeakerRawCell.vue';
 import BeakerAgentCell from '../components/cell/BeakerAgentCell.vue';
 
+import { useIntegrationUpload } from '../composables/useIntegrationUpload';
 import { useNotebookInterface } from '../composables/useNotebookInterface';
 import { useQueryCellFlattening } from '../composables/useQueryCellFlattening';
 import { listIntegrations, type IntegrationMap } from '../util/integration';
@@ -270,6 +272,10 @@ beakerApp.setPage("notebook");
 const urlParams = new URLSearchParams(window.location.search);
 const sessionIdFromUrl = urlParams.has("session") ? urlParams.get("session") : "nextgen_notebook_dev_session";
 const sessionIdFromProps = computed(() => props.sessionId);
+
+const { handleUpload: handleIntegrationUpload } = useIntegrationUpload({
+    sessionId: () => sessionIdFromProps.value || sessionIdFromUrl,
+});
 const renderersFromProps = computed(() => props.renderers);
 
 const truncateAgentCodeCells = ref<boolean>(false);

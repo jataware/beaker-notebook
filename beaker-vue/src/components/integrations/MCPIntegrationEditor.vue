@@ -505,6 +505,8 @@ const save = async () => {
     height: 100%;
 
     .mcp-editor-content {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow: auto;
         display: flex;
         flex-direction: column;

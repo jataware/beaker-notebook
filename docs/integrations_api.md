@@ -32,6 +32,9 @@ Note: Integrations are exposed as a flattened map, so that no consumer is respon
 * `POST /beaker/integrations/{session_id}/{integration_id}`:
     * Method: `provider.update_integration(integration_id)`
 
+* `DELETE /beaker/integrations/{session_id}/{integration_id}`:
+    * Method: `provider.remove_integration(integration_id)`
+
 * `POST /beaker/integrations/{session_id}/{integration_id}/{resource_type}`:
     * Method: `provider.add_resource(integration_id)`
 
@@ -39,9 +42,11 @@ Note: Integrations are exposed as a flattened map, so that no consumer is respon
     * Method: `provider.update_resource(integration_id, resource_id)`
 
 * `DELETE /beaker/integrations/{session_id}/{integration_id}/{resource_type}/{resource_id}`:
-    * Method: `provider.delete_resource(integration_id, resource_id)`
+    * Method: `provider.remove_resource(integration_id, resource_id)`
 
-POST bodies are accessed through `**kwargs` on all of the respective methods above.
+POST bodies are accessed through `**kwargs` on all of the respective methods above. What a body must contain is defined by the target provider (for example, a provider may accept a flag that previews a build without persisting it).
+
+The add / update / remove methods above are only available on providers that inherit `MutableBaseIntegrationProvider`; see [Providers](integration_providers.html).
 
 ## REST API Implementation
 

@@ -1,5 +1,11 @@
 <template>
-    <div class="integrations-panel">
+    <div
+        class="integrations-panel"
+        :class="{ 'drag-over': isDragOver }"
+        @dragover.prevent="onDragOver"
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop"
+    >
         <div class="integration-header">
             <InputGroup>
                 <InputGroupAddon>
@@ -17,24 +23,42 @@
             </InputGroup>
             <div
                 v-if="!readOnly"
+                class="integration-actions"
                 style="
-                    display: flex;
-                    flex-direction: column;
                     padding-top: 0.25rem;
-                    padding-bottom: 0.25rem;
-                    gap: 0.5rem;
                     width: 100%;
             ">
                 <RouterLink
-                    :to="`/integrations?selected=new${sessionIdParam}`"
-                    aria-label="Edit {{ integration?.name }} "
+                    :to="(route.name == 'integrations' ? `/?session=${sessionId}` : `/integrations?session=${sessionId}`)"
                 >
                     <Button
-                        style="height: 32px"
+                        :label="(route.name == 'integrations' ? 'Back to session' : 'Manage Integrations') "
+                    />
+                </RouterLink>
+                <span style="flex: 1"></span>
+                <RouterLink
+                    :to="`/integrations?selected=new${sessionIdParam}`"
+                    aria-label="New Integration"
+                >
+                    <Button
                         icon="pi pi-plus"
                         label="New Integration"
                     />
                 </RouterLink>
+                <Button
+                    icon="pi pi-upload"
+                    label="Upload"
+                    severity="secondary"
+                    @click="triggerUpload"
+                    v-tooltip.bottom="'Import a skill from a SKILL.md or .zip (or drop a file on this panel)'"
+                />
+                <input
+                    ref="fileInputRef"
+                    type="file"
+                    accept=".zip,.md,text/markdown,application/zip"
+                    style="display: none;"
+                    @change="onFileSelected"
+                />
             </div>
             <div
                 style="
@@ -144,9 +168,10 @@ import Card from "primevue/card";
 import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType, getIntegrationIcon, getIntegrationTypeLabel, isContextProvidedIntegration } from "@/util/integration";
-import { RouterLink } from "vue-router";
+import { useRoute, RouterLink } from "vue-router";
 import { read } from "fs";
 
+const route = useRoute();
 const searchText = ref(undefined);
 
 interface PropTypes {
@@ -157,15 +182,56 @@ const props = withDefaults(defineProps<PropTypes>(), {
     readOnly: false,
 });
 
+const emit = defineEmits<{
+    (e: 'upload', file: File): void;
+}>();
+
 const integrations = defineModel<IntegrationMap>()
 
-const urlParams = new URLSearchParams(window.location.search);
-const sessionIdParam = urlParams.has("session") ? `&session=${urlParams.get("session")}` : "";
+// --- Skill upload (button + drag-and-drop) ---
+const fileInputRef = ref<HTMLInputElement>();
+const isDragOver = ref(false);
 
-const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
+const triggerUpload = () => fileInputRef.value?.click();
+
+const onFileSelected = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) {
+        emit('upload', file);
+    }
+    // Reset so selecting the same file again re-triggers change.
+    input.value = '';
+};
+
+const onDragOver = () => {
+    if (!props.readOnly) {
+        isDragOver.value = true;
+    }
+};
+
+const onDragLeave = () => {
+    isDragOver.value = false;
+};
+
+const onDrop = (event: DragEvent) => {
+    isDragOver.value = false;
+    if (props.readOnly) {
+        return;
+    }
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+        emit('upload', file);
+    }
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+const sessionId = urlParams.get("session") ?? "";
+const sessionIdParam = sessionId ? `&session=${sessionId}` : "";
+
 
 const sortIntegrations = (integrations: Integration[]) =>
-    integrations.toSorted((a, b) => a?.name.localeCompare(b?.name))
+    integrations.toSorted((a, b) => (a?.name ?? '').localeCompare(b?.name ?? ''))
 
 const filterIntegrations = (integrations: Integration[]) =>
     integrations.filter(integration =>
@@ -185,15 +251,14 @@ const processIntegrations = (integrations: Integration[]) =>
 //         .reduce((result, key) => (result[key] = providers[key], result), {})
 
 // Whether a card opens into an editor ("Edit") rather than a read-only viewer
-// ("View"). MCP servers are editable unless provided by a context (see
-// isContextProvidedIntegration); adhoc integrations are always editable; every
-// other type is view-only.
+// ("View"). MCP servers and skills are editable unless provided by a context
+// (see isContextProvidedIntegration); every other type is view-only.
 const isEditableType = (integration: Integration): boolean => {
     const type = getIntegrationProviderType(integration);
-    if (type === 'mcp') {
+    if (type === 'mcp' || type === 'agent-skill') {
         return !isContextProvidedIntegration(integration);
     }
-    return type === 'adhoc';
+    return false;
 };
 
 const allIntegrations = computed<Integration[]>(() => Object.values(integrations.value))
@@ -221,6 +286,19 @@ watch(searchText, () => {
     padding-left: 0.25rem;
     padding-right: 0.25rem;
     gap: 0.5rem;
+
+    &.drag-over {
+        outline: 2px dashed var(--p-primary-color);
+        outline-offset: -4px;
+        border-radius: 4px;
+    }
+
+    .integration-actions {
+        display: flex;
+        flex-direction: row;
+        gap: 0.5rem;
+        align-items: center;
+    }
     div.p-card .p-card-content {
         padding: 0;
     }

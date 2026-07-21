@@ -676,6 +676,9 @@ class BeakerKernel(KernelProxyManager):
                         self.handle_tool_call_update, parent_header=message.header
                     )
                 self.debug("llm_query", request, parent_header=message.header)
+                # Rebuild the system_preamble if a mid-session mutation (e.g. an
+                # edited skill) marked it dirty, so this turn sees current state.
+                await self.context.ensure_system_preamble_fresh()
                 task = asyncio.create_task(self.context.agent.react_async(request, react_context={"message": message}))
                 self.running_actions[request_key] = task
                 result = await task

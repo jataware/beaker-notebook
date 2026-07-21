@@ -29,11 +29,22 @@ def get_resource(self, integration_id: str, resource_id: str) -> Resource:
     ...
 ```
 
-The provider's display name is set during initialization via `super().__init__(display_name)`.
+A provider's identity is declared with class variables — `provider_type`, `slug`, and `display_name` — set on the provider class (not passed to `__init__`, which takes only an optional `id`).
 
-Providers inheriting `MutableBaseIntegrationProvider` — designed to have integrations added, updated, or deleted at runtime — have additional methods to implement for those add/update/delete flows.
+Providers inheriting `MutableBaseIntegrationProvider` — designed to have integrations added, updated, or deleted at runtime — implement the following additional methods for those flows:
 
-See `beaker_kernel/lib/integrations/base.py` for the full base class.
+```python
+def add_integration(self, **payload) -> Integration: ...
+def update_integration(self, integration_id: str, **payload) -> Integration: ...
+def remove_integration(self, integration_id: str, **payload) -> None: ...
+def add_resource(self, integration_id: str, **payload) -> Resource: ...
+def update_resource(self, integration_id: str, resource_id: str, **payload) -> Resource: ...
+def remove_resource(self, integration_id: str, resource_id: str, **payload) -> None: ...
+```
+
+These are the methods behind the create/update/delete routes in the [REST API](integrations_api.html). `SkillIntegrationProvider` (local skills persisted to disk) and `MCPIntegrationProvider` are working examples of mutable providers.
+
+See `beaker_notebook/lib/integrations/base.py` for the full base class.
 
 How a provider stores its integrations and manages their lifecycle is entirely up to the provider implementation.
 
@@ -63,7 +74,7 @@ At a glance:
 
 ## Integration and Resource types
 
-The `Integration` and `Resource` dataclasses, along with the specialized resource subclasses (`FileResource`, `ExampleResource`, `SkillMetadataResource`, `SkillInstructionsResource`, `SkillFileResource`, `SkillExampleResource`), are defined in `beaker_kernel/lib/integrations/types.py`. Resources are anything inheriting `Resource`, which carries:
+The `Integration` and `Resource` dataclasses, along with the specialized resource subclasses (`FileResource`, `ExampleResource`, `SkillMetadataResource`, `SkillInstructionsResource`, `SkillFileResource`, `SkillExampleResource`), are defined in `beaker_notebook/lib/integrations/types.py`. Resources are anything inheriting `Resource`, which carries:
 
 * `resource_type` — a `ClassVar` defined on subclasses
 * `resource_id` — a UUID

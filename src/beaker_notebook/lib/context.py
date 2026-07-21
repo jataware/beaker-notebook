@@ -131,6 +131,13 @@ class BeakerContext:
         self.current_llm_query = None
         self.session_attachments: list[dict[str, Any]] = []
         self._notebook_state = None
+        # Lazy invalidation flag for the cacheable system_preamble layer. Set by
+        # `mark_system_preamble_dirty()` when a mutation is known to change a
+        # contributor's output (e.g. an integration is edited mid-session), and
+        # cleared by a rebuild. Deferring the rebuild to next use (see
+        # `ensure_system_preamble_fresh()`) coalesces multiple mutations into a
+        # single reassembly rather than doing discarded work between each.
+        self._system_preamble_dirty = False
 
         self.disable_tools()
 
@@ -391,6 +398,25 @@ class BeakerContext:
         setter = getattr(chat_history, "set_system_preamble_text", None) if chat_history else None
         if setter is not None:
             setter(text or "")
+        self._system_preamble_dirty = False
+
+    def mark_system_preamble_dirty(self) -> None:
+        """Flag the system_preamble for rebuild on next use.
+
+        Cheaper than rebuilding eagerly: several mutations in a row (e.g. saving
+        a skill's body plus a handful of its resource files) collapse into one
+        reassembly the next time a turn actually needs the preamble.
+        """
+        self._system_preamble_dirty = True
+
+    async def ensure_system_preamble_fresh(self) -> None:
+        """Rebuild the system_preamble if a mutation marked it dirty.
+
+        Called at the start of a turn (before the ReAct loop) so an edit made
+        between turns is reflected without an eager rebuild at mutation time.
+        """
+        if self._system_preamble_dirty:
+            await self.refresh_system_preamble()
 
     def disable_tools(self):
         # TODO: Identical toolnames don't work
@@ -662,6 +688,18 @@ class BeakerContext:
             )
         }
 
+    # Provider/integration functions whose effect changes what the integration
+    # layer contributes to the system_preamble; calling any of them via
+    # `call_in_context` marks the preamble dirty for a lazy rebuild next turn.
+    _PREAMBLE_MUTATING_FUNCTIONS = frozenset({
+        "add_integration",
+        "update_integration",
+        "remove_integration",
+        "add_resource",
+        "update_resource",
+        "remove_resource",
+    })
+
     @action(scope="internal")
     async def call_in_context(self, message):
         content = message.content
@@ -717,6 +755,10 @@ class BeakerContext:
                 result = await self._call_in_context(ensure_async(function(*args, **kwargs)))
             case _:
                 raise NotImplementedError
+        # Integration/provider mutations change what the integration layer
+        # contributes to the system_preamble; flag it for a lazy rebuild.
+        if target_type in ("provider", "integration") and content.get("function") in self._PREAMBLE_MUTATING_FUNCTIONS:
+            self.mark_system_preamble_dirty()
         return result
 
     async def _call_in_context(self, coro):

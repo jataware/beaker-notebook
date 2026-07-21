@@ -3,8 +3,9 @@ import json
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Mapping, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Collection, Optional, Mapping, TypeAlias, cast
 from typing_extensions import Self
 from uuid import uuid4
 
@@ -22,7 +23,39 @@ from beaker_notebook.lib.integrations.types import (
     SkillIntegration,
     SkillMetadataResource,
 )
-from .base import BaseIntegrationProvider
+from .base import MutableBaseIntegrationProvider
+
+# Subdirectories under a local skill directory that hold progressively-disclosed
+# resource files (mirrors the Agent Skills layout). Order is the display order.
+# Both "references" and the singular "reference" are recognized because real
+# skills (e.g. Anthropic's own) use the singular form.
+TypeCollection: TypeAlias = tuple[str, ...]
+
+def with_plurals(items: Collection[str], plural_form_first: bool = True) -> TypeCollection:
+    """
+    Returns a tuple of both the original value and plural value for each
+    string in a collection.
+
+    Note: Pluralization naively adds an 's' to the end of the string.
+    It does not validate that the original string is singular or
+    handle special plural forms such as -es, -i, etc.
+    """
+    return tuple(
+        item_str
+        for item in items
+        for item_str in ((f'{item}s', item) if plural_form_first else (item, f'{item}s'))
+    )
+
+# The recognized directory names below are mirrored on the frontend in
+# beaker-vue/src/util/skillArchive.ts (which enumerates an uploaded skill's
+# files). Keep the two in sync: a dir the client enumerates but this provider
+# rejects (see _validate_resource_path) fails on save, and a dir only this
+# provider knows is never uploaded by the client.
+SKILL_RESOURCE_TYPES: TypeCollection = ("reference", "script", "asset")
+SKILL_RESOURCE_DIRS: TypeCollection = with_plurals(SKILL_RESOURCE_TYPES)
+SKILL_EXAMPLE_TYPES: TypeCollection = ("example",)
+SKILL_EXAMPLE_DIRS: TypeCollection = with_plurals(SKILL_EXAMPLE_TYPES)
+
 if TYPE_CHECKING:
     from beaker_notebook.lib.agent import BeakerAgent
     from beaker_notebook.lib.context import BeakerContext
@@ -151,16 +184,23 @@ def extract_file_references(body: str) -> list[str]:
 
     # Markdown links: [text](path)
     link_pattern = re.compile(r'\[(?:[^\]]*)\]\(([^)]+)\)')
+    example_paths = tuple((f"{example_path}/" for example_path in SKILL_EXAMPLE_DIRS))
     for match in link_pattern.finditer(body):
         path = match.group(1)
+        # Normalize a leading "./" so a body reference like ./reference/x.md
+        # matches the on-disk / enumerated path (reference/x.md) and dedupes
+        # rather than appearing as a separate, phantom resource.
+        if path.startswith("./"):
+            path = path[2:]
         if not path.startswith(("http://", "https://", "#", "mailto:")):
             # Skip examples/ paths — they are handled as SkillExampleResources
-            if not path.startswith("examples/") and path != "examples/":
+            if not path.startswith(example_paths) and path not in example_paths:
                 references.append(path)
 
     # Backtick-quoted file paths: `some/path.ext`
     # Match paths that contain a / and end with a file extension
-    backtick_pattern = re.compile(r'`((?:references|scripts|assets)/[^`]+)`')
+    backtick_pattern_str = rf'`((?:{"|".join(SKILL_RESOURCE_DIRS)})/[^`]+)`'
+    backtick_pattern = re.compile(backtick_pattern_str)
     for match in backtick_pattern.finditer(body):
         references.append(match.group(1))
 
@@ -198,22 +238,29 @@ def parse_example_md(content: str) -> tuple[str, str]:
     return title, description
 
 
-class SkillIntegrationProvider(BaseIntegrationProvider):
+class SkillIntegrationProvider(MutableBaseIntegrationProvider):
     """Provides Agent Skills as Beaker integrations with progressive disclosure.
 
     Skills are discovered from a skills.json config file containing a list of
     local paths and/or remote URLs pointing to SKILL.md files.
+
+    Local skills are editable: their ``SKILL.md`` (name/description/frontmatter
+    metadata + instructions body) is written through ``update_integration`` and
+    their resource files (under ``references/``/``scripts/``/``assets/`` and
+    ``examples/``) through the resource-mutation methods. Remote skills are
+    defined by a URL only; their fetched content is read-only.
     """
 
     provider_type: ClassVar[str] = "agent-skill"
     display_name: ClassVar[str] = "Agent Skills"
     slug: ClassVar[str] = "agent-skill"
-    mutable: ClassVar[bool] = False
 
     def __init__(self, id: Optional[str] = None, skill_paths: Optional[list[str|os.PathLike]] = None):
         super().__init__(id=id)
         logger.debug(f"Initializing SkillIntegrationProvider {self.display_name} ({self.id})")
-        self._skills: list[SkillIntegration] = list(self.discover_integrations(paths=skill_paths).values())
+        self._skills: list[SkillIntegration] = list(
+            self.discover_integrations(paths=skill_paths, corpus=self.id).values()
+        )
         self._loaded: dict[str, set[tuple[str, str]]] = {}
 
     @classmethod
@@ -266,7 +313,10 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         context_dir_path = Path(inspect.getabsfile(context.__class__)).parent
         integration_paths = cls.discover_integration_paths(root_paths=[context_dir_path])
         if integration_paths:
-            return [cls(skill_paths=integration_paths)]
+            # Namespace context-bundled skills under a `context-<slug>` id so the
+            # front-end (isContextProvidedIntegration) renders them read-only,
+            # mirroring MCPIntegrationProvider.from_context.
+            return [cls(id=f"context-{context.slug}", skill_paths=integration_paths)]
         else:
             return []
 
@@ -305,20 +355,21 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return config_files
 
     @classmethod
-    def discover_integrations(cls, *, paths: Optional[list[str|os.PathLike]] = None, **kwargs) -> Mapping[str, SkillIntegration]:
+    def discover_integrations(cls, *, paths: Optional[list[str|os.PathLike]] = None, corpus: Optional[str] = None, **kwargs) -> Mapping[str, SkillIntegration]:
         """Discover and load skills from ``skills.json`` files and ``skills/``
         directories under each search root.
 
         Each root is checked for both a ``skills.json`` manifest and a
         ``skills/`` subdirectory; roots earlier in the list take precedence
-        on slug conflicts.
+        on slug conflicts. ``corpus`` namespaces the built integrations (and
+        their deterministic uuids); it is the owning provider's id.
         """
         skills: dict[str, SkillIntegration] = {}
         loaded_slugs: set[str] = set()
 
-        def _load_deduped(source: str, base_path: Optional[str]=None):
+        def _load_deduped(source: str, base_path: Optional[str]=None, manifest_path: Optional[str]=None):
             try:
-                skill = cls._load_skill(source, base_path=base_path)
+                skill = cls._load_skill(source, base_path=base_path, corpus=corpus, manifest_path=manifest_path)
                 if skill.slug in loaded_slugs:
                     logger.debug("Skipping duplicate skill '%s' from %s", skill.name, source)
                 else:
@@ -342,7 +393,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                     logger.warning("skills.json must be a JSON list, got %s", type(data).__name__)
                     continue
                 for source in data:
-                    _load_deduped(source, base_path=str(config_path.parent))
+                    _load_deduped(source, base_path=str(config_path.parent), manifest_path=str(config_path))
             elif config_path.is_dir():
                 logger.debug("Scanning skills directory: %s", config_path)
                 for skill_md in config_path.glob("*/SKILL.md"):
@@ -359,18 +410,18 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         return a
 
     @classmethod
-    def _load_skill(cls, source: str, base_path: Optional[str]=None) -> SkillIntegration:
+    def _load_skill(cls, source: str, base_path: Optional[str]=None, corpus: Optional[str]=None, manifest_path: Optional[str]=None) -> SkillIntegration:
         """Load a single skill from a local path or remote URL."""
         if source.startswith(("http://", "https://")):
-            return cls._load_remote_skill(source)
+            return cls._load_remote_skill(source, corpus=corpus, manifest_path=manifest_path)
         else:
             # If the source reference is relative, convert it to an absolute path relative to the folder the json file is in.
             if not Path(source).is_absolute() and base_path is not None:
                 source = str((Path(base_path) / source).absolute())
-            return cls._load_local_skill(source)
+            return cls._load_local_skill(source, corpus=corpus)
 
     @classmethod
-    def _load_local_skill(cls, path: str) -> SkillIntegration:
+    def _load_local_skill(cls, path: str, corpus: Optional[str]=None) -> SkillIntegration:
         """Load a skill from a local directory or SKILL.md path."""
         skill_path = Path(path)
         if skill_path.is_file() and skill_path.name == "SKILL.md":
@@ -396,10 +447,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             body=body,
             source_type="local",
             base_path=str(skill_dir),
+            corpus=corpus,
         )
 
     @classmethod
-    def _load_remote_skill(cls, url: str) -> SkillIntegration:
+    def _load_remote_skill(cls, url: str, corpus: Optional[str]=None, manifest_path: Optional[str]=None) -> SkillIntegration:
         """Load a skill from a remote URL."""
         if url.rstrip("/").endswith("SKILL.md"):
             skill_url = url
@@ -418,6 +470,11 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             body=body,
             source_type="remote",
             base_url=base_url,
+            corpus=corpus,
+            # Retain where this remote skill was declared, and under what source
+            # string, so update_integration can rewrite the manifest entry.
+            source_url=url,
+            manifest_path=manifest_path,
         )
 
     @classmethod
@@ -429,20 +486,35 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         slug: Optional[str] = None,
         base_path: Optional[str] = None,
         base_url: Optional[str] = None,
+        corpus: Optional[str] = None,
+        source_url: Optional[str] = None,
+        manifest_path: Optional[str] = None,
     ) -> SkillIntegration:
         """Build a SkillIntegration with resources from parsed SKILL.md."""
         name = frontmatter["name"]
         description = frontmatter["description"]
 
+        if slug is None:
+            slug = Integration.slugify(name)
+
         skill = SkillIntegration(
+            uuid=cls._skill_uuid(slug, corpus),
             name=name,
-            slug=cast(str, slug),
+            slug=slug,
             description=description,
             provider=f"{cls.provider_type}:{cls.slug}",
             source_type=source_type,
             base_path=base_path,
             base_url=base_url,
+            corpus=corpus,
         )
+        if source_url:
+            # Surface the source URL as the integration's url so the editor can
+            # display it; also retained in extra_metadata for manifest rewrites.
+            skill.url = source_url
+            skill.extra_metadata["source_url"] = source_url
+        if manifest_path:
+            skill.extra_metadata["manifest_path"] = manifest_path
 
         metadata_resource = SkillMetadataResource(
             integration=skill.uuid,
@@ -460,18 +532,74 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             content=body,
         )
 
-        file_resources = []
-        for ref_path in extract_file_references(body):
-            file_resources.append(SkillFileResource(
-                integration=skill.uuid,
-                name=Path(ref_path).name,
-                relative_path=ref_path,
-            ))
-
+        file_resources = cls._discover_file_resources(skill, body, source_type, base_path)
         example_resources = cls._discover_examples(skill, source_type, base_path, base_url)
 
         skill.add_resources([metadata_resource, instructions_resource] + file_resources + example_resources)
         return skill
+
+    @classmethod
+    def _skill_uuid(cls, slug: str, corpus: Optional[str]) -> str:
+        """Deterministic uuid for a skill: ``agent-skill:<corpus>:<slug>``.
+
+        Stable across reloads within a provider's lifetime (``corpus`` is the
+        provider id), so an edit -> save -> re-fetch round-trip keeps the same
+        identity, mirroring the MCP provider's scheme.
+        """
+        return f"{cls.slug}:{corpus}:{slug}"
+
+    # Resource ids are left as auto-generated uuid4s (see Resource.__post_init__)
+    # rather than derived from the skill uuid / path: the resource routes carry
+    # the id as a URL path segment (regex `[\w\d-]+`), so it must not contain
+    # ':', '.', or '/'. The front-end always uses the ids from the freshly
+    # fetched integration, so stability across reloads is not required.
+
+    @classmethod
+    def _discover_file_resources(
+        cls,
+        skill: SkillIntegration,
+        body: str,
+        source_type: str,
+        base_path: Optional[str] = None,
+    ) -> list[SkillFileResource]:
+        """Build the skill's ``skill_file`` resources.
+
+        For a local skill the on-disk contents of the resource dirs
+        (``references``/``reference``/``scripts``/``assets``) are the sole source
+        of truth. Body references are deliberately NOT used for local skills:
+        they would create phantom or duplicate resources — a referenced-but-
+        absent path, a different spelling (``./x`` vs ``x``), or a copy of a file
+        that is also uploaded separately. For a remote skill (which cannot be
+        scanned) the body references are the only signal available.
+        """
+        seen: dict[str, SkillFileResource] = {}
+
+        def _add(relative_path: str):
+            if relative_path in seen:
+                return
+            seen[relative_path] = SkillFileResource(
+                integration=skill.uuid,
+                name=Path(relative_path).name,
+                relative_path=relative_path,
+            )
+
+        if source_type == "local":
+            if base_path:
+                root = Path(base_path)
+                for subdir in SKILL_RESOURCE_DIRS:
+                    dir_path = root / subdir
+                    if not dir_path.is_dir():
+                        continue
+                    for file_path in sorted(dir_path.rglob("*")):
+                        if file_path.is_file():
+                            _add(str(file_path.relative_to(root)))
+            # A local skill with no base_path (e.g. an upload preview) has no
+            # files to enumerate yet; the client provides them on save.
+        else:
+            for ref_path in extract_file_references(body):
+                _add(ref_path)
+
+        return list(seen.values())
 
     @classmethod
     def _discover_examples(
@@ -489,21 +617,21 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         """
         resources = []
         if source_type == "local" and base_path:
-            examples_dir = Path(base_path) / "examples"
-            if examples_dir.is_dir():
-                for example_path in sorted(examples_dir.glob("*.md")):
-                    try:
-                        content = example_path.read_text(encoding="utf-8")
-                        title, description = parse_example_md(content)
-                        resources.append(SkillExampleResource(
-                            integration=skill.uuid,
-                            filename=example_path.name,
-                            title=title or example_path.stem,
-                            description=description,
-                            content=None,  # Loaded on demand (tier 3)
-                        ))
-                    except Exception:
-                        logger.exception("Failed to parse example: %s", example_path)
+            for examples_dir in ((Path(base_path) / example_dir) for example_dir in SKILL_EXAMPLE_DIRS):
+                if examples_dir.is_dir():
+                    for example_path in sorted(examples_dir.glob("*.md")):
+                        try:
+                            content = example_path.read_text(encoding="utf-8")
+                            title, description = parse_example_md(content)
+                            resources.append(SkillExampleResource(
+                                integration=skill.uuid,
+                                filename=example_path.name,
+                                title=title or example_path.stem,
+                                description=description,
+                                content=None,  # Loaded on demand (tier 3)
+                            ))
+                        except Exception:
+                            logger.exception("Failed to parse example: %s", example_path)
         return resources
 
     # --- Abstract method implementations ---
@@ -535,6 +663,387 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         elif isinstance(resource, SkillExampleResource) and resource.content is None:
             resource.content = self._fetch_file_content(skill, f"examples/{resource.filename}")
         return resource
+
+    # --- Mutation: write-location resolution -----------------------------
+
+    @classmethod
+    def _candidate_write_roots(cls) -> list[Path]:
+        """Ordered base dirs a user's skills may be written to, most preferred
+        first. Mirrors the discovery search roots but keeps locations that do
+        not yet exist so a first-run install still has somewhere to land.
+        """
+        roots: list[Path] = []
+        cwd = Path.cwd()
+        for name in (".agents", ".beaker"):
+            roots.append(cwd / name)
+        home = Path.home()
+        for name in (".agents", ".beaker"):
+            roots.append(home / name)
+        for data_dir in find_resource_dirs("data"):
+            roots.append(Path(data_dir))
+        return roots
+
+    @classmethod
+    def _resolve_writable_base(cls) -> Path:
+        """Pick a base dir for new skills/manifests.
+
+        Uses the first candidate root that already exists and is writable; if
+        none exist, the first candidate we can create. Raises if nothing is
+        writable.
+        """
+        candidates = cls._candidate_write_roots()
+        for root in candidates:
+            if root.is_dir() and os.access(root, os.W_OK):
+                return root
+        for root in candidates:
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                return root
+            except OSError:
+                continue
+        raise OSError("No writable location available to store skills.")
+
+    def _resolve_writable_manifest(self) -> Path:
+        """Resolve a ``skills.json`` to record remote-skill URLs in.
+
+        Prefers a manifest this provider already reads from and can write to, so
+        a user's remote skills stay collected together; otherwise scaffolds one
+        under the first writable base.
+        """
+        for skill in self._skills:
+            manifest_path = skill.extra_metadata.get("manifest_path")
+            if manifest_path and Path(manifest_path).is_file() and os.access(manifest_path, os.W_OK):
+                return Path(manifest_path)
+        manifest = self._resolve_writable_base() / "skills.json"
+        if not manifest.exists():
+            manifest.write_text("[]\n", encoding="utf-8")
+        return manifest
+
+    @staticmethod
+    def _read_manifest(path: Path) -> list:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        return data if isinstance(data, list) else []
+
+    @classmethod
+    def _write_manifest(cls, path: Path, data: list) -> None:
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _manifest_entry_matches(entry: Any, url: str) -> bool:
+        return entry == url or (isinstance(entry, dict) and entry.get("source") == url)
+
+    # --- Mutation: SKILL.md serialization --------------------------------
+
+    @staticmethod
+    def _frontmatter_from_payload(payload: dict, defaults: Optional[dict] = None) -> dict:
+        """Assemble ordered SKILL.md frontmatter from an editor payload.
+
+        Only ``name``/``description`` are required; optional keys are omitted
+        when empty so the written file stays clean. ``defaults`` (an existing
+        skill's values) backs fields the payload omits on update.
+        """
+        defaults = defaults or {}
+        fm: dict[str, Any] = {
+            "name": payload.get("name") or defaults.get("name"),
+            "description": payload.get("description")
+                if payload.get("description") is not None else defaults.get("description"),
+        }
+        license_val = payload.get("license", defaults.get("license"))
+        if license_val:
+            fm["license"] = license_val
+        compatibility = payload.get("compatibility", defaults.get("compatibility"))
+        if compatibility:
+            fm["compatibility"] = compatibility
+        allowed_tools = payload.get("allowed_tools", defaults.get("allowed_tools"))
+        if allowed_tools:
+            fm["allowed-tools"] = allowed_tools
+        metadata = payload.get("skill_metadata", defaults.get("skill_metadata"))
+        if metadata:
+            fm["metadata"] = metadata
+        return fm
+
+    @staticmethod
+    def _render_skill_md(frontmatter: dict, body: str) -> str:
+        clean = {k: v for k, v in frontmatter.items() if v not in (None, "", {}, [])}
+        yaml_text = yaml.safe_dump(clean, sort_keys=False, default_flow_style=False).strip()
+        return f"---\n{yaml_text}\n---\n\n{(body or '').strip()}\n"
+
+    def _existing_frontmatter_defaults(self, skill: SkillIntegration) -> dict:
+        """Current frontmatter-relevant values for a skill, from its metadata
+        resource, used to back fields an update payload does not include.
+        """
+        metadata = next(
+            (r for r in skill.resources.values() if isinstance(r, SkillMetadataResource)),
+            None,
+        )
+        return {
+            "name": skill.name,
+            "description": skill.description,
+            "license": getattr(metadata, "license", None),
+            "compatibility": getattr(metadata, "compatibility", None),
+            "allowed_tools": getattr(metadata, "allowed_tools", None),
+            "skill_metadata": getattr(metadata, "skill_metadata", None),
+        }
+
+    def _existing_body(self, skill: SkillIntegration) -> str:
+        instructions = next(
+            (r for r in skill.resources.values() if isinstance(r, SkillInstructionsResource)),
+            None,
+        )
+        return instructions.content if instructions else ""
+
+    def _replace_skill(self, uuid: str, new_skill: SkillIntegration) -> None:
+        for i, skill in enumerate(self._skills):
+            if skill.uuid == uuid:
+                self._skills[i] = new_skill
+                return
+        self._skills.append(new_skill)
+
+    # --- Mutation: integrations ------------------------------------------
+
+    def add_integration(self, **payload) -> Integration:
+        # Preview: build and return the (unsaved) skill so the editor can
+        # populate its form before the user commits. Nothing is written to disk
+        # or added to the catalog. A remote preview fetches the SKILL.md from a
+        # URL; a local/upload preview parses SKILL.md text supplied directly.
+        if payload.get("preview"):
+            return self._preview_integration(**payload)
+        if payload.get("source_type") == "remote":
+            return self._add_remote_integration(**payload)
+        return self._add_local_integration(**payload)
+
+    def _preview_integration(self, **payload) -> SkillIntegration:
+        if payload.get("source_type") == "remote":
+            url = (payload.get("url") or "").strip()
+            if not url:
+                raise ValueError("Cannot preview remote skill: a URL is required.")
+            return self._load_remote_skill(url, corpus=self.id)
+        content = payload.get("content")
+        if not content:
+            raise ValueError("Cannot preview skill: SKILL.md content is required.")
+        frontmatter, body = parse_skill_md(content)
+        # base_path is intentionally omitted: the client enumerates the uploaded
+        # skill's resource files itself and uploads them on save. This preview
+        # only supplies name/description/metadata/instructions for the form.
+        return self._build_skill_integration(
+            frontmatter=frontmatter,
+            body=body,
+            source_type="local",
+            corpus=self.id,
+        )
+
+    def _add_local_integration(self, **payload) -> SkillIntegration:
+        name = payload.get("name")
+        if not name:
+            raise ValueError("Cannot add skill: a name is required.")
+        slug = Integration.slugify(name)
+        if any(skill.slug == slug for skill in self._skills):
+            raise ValueError(f"A skill named '{name}' (slug '{slug}') already exists.")
+        skill_dir = self._resolve_writable_base() / "skills" / slug
+        if skill_dir.exists():
+            raise ValueError(f"Skill directory already exists: {skill_dir}")
+        skill_dir.mkdir(parents=True)
+        frontmatter = self._frontmatter_from_payload(payload)
+        (skill_dir / "SKILL.md").write_text(
+            self._render_skill_md(frontmatter, payload.get("instructions") or ""),
+            encoding="utf-8",
+        )
+        skill = self._load_local_skill(str(skill_dir), corpus=self.id)
+        self._skills.append(skill)
+        return skill
+
+    def _add_remote_integration(self, **payload) -> SkillIntegration:
+        url = (payload.get("url") or "").strip()
+        if not url:
+            raise ValueError("Cannot add remote skill: a URL is required.")
+        manifest = self._resolve_writable_manifest()
+        data = self._read_manifest(manifest)
+        if not any(self._manifest_entry_matches(entry, url) for entry in data):
+            data.append(url)
+            self._write_manifest(manifest, data)
+        try:
+            skill = self._load_remote_skill(url, corpus=self.id, manifest_path=str(manifest))
+        except Exception:
+            # Roll back the manifest entry so a failed fetch leaves no dangling row.
+            self._remove_manifest_url(manifest, url)
+            raise
+        if any(existing.slug == skill.slug for existing in self._skills):
+            self._remove_manifest_url(manifest, url)
+            raise ValueError(f"A skill with slug '{skill.slug}' already exists.")
+        self._skills.append(skill)
+        return skill
+
+    def update_integration(self, integration_id: str, **payload) -> Integration:
+        skill = self.get_integration(integration_id)
+        if skill.source_type == "remote":
+            return self._update_remote_integration(skill, **payload)
+        return self._update_local_integration(skill, **payload)
+
+    def _update_local_integration(self, skill: SkillIntegration, **payload) -> SkillIntegration:
+        if not skill.base_path:
+            raise ValueError(f"Skill '{skill.slug}' has no local path to write to.")
+        # The directory name (and thus slug/uuid) is fixed at creation; only the
+        # SKILL.md content changes here.
+        defaults = self._existing_frontmatter_defaults(skill)
+        frontmatter = self._frontmatter_from_payload(payload, defaults=defaults)
+        body = payload.get("instructions")
+        if body is None:
+            body = self._existing_body(skill)
+        (Path(skill.base_path) / "SKILL.md").write_text(
+            self._render_skill_md(frontmatter, body), encoding="utf-8",
+        )
+        refreshed = self._load_local_skill(skill.base_path, corpus=skill.corpus)
+        self._replace_skill(skill.uuid, refreshed)
+        return refreshed
+
+    def _update_remote_integration(self, skill: SkillIntegration, **payload) -> SkillIntegration:
+        new_url = (payload.get("url") or "").strip()
+        if not new_url:
+            raise ValueError("A URL is required for a remote skill.")
+        old_url = skill.extra_metadata.get("source_url")
+        manifest = skill.extra_metadata.get("manifest_path")
+        if not manifest:
+            raise ValueError("Cannot locate the manifest for this remote skill.")
+        manifest_path = Path(manifest)
+        if new_url != old_url:
+            data = self._read_manifest(manifest_path)
+            for i, entry in enumerate(data):
+                if entry == old_url:
+                    data[i] = new_url
+                elif isinstance(entry, dict) and entry.get("source") == old_url:
+                    entry["source"] = new_url
+            self._write_manifest(manifest_path, data)
+        refreshed = self._load_remote_skill(new_url, corpus=skill.corpus, manifest_path=manifest)
+        self._replace_skill(skill.uuid, refreshed)
+        return refreshed
+
+    def remove_integration(self, integration_id: str, **payload) -> None:
+        skill = self.get_integration(integration_id)
+        if skill.source_type == "remote":
+            manifest = skill.extra_metadata.get("manifest_path")
+            url = skill.extra_metadata.get("source_url")
+            if manifest and url:
+                self._remove_manifest_url(Path(manifest), url)
+        elif skill.base_path and Path(skill.base_path).is_dir():
+            shutil.rmtree(skill.base_path)
+        self._skills = [existing for existing in self._skills if existing.uuid != integration_id]
+
+    def _remove_manifest_url(self, manifest: Path, url: str) -> None:
+        data = self._read_manifest(manifest)
+        remaining = [entry for entry in data if not self._manifest_entry_matches(entry, url)]
+        if len(remaining) != len(data):
+            self._write_manifest(manifest, remaining)
+
+    # --- Mutation: resources (local skills only) -------------------------
+
+    @staticmethod
+    def _require_local_editable(skill: SkillIntegration) -> None:
+        if skill.source_type != "local" or not skill.base_path:
+            raise ValueError(f"Skill '{skill.slug}' is not a local skill and its resources cannot be edited.")
+
+    @staticmethod
+    def _validate_resource_path(relative_path: str) -> None:
+        path = Path(relative_path)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"Invalid resource path: {relative_path}")
+        if not path.parts or path.parts[0] not in SKILL_RESOURCE_DIRS:
+            raise ValueError(
+                f"Resource path must be under one of {SKILL_RESOURCE_DIRS}: {relative_path}"
+            )
+
+    def _write_skill_file(self, skill: SkillIntegration, relative_path: str, content: str) -> None:
+        base = Path(skill.base_path).resolve()
+        target = (base / relative_path).resolve()
+        if target != base and base not in target.parents:
+            raise ValueError(f"Refusing to write outside the skill directory: {relative_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    def _delete_skill_file(self, skill: SkillIntegration, relative_path: str) -> None:
+        target = Path(skill.base_path) / relative_path
+        if target.is_file():
+            target.unlink()
+
+    def add_resource(self, integration_id: str, **payload) -> Resource:
+        skill = self.get_integration(integration_id)
+        self._require_local_editable(skill)
+        resource_type = payload.get("resource_type")
+        content = payload.get("content") or ""
+        if resource_type == "skill_file":
+            relative_path = payload.get("relative_path")
+            if not relative_path:
+                raise ValueError("A skill_file resource requires a relative_path.")
+            self._validate_resource_path(relative_path)
+            self._write_skill_file(skill, relative_path, content)
+            resource: Resource = SkillFileResource(
+                integration=skill.uuid,
+                name=payload.get("name") or Path(relative_path).name,
+                relative_path=relative_path,
+                content=content,
+            )
+        elif resource_type == "skill_example":
+            filename = payload.get("filename")
+            if not filename:
+                raise ValueError("A skill_example resource requires a filename.")
+            self._write_skill_file(skill, f"examples/{filename}", content)
+            parsed_title, parsed_description = parse_example_md(content)
+            resource = SkillExampleResource(
+                integration=skill.uuid,
+                filename=filename,
+                title=payload.get("title") or parsed_title or Path(filename).stem,
+                description=payload.get("description") or parsed_description,
+                content=content,
+            )
+        else:
+            raise ValueError(
+                f"Cannot add a resource of type '{resource_type}' to a skill. "
+                "Editable resource types are 'skill_file' and 'skill_example'; "
+                "the instructions body and metadata are edited via the integration itself."
+            )
+        skill.resources[resource.resource_id] = resource
+        return resource
+
+    def update_resource(self, integration_id: str, resource_id: str, **payload) -> Resource:
+        skill = self.get_integration(integration_id)
+        self._require_local_editable(skill)
+        resource = skill.resources.get(resource_id)
+        if resource is None:
+            raise KeyError(f"Resource not found: {resource_id}")
+        content = payload.get("content")
+        if isinstance(resource, SkillFileResource):
+            if content is not None:
+                self._write_skill_file(skill, resource.relative_path, content)
+                resource.content = content
+        elif isinstance(resource, SkillExampleResource):
+            if content is not None:
+                self._write_skill_file(skill, f"examples/{resource.filename}", content)
+                resource.content = content
+                parsed_title, parsed_description = parse_example_md(content)
+                resource.title = payload.get("title") or parsed_title or resource.title
+                resource.description = payload.get("description") or parsed_description or resource.description
+        else:
+            raise ValueError(
+                "Only 'skill_file' and 'skill_example' resources are editable; "
+                "instructions and metadata are edited via the integration itself."
+            )
+        return resource
+
+    def remove_resource(self, integration_id: str, resource_id: str, **payload) -> None:
+        skill = self.get_integration(integration_id)
+        self._require_local_editable(skill)
+        resource = skill.resources.get(resource_id)
+        if resource is None:
+            return
+        if isinstance(resource, SkillFileResource):
+            self._delete_skill_file(skill, resource.relative_path)
+        elif isinstance(resource, SkillExampleResource):
+            self._delete_skill_file(skill, f"examples/{resource.filename}")
+        else:
+            raise ValueError("Only 'skill_file' and 'skill_example' resources can be removed.")
+        skill.resources.pop(resource_id, None)
 
     # --- Prompt (Tier 1: metadata only, as YAML) ---
 
