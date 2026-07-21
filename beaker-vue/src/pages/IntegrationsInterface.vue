@@ -213,6 +213,7 @@ import {
 } from '@/util/integration';
 import { parseSkillUpload } from '@/util/skillArchive';
 import { useRoute } from 'vue-router';
+import { useIntegrationUpload } from '../composables/useIntegrationUpload';
 
 const beakerNotebookRef = ref<BeakerNotebookComponentType>();
 const beakerInterfaceRef = ref();
@@ -360,7 +361,7 @@ const readOnly = computed<boolean>(() => {
 // --- Integration selector logic (moved from IntegrationEditor) ---
 
 const sortIntegrations = (integrations: IntegrationMap): Integration[] =>
-    Object.values(integrations).toSorted((a, b) => a?.name.localeCompare(b?.name));
+    Object.values(integrations).toSorted((a, b) => (a?.name ?? '').localeCompare(b?.name ?? ''));
 
 const sortedIntegrations = computed<Integration[]>(() =>
     sortIntegrations(integrations.value.integrations ?? {}));
@@ -492,10 +493,35 @@ const delayUntil = (condition, retryInterval) => {
     return new Promise(poll);
 };
 
+const { takePendingUpload } = useIntegrationUpload();
+
 const route = useRoute();
-watch(() => route, (newRoute) => {
-    if (newRoute.query?.selected === "new") {
-        const providerType = (newRoute.query?.type as string | undefined) ?? 'skill';
+// Watch only the `selected` query value (not the whole route object) so a
+// single navigation fires this exactly once. A deep watch on the route re-fired
+// as the route settled, letting a later fire clobber a just-filled-in upload
+// with a blank `newIntegration`.
+watch(() => route.query?.selected, (selected) => {
+    if (selected === "upload") {
+        // Hand-off from another page's upload (e.g. the notebook): consume the
+        // stashed file and run the full parse/preview flow. Falls back to a
+        // blank new skill if there is no pending file (e.g. a reload of this
+        // URL, where the module-level stash is empty).
+        const pendingFile = takePendingUpload();
+        const start = () => {
+            if (pendingFile) {
+                handleSkillUpload(pendingFile);
+            } else {
+                newIntegration('skill');
+            }
+        };
+        if (integrations.value.finishedInitialLoad) {
+            start();
+        } else {
+            delayUntil(() => integrations.value.finishedInitialLoad, 100)
+                .then(start);
+        }
+    } else if (selected === "new") {
+        const providerType = (route.query?.type as string | undefined) ?? 'skill';
         if (integrations.value.finishedInitialLoad) {
             newIntegration(providerType);
         } else {
@@ -503,9 +529,23 @@ watch(() => route, (newRoute) => {
                 .then(() => newIntegration(providerType));
         }
     } else {
-        integrations.value.selected = newRoute.query?.selected as string | undefined ?? integrations.value.selected;
+        integrations.value.selected = selected as string | undefined ?? integrations.value.selected;
     }
-}, {immediate: true, deep: true});
+}, {immediate: true});
+
+// Whenever selection moves off an unsaved "new" entry, drop it so it doesn't
+// linger in the list. This covers every path that changes the selection (route
+// navigation, the Select dropdown, the New Integration button), not just route
+// changes. A successful save removes "new" via its own path; by the time this
+// fires the save has already captured what it needs, so the extra delete is a
+// harmless no-op. `newIntegration` keeps selection on "new" (overwriting the
+// entry), so it does not trigger this.
+watch(() => integrations.value.selected, (newSelected, oldSelected) => {
+    if (oldSelected === "new" && newSelected !== "new" && integrations.value.integrations?.["new"]) {
+        delete integrations.value.integrations["new"];
+        integrations.value.unsavedChanges = false;
+    }
+});
 
 // --- API operations ---
 
@@ -526,7 +566,14 @@ const fetchResourcesForSelectedIntegration = async () => {
 }
 
 const fetchIntegrations = async () => {
-    integrations.value.integrations = await listIntegrations(sessionId);
+    const fetched = await listIntegrations(sessionId);
+    // Preserve any unsaved, client-only "new" entry (an in-progress upload or a
+    // blank new integration). It has no server-side counterpart, so replacing
+    // the map wholesale would wipe it -- which is what caused an uploaded skill
+    // to flash in and then vanish when a refetch (triggered by session/context
+    // changes) landed after the upload populated it.
+    const unsaved = integrations.value.integrations?.["new"];
+    integrations.value.integrations = unsaved ? { ...fetched, new: unsaved } : fetched;
     integrations.value.finishedInitialLoad = true;
 }
 

@@ -223,7 +223,7 @@ const sessionIdParam = urlParams.has("session") ? `&session=${urlParams.get("ses
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 
 const sortIntegrations = (integrations: Integration[]) =>
-    integrations.toSorted((a, b) => a?.name.localeCompare(b?.name))
+    integrations.toSorted((a, b) => (a?.name ?? '').localeCompare(b?.name ?? ''))
 
 const filterIntegrations = (integrations: Integration[]) =>
     integrations.filter(integration =>
