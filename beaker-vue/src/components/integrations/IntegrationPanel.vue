@@ -28,6 +28,13 @@
                     padding-top: 0.25rem;
                     width: 100%;
             ">
+                <RouterLink
+                    :to="(route.name == 'integrations' ? `/?session=${sessionId}` : `/integrations?session=${sessionId}`)"
+                >
+                    <Button
+                        :label="(route.name == 'integrations' ? 'Back to session' : 'Manage Integrations') "
+                    />
+                </RouterLink>
                 <span style="flex: 1"></span>
                 <RouterLink
                     :to="`/integrations?selected=new${sessionIdParam}`"
@@ -161,9 +168,10 @@ import Card from "primevue/card";
 import { marked } from "marked";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType, getIntegrationIcon, getIntegrationTypeLabel, isContextProvidedIntegration } from "@/util/integration";
-import { RouterLink } from "vue-router";
+import { useRoute, RouterLink } from "vue-router";
 import { read } from "fs";
 
+const route = useRoute();
 const searchText = ref(undefined);
 
 interface PropTypes {
@@ -218,9 +226,9 @@ const onDrop = (event: DragEvent) => {
 };
 
 const urlParams = new URLSearchParams(window.location.search);
-const sessionIdParam = urlParams.has("session") ? `&session=${urlParams.get("session")}` : "";
+const sessionId = urlParams.get("session") ?? "";
+const sessionIdParam = sessionId ? `&session=${sessionId}` : "";
 
-const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 
 const sortIntegrations = (integrations: Integration[]) =>
     integrations.toSorted((a, b) => (a?.name ?? '').localeCompare(b?.name ?? ''))
