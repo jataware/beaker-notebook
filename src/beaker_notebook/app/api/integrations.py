@@ -242,6 +242,22 @@ class IntegrationHandler(BeakerAPIMixin, JupyterHandler):
         except Exception as e:
             raise tornado.web.HTTPError(status_code=500, log_message=str(e))
 
+    async def delete(self, session_id=None, integration_id=None):
+        if integration_id is None:
+            raise tornado.web.HTTPError(status_code=400, log_message="An integration id is required to delete an integration.")
+        try:
+            await self.call_in_context(
+                session_id=session_id,
+                target=f"integration:{integration_id}",
+                function="remove_integration",
+                kwargs={"integration_id": integration_id},
+            )
+            self.write({})
+        except TimeoutError as e:
+            raise tornado.web.HTTPError(status_code=504, log_message="Kernel took too long to repond to request")
+        except Exception as e:
+            raise tornado.web.HTTPError(status_code=500, log_message=str(e))
+
 
 class IntegrationResourceHandler(BeakerAPIMixin, JupyterHandler):
     """

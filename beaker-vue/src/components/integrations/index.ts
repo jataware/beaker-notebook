@@ -7,3 +7,5 @@ export { default as MCPIntegrationViewer } from './MCPIntegrationViewer.vue';
 export { default as MCPToolsPanel } from './MCPToolsPanel.vue';
 export { default as ResourceViewer } from './ResourceViewer.vue';
 export { default as SkillIntegrationViewer } from './SkillIntegrationViewer.vue';
+export { default as SkillIntegrationEditor } from './SkillIntegrationEditor.vue';
+export { default as SkillResourcePanel } from './SkillResourcePanel.vue';

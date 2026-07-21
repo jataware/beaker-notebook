@@ -142,6 +142,8 @@ const exampleResources = computed<SkillExampleResource[]>(() => {
     height: 100%;
 
     .skill-viewer-content {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow: auto;
         display: flex;
         flex-direction: column;
