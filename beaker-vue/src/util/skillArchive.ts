@@ -11,11 +11,21 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_ENTRIES = 2000;
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 
-// Subtrees whose files become skill resources (mirrors the backend
-// SKILL_RESOURCE_DIRS). Both "references" and the singular "reference" are
-// recognized because real skills use the singular form. Anything outside these
-// (and SKILL.md / examples) is ignored.
-const RESOURCE_DIRS = ['references', 'reference', 'scripts', 'assets'];
+// Mirror of `with_plurals` in src/beaker_notebook/lib/integrations/skill.py:
+// naively appends "s" (does not handle irregular plurals) so both the singular
+// and plural directory names are recognized.
+const withPlurals = (items: string[]): string[] =>
+    items.flatMap((item) => [`${item}s`, item]);
+
+// Directory names whose files become skill resources. These MUST stay in sync
+// with SKILL_RESOURCE_DIRS / SKILL_EXAMPLE_DIRS in
+// src/beaker_notebook/lib/integrations/skill.py — the backend re-validates every
+// resource path on save, so a name recognized here but not there is rejected
+// (and vice versa a file in a dir only the backend knows is never uploaded).
+// Both singular and plural forms are recognized because real skills use either.
+// Anything outside these (and SKILL.md) is ignored.
+const RESOURCE_DIRS = withPlurals(['reference', 'script', 'asset']);
+const EXAMPLE_DIRS = withPlurals(['example']);
 
 export interface EnumeratedResource {
     resource_type: 'skill_file' | 'skill_example';
@@ -119,8 +129,8 @@ export async function parseSkillUpload(file: File): Promise<ParsedSkillUpload> {
         const parts = rel.split('/');
         const top = parts[0];
 
-        if (top === 'examples') {
-            // Examples are flat (examples/<file>); ignore nested paths.
+        if (EXAMPLE_DIRS.includes(top)) {
+            // Examples are flat (<dir>/<file>); ignore nested paths.
             if (parts.length !== 2) {
                 continue;
             }

@@ -61,6 +61,18 @@ describe('parseSkillUpload', () => {
         expect(relPaths(result.resources)).toEqual(['reference/node.md', 'scripts/run.py']);
     });
 
+    it('recognizes singular resource and example directory names', async () => {
+        const result = await parseSkillUpload(zipFile({
+            'SKILL.md': strToU8(SKILL_MD),
+            'reference/a.md': strToU8('a'),
+            'script/b.py': strToU8('b'),
+            'asset/c.json': strToU8('{}'),
+            'example/ex.md': strToU8('# Ex'),
+        }));
+        expect(relPaths(result.resources)).toEqual(['asset/c.json', 'reference/a.md', 'script/b.py']);
+        expect(exampleNames(result.resources)).toEqual(['ex.md']);
+    });
+
     it('captures example content and file content', async () => {
         const result = await parseSkillUpload(zipFile({
             'SKILL.md': strToU8(SKILL_MD),

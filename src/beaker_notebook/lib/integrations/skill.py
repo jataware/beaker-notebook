@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Mapping, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Collection, Optional, Mapping, TypeAlias, cast
 from typing_extensions import Self
 from uuid import uuid4
 
@@ -29,7 +29,33 @@ from .base import MutableBaseIntegrationProvider
 # resource files (mirrors the Agent Skills layout). Order is the display order.
 # Both "references" and the singular "reference" are recognized because real
 # skills (e.g. Anthropic's own) use the singular form.
-SKILL_RESOURCE_DIRS = ("references", "reference", "scripts", "assets")
+TypeCollection: TypeAlias = tuple[str, ...]
+
+def with_plurals(items: Collection[str], plural_form_first: bool = True) -> TypeCollection:
+    """
+    Returns a tuple of both the original value and plural value for each
+    string in a collection.
+
+    Note: Pluralization naively adds an 's' to the end of the string.
+    It does not validate that the original string is singular or
+    handle special plural forms such as -es, -i, etc.
+    """
+    return tuple(
+        item_str
+        for item in items
+        for item_str in ((f'{item}s', item) if plural_form_first else (item, f'{item}s'))
+    )
+
+# The recognized directory names below are mirrored on the frontend in
+# beaker-vue/src/util/skillArchive.ts (which enumerates an uploaded skill's
+# files). Keep the two in sync: a dir the client enumerates but this provider
+# rejects (see _validate_resource_path) fails on save, and a dir only this
+# provider knows is never uploaded by the client.
+SKILL_RESOURCE_TYPES: TypeCollection = ("reference", "script", "asset")
+SKILL_RESOURCE_DIRS: TypeCollection = with_plurals(SKILL_RESOURCE_TYPES)
+SKILL_EXAMPLE_TYPES: TypeCollection = ("example",)
+SKILL_EXAMPLE_DIRS: TypeCollection = with_plurals(SKILL_EXAMPLE_TYPES)
+
 if TYPE_CHECKING:
     from beaker_notebook.lib.agent import BeakerAgent
     from beaker_notebook.lib.context import BeakerContext
@@ -158,6 +184,7 @@ def extract_file_references(body: str) -> list[str]:
 
     # Markdown links: [text](path)
     link_pattern = re.compile(r'\[(?:[^\]]*)\]\(([^)]+)\)')
+    example_paths = tuple((f"{example_path}/" for example_path in SKILL_EXAMPLE_DIRS))
     for match in link_pattern.finditer(body):
         path = match.group(1)
         # Normalize a leading "./" so a body reference like ./reference/x.md
@@ -167,12 +194,13 @@ def extract_file_references(body: str) -> list[str]:
             path = path[2:]
         if not path.startswith(("http://", "https://", "#", "mailto:")):
             # Skip examples/ paths — they are handled as SkillExampleResources
-            if not path.startswith("examples/") and path != "examples/":
+            if not path.startswith(example_paths) and path not in example_paths:
                 references.append(path)
 
     # Backtick-quoted file paths: `some/path.ext`
     # Match paths that contain a / and end with a file extension
-    backtick_pattern = re.compile(r'`((?:references|reference|scripts|assets)/[^`]+)`')
+    backtick_pattern_str = rf'`((?:{"|".join(SKILL_RESOURCE_DIRS)})/[^`]+)`'
+    backtick_pattern = re.compile(backtick_pattern_str)
     for match in backtick_pattern.finditer(body):
         references.append(match.group(1))
 
@@ -589,21 +617,21 @@ class SkillIntegrationProvider(MutableBaseIntegrationProvider):
         """
         resources = []
         if source_type == "local" and base_path:
-            examples_dir = Path(base_path) / "examples"
-            if examples_dir.is_dir():
-                for example_path in sorted(examples_dir.glob("*.md")):
-                    try:
-                        content = example_path.read_text(encoding="utf-8")
-                        title, description = parse_example_md(content)
-                        resources.append(SkillExampleResource(
-                            integration=skill.uuid,
-                            filename=example_path.name,
-                            title=title or example_path.stem,
-                            description=description,
-                            content=None,  # Loaded on demand (tier 3)
-                        ))
-                    except Exception:
-                        logger.exception("Failed to parse example: %s", example_path)
+            for examples_dir in ((Path(base_path) / example_dir) for example_dir in SKILL_EXAMPLE_DIRS):
+                if examples_dir.is_dir():
+                    for example_path in sorted(examples_dir.glob("*.md")):
+                        try:
+                            content = example_path.read_text(encoding="utf-8")
+                            title, description = parse_example_md(content)
+                            resources.append(SkillExampleResource(
+                                integration=skill.uuid,
+                                filename=example_path.name,
+                                title=title or example_path.stem,
+                                description=description,
+                                content=None,  # Loaded on demand (tier 3)
+                            ))
+                        except Exception:
+                            logger.exception("Failed to parse example: %s", example_path)
         return resources
 
     # --- Abstract method implementations ---
