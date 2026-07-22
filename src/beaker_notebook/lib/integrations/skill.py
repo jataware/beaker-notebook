@@ -141,11 +141,22 @@ def parse_skill_md(content: str) -> tuple[dict, str]:
     return frontmatter, body
 
 
+#: Directory, relative to the skill root, whose contents are examples rather
+#: than plain reference files. Referenced paths under it become
+#: SkillExampleResources; see `_build_skill_integration`.
+EXAMPLES_DIR = "examples/"
+
+
 def extract_file_references(body: str) -> list[str]:
     """Extract relative file paths referenced in the markdown body.
 
     Detects both markdown links [text](path) and backtick-quoted paths
     like `references/some_file.md` or `scripts/run.py`.
+
+    Paths under ``examples/`` are included. The caller decides what a path
+    becomes -- `_build_skill_integration` routes them to SkillExampleResources
+    rather than SkillFileResources -- so this stays a single, uniform pass over
+    the body. A bare ``examples/`` directory link names no file and is dropped.
     """
     references = []
 
@@ -153,49 +164,21 @@ def extract_file_references(body: str) -> list[str]:
     link_pattern = re.compile(r'\[(?:[^\]]*)\]\(([^)]+)\)')
     for match in link_pattern.finditer(body):
         path = match.group(1)
-        if not path.startswith(("http://", "https://", "#", "mailto:")):
-            # Skip examples/ paths — they are handled as SkillExampleResources
-            if not path.startswith("examples/") and path != "examples/":
-                references.append(path)
+        if path.startswith(("http://", "https://", "#", "mailto:")):
+            continue
+        # A link to the directory itself, not to a file in it.
+        if path.rstrip("/") == EXAMPLES_DIR.rstrip("/"):
+            continue
+        references.append(path)
 
     # Backtick-quoted file paths: `some/path.ext`
     # Match paths that contain a / and end with a file extension
-    backtick_pattern = re.compile(r'`((?:references|scripts|assets)/[^`]+)`')
+    backtick_pattern = re.compile(r'`((?:references|scripts|assets|examples)/[^`]+)`')
     for match in backtick_pattern.finditer(body):
         references.append(match.group(1))
 
     # Deduplicate preserving order
     return list(dict.fromkeys(references))
-
-
-# A markdown link into examples/, plus whatever text follows it on the line.
-# Skill authors conventionally list examples as
-#     - [examples/foo.py](examples/foo.py) — what it demonstrates
-# so the trailing text is the natural description.
-_EXAMPLE_LINK_PATTERN = re.compile(r'\[([^\]]*)\]\((examples/[^)\s]+)\)([^\n]*)')
-
-
-def extract_example_references(body: str) -> list[tuple[str, str, str]]:
-    """Extract examples declared as markdown links in the body.
-
-    Used for remote skills, where the ``examples/`` directory cannot be listed.
-    Local skills scan the directory instead, which stays authoritative.
-
-    Returns ``(relative_path, title, description)`` per example, deduplicated on
-    path and in document order. ``relative_path`` is relative to the skill root
-    (i.e. it retains the ``examples/`` prefix).
-    """
-    examples: dict[str, tuple[str, str, str]] = {}
-    for match in _EXAMPLE_LINK_PATTERN.finditer(body):
-        link_text, path, trailing = match.group(1).strip(), match.group(2).strip(), match.group(3)
-        if path in examples:
-            continue
-        # Authors usually write the path as the link text; a filename reads
-        # better as a title than a repeated path does.
-        title = link_text if link_text and link_text != path else Path(path).name
-        description = trailing.strip().lstrip("-–—:*").strip()
-        examples[path] = (path, title, description)
-    return list(examples.values())
 
 
 def parse_example_md(content: str) -> tuple[str, str]:
@@ -490,15 +473,24 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
             content=body,
         )
 
+        # One pass over the body; the prefix decides which kind of resource a
+        # referenced path becomes. Examples have their own tier and their own
+        # loading tool, so they must not also appear as plain files.
         file_resources = []
+        referenced_examples = []
         for ref_path in extract_file_references(body):
-            file_resources.append(SkillFileResource(
-                integration=skill.uuid,
-                name=Path(ref_path).name,
-                relative_path=ref_path,
-            ))
+            if ref_path.startswith(EXAMPLES_DIR):
+                referenced_examples.append(ref_path)
+            else:
+                file_resources.append(SkillFileResource(
+                    integration=skill.uuid,
+                    name=Path(ref_path).name,
+                    relative_path=ref_path,
+                ))
 
-        example_resources = cls._discover_examples(skill, source_type, base_path, base_url, body=body)
+        example_resources = cls._discover_examples(
+            skill, source_type, base_path, base_url, referenced=referenced_examples
+        )
 
         skill.add_resources([metadata_resource, instructions_resource] + file_resources + example_resources)
         return skill
@@ -510,20 +502,31 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         source_type: str,
         base_path: Optional[str] = None,
         base_url: Optional[str] = None,
-        body: str = "",
+        referenced: "Optional[list[str]]" = None,
     ) -> list[SkillExampleResource]:
-        """Discover a skill's examples.
+        """Discover a skill's examples, from the directory and from the body.
 
-        Local skills scan the ``examples/`` subdirectory, reading only enough of
-        each file to pull out a title and description.
+        Two sources, in precedence order:
 
-        Remote skills cannot list a directory over HTTP, so their examples are
-        taken from the ``examples/`` markdown links in the body -- the listing
-        skill authors already write. Titles and descriptions come from the link
-        text and the text following it, so discovery costs no extra requests;
-        content is still fetched on demand.
+        1. **Local directory scan.** Reads enough of each ``examples/*.md`` file
+           to pull out a title and description. Only possible for local skills.
+        2. **Paths referenced in SKILL.md**, passed in as ``referenced``. This is
+           the only source available to a remote skill, where the directory
+           cannot be listed over HTTP, and it also picks up local examples the
+           ``*.md`` glob misses -- a skill shipping ``examples/*.py`` was
+           previously invisible whether it was local or remote.
+
+        The scan wins on conflict because it carries a real parsed title and
+        description; a referenced path yields only its filename. That costs
+        little, because the agent must call ``load_skill_instructions`` -- which
+        returns the whole body, author's example listing included -- before it
+        can ask for an example by name.
+
+        Content is never fetched here; it stays tier 3, loaded on demand.
         """
         resources = []
+        seen: set[str] = set()
+
         if source_type == "local" and base_path:
             examples_dir = Path(base_path) / "examples"
             if examples_dir.is_dir():
@@ -538,20 +541,25 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                             description=description,
                             content=None,  # Loaded on demand (tier 3)
                         ))
+                        seen.add(example_path.name)
                     except Exception:
                         logger.exception("Failed to parse example: %s", example_path)
-        elif source_type == "remote" and base_url:
-            for relative_path, title, description in extract_example_references(body):
-                # Keep the path below examples/ as the filename so nested
-                # examples round-trip through load_skill_examples correctly.
-                filename = relative_path[len("examples/"):]
-                resources.append(SkillExampleResource(
-                    integration=skill.uuid,
-                    filename=filename,
-                    title=title,
-                    description=description,
-                    content=None,  # Loaded on demand (tier 3)
-                ))
+
+        for relative_path in referenced or []:
+            # Keep the path below examples/ as the filename so nested examples
+            # round-trip through load_skill_examples and _fetch_file_content.
+            filename = relative_path[len(EXAMPLES_DIR):]
+            if not filename or filename in seen:
+                continue
+            seen.add(filename)
+            resources.append(SkillExampleResource(
+                integration=skill.uuid,
+                filename=filename,
+                title=filename,
+                description="",
+                content=None,  # Loaded on demand (tier 3)
+            ))
+
         return resources
 
     # --- Abstract method implementations ---

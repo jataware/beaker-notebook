@@ -12,7 +12,6 @@ from beaker_notebook.lib.integrations.skill import (
     SkillIntegrationProvider,
     parse_skill_md,
     parse_example_md,
-    extract_example_references,
     extract_file_references,
 )
 from beaker_notebook.lib.integrations.types import (
@@ -207,7 +206,12 @@ class TestExtractFileReferences:
         assert "references/patterns.md" in refs
         assert "scripts/run.py" in refs
 
-    def test_examples_paths_excluded(self):
+    def test_example_paths_included_but_bare_directory_link_dropped(self):
+        """examples/ files are extracted here; the caller routes them onward.
+
+        A link to the directory itself names no file, so it is dropped rather
+        than becoming a resource that cannot be loaded.
+        """
         body = (
             "See [examples/](examples/) for working examples.\n"
             "Also see [examples/basic.md](examples/basic.md) for a quick start.\n"
@@ -215,60 +219,12 @@ class TestExtractFileReferences:
         )
         refs = extract_file_references(body)
         assert "examples/" not in refs
-        assert "examples/basic.md" not in refs
+        assert "examples/basic.md" in refs
         assert "references/guide.md" in refs
 
-
-# ---------------------------------------------------------------------------
-# extract_example_references
-# ---------------------------------------------------------------------------
-
-class TestExtractExampleReferences:
-    def test_conventional_listing(self):
-        """The form skill authors actually write: a bulleted link plus a gloss."""
-        body = (
-            "## Runnable examples\n\n"
-            "- [examples/basic_fetch.py](examples/basic_fetch.py) — obs + hindcast fetch\n"
-            "- [examples/s2s.py](examples/s2s.py) — sub-seasonal issuance\n"
-        )
-        assert extract_example_references(body) == [
-            ("examples/basic_fetch.py", "basic_fetch.py", "obs + hindcast fetch"),
-            ("examples/s2s.py", "s2s.py", "sub-seasonal issuance"),
-        ]
-
-    def test_descriptive_link_text_becomes_the_title(self):
-        body = "- [End-to-end forecast](examples/e2e.py) — optimize then verify\n"
-        assert extract_example_references(body) == [
-            ("examples/e2e.py", "End-to-end forecast", "optimize then verify"),
-        ]
-
-    def test_separators_and_bullets_stripped_from_description(self):
-        for separator in ("-", "–", "—", ":"):
-            body = f"- [x](examples/a.py) {separator} does a thing\n"
-            assert extract_example_references(body)[0][2] == "does a thing"
-
-    def test_link_without_description(self):
-        assert extract_example_references("[x](examples/a.py)\n") == [
-            ("examples/a.py", "x", ""),
-        ]
-
-    def test_deduplicated_in_document_order(self):
-        body = (
-            "- [a](examples/a.py) — first\n"
-            "- [b](examples/b.py) — second\n"
-            "See [a](examples/a.py) again.\n"
-        )
-        paths = [path for path, _, _ in extract_example_references(body)]
-        assert paths == ["examples/a.py", "examples/b.py"]
-
-    def test_non_example_links_ignored(self):
-        body = "[guide](references/guide.md) and [site](https://example.com/examples/x.py)\n"
-        assert extract_example_references(body) == []
-
-    def test_nested_path_retained(self):
-        """Paths keep the examples/ prefix so they can be fetched back."""
-        body = "[deep](examples/advanced/tuning.py) — tuning\n"
-        assert extract_example_references(body)[0][0] == "examples/advanced/tuning.py"
+    def test_backtick_example_paths(self):
+        refs = extract_file_references("Run `examples/quickstart.py` to start.")
+        assert "examples/quickstart.py" in refs
 
 
 # ---------------------------------------------------------------------------
@@ -704,15 +660,18 @@ class TestRemoteExampleDiscovery:
         examples = [r for r in skill.resources.values() if isinstance(r, SkillExampleResource)]
         assert {e.filename for e in examples} == {"basic.py", "advanced.py"}
 
-    def test_descriptions_come_from_the_listing(self):
+    def test_filename_is_the_handle(self):
+        """The filename is what load_skill_examples is called with."""
         skill = _load_remote_skill_with_examples()
         by_name = {
             r.filename: r
             for r in skill.resources.values()
             if isinstance(r, SkillExampleResource)
         }
-        assert by_name["basic.py"].description == "the simplest case"
-        assert by_name["advanced.py"].description == "every knob turned"
+        assert by_name["basic.py"].title == "basic.py"
+        # The author's own gloss already reached the agent with the body, which
+        # load_skill_instructions returns in full before examples can be asked for.
+        assert by_name["basic.py"].description == ""
 
     def test_content_is_not_fetched_during_discovery(self):
         """Discovery must stay free; content is tier 3, loaded on demand."""
@@ -762,6 +721,83 @@ class TestRemoteExampleDiscovery:
         with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response):
             skill = SkillIntegrationProvider._load_remote_skill("https://example.com/skill/")
         assert not [r for r in skill.resources.values() if isinstance(r, SkillExampleResource)]
+
+    def test_nested_example_path_round_trips(self):
+        """A nested path keeps enough of itself to be fetched back."""
+        md = MINIMAL_SKILL_MD.rstrip() + "\n\n[deep](examples/advanced/tuning.py)\n"
+        resp = MagicMock(text=md, raise_for_status=MagicMock())
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=resp):
+            skill = SkillIntegrationProvider._load_remote_skill("https://example.com/skill/")
+        example = next(
+            r for r in skill.resources.values() if isinstance(r, SkillExampleResource)
+        )
+        assert example.filename == "advanced/tuning.py"
+
+        provider = _make_provider([])
+        fetched = MagicMock(text="x = 1", raise_for_status=MagicMock())
+        with patch(
+            "beaker_notebook.lib.integrations.skill.requests.get", return_value=fetched
+        ) as mock_get:
+            provider._fetch_file_content(skill, f"examples/{example.filename}")
+        mock_get.assert_called_once_with(
+            "https://example.com/skill/examples/advanced/tuning.py", timeout=30
+        )
+
+
+# ---------------------------------------------------------------------------
+# Example discovery: directory scan and body references combined
+# ---------------------------------------------------------------------------
+
+class TestExampleSourcesAreDeduped:
+    """Local skills draw examples from two sources, which must not collide."""
+
+    def test_directory_scan_wins_over_body_reference(self, skill_dir: Path):
+        """The scan carries a real parsed title; a bare reference does not."""
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(
+            skill_md.read_text()
+            + "\n\nSee [examples/basic_usage.md](examples/basic_usage.md) too.\n"
+        )
+        skill = SkillIntegrationProvider._load_local_skill(str(skill_dir))
+        matching = [
+            r for r in skill.resources.values()
+            if isinstance(r, SkillExampleResource) and r.filename == "basic_usage.md"
+        ]
+        assert len(matching) == 1, "example listed twice"
+        assert matching[0].title == "Basic usage of the full skill"
+
+    def test_body_reference_adds_examples_the_glob_misses(self, skill_dir: Path):
+        """A skill shipping examples/*.py was previously invisible entirely.
+
+        _discover_examples only globs *.md, so a .py example is found solely
+        because SKILL.md points at it.
+        """
+        (skill_dir / "examples" / "script_example.py").write_text("print('hi')")
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(
+            skill_md.read_text()
+            + "\n\n- [examples/script_example.py](examples/script_example.py) - a script\n"
+        )
+        skill = SkillIntegrationProvider._load_local_skill(str(skill_dir))
+        names = {
+            r.filename for r in skill.resources.values()
+            if isinstance(r, SkillExampleResource)
+        }
+        assert names == {"basic_usage.md", "advanced_usage.md", "script_example.py"}
+
+    def test_referenced_examples_are_not_also_file_resources(self, skill_dir: Path):
+        """Examples have their own tier and must not double as reference files."""
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(
+            skill_md.read_text() + "\n\n[x](examples/basic_usage.md)\n"
+        )
+        skill = SkillIntegrationProvider._load_local_skill(str(skill_dir))
+        file_paths = {
+            r.relative_path for r in skill.resources.values()
+            if isinstance(r, SkillFileResource)
+        }
+        assert not any(p.startswith("examples/") for p in file_paths)
+
 
 
 # ---------------------------------------------------------------------------
