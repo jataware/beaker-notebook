@@ -168,6 +168,36 @@ def extract_file_references(body: str) -> list[str]:
     return list(dict.fromkeys(references))
 
 
+# A markdown link into examples/, plus whatever text follows it on the line.
+# Skill authors conventionally list examples as
+#     - [examples/foo.py](examples/foo.py) — what it demonstrates
+# so the trailing text is the natural description.
+_EXAMPLE_LINK_PATTERN = re.compile(r'\[([^\]]*)\]\((examples/[^)\s]+)\)([^\n]*)')
+
+
+def extract_example_references(body: str) -> list[tuple[str, str, str]]:
+    """Extract examples declared as markdown links in the body.
+
+    Used for remote skills, where the ``examples/`` directory cannot be listed.
+    Local skills scan the directory instead, which stays authoritative.
+
+    Returns ``(relative_path, title, description)`` per example, deduplicated on
+    path and in document order. ``relative_path`` is relative to the skill root
+    (i.e. it retains the ``examples/`` prefix).
+    """
+    examples: dict[str, tuple[str, str, str]] = {}
+    for match in _EXAMPLE_LINK_PATTERN.finditer(body):
+        link_text, path, trailing = match.group(1).strip(), match.group(2).strip(), match.group(3)
+        if path in examples:
+            continue
+        # Authors usually write the path as the link text; a filename reads
+        # better as a title than a repeated path does.
+        title = link_text if link_text and link_text != path else Path(path).name
+        description = trailing.strip().lstrip("-–—:*").strip()
+        examples[path] = (path, title, description)
+    return list(examples.values())
+
+
 def parse_example_md(content: str) -> tuple[str, str]:
     """Extract (title, description) from an example markdown file.
 
@@ -468,7 +498,7 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                 relative_path=ref_path,
             ))
 
-        example_resources = cls._discover_examples(skill, source_type, base_path, base_url)
+        example_resources = cls._discover_examples(skill, source_type, base_path, base_url, body=body)
 
         skill.add_resources([metadata_resource, instructions_resource] + file_resources + example_resources)
         return skill
@@ -480,12 +510,18 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         source_type: str,
         base_path: Optional[str] = None,
         base_url: Optional[str] = None,
+        body: str = "",
     ) -> list[SkillExampleResource]:
-        """Discover example files from the skill's examples/ directory.
+        """Discover a skill's examples.
 
-        For local skills, scans the examples/ subdirectory. For remote skills,
-        examples must be declared in the frontmatter (not yet implemented).
-        Only reads the first few lines of each file to extract title and description.
+        Local skills scan the ``examples/`` subdirectory, reading only enough of
+        each file to pull out a title and description.
+
+        Remote skills cannot list a directory over HTTP, so their examples are
+        taken from the ``examples/`` markdown links in the body -- the listing
+        skill authors already write. Titles and descriptions come from the link
+        text and the text following it, so discovery costs no extra requests;
+        content is still fetched on demand.
         """
         resources = []
         if source_type == "local" and base_path:
@@ -504,6 +540,18 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
                         ))
                     except Exception:
                         logger.exception("Failed to parse example: %s", example_path)
+        elif source_type == "remote" and base_url:
+            for relative_path, title, description in extract_example_references(body):
+                # Keep the path below examples/ as the filename so nested
+                # examples round-trip through load_skill_examples correctly.
+                filename = relative_path[len("examples/"):]
+                resources.append(SkillExampleResource(
+                    integration=skill.uuid,
+                    filename=filename,
+                    title=title,
+                    description=description,
+                    content=None,  # Loaded on demand (tier 3)
+                ))
         return resources
 
     # --- Abstract method implementations ---

@@ -12,6 +12,7 @@ from beaker_notebook.lib.integrations.skill import (
     SkillIntegrationProvider,
     parse_skill_md,
     parse_example_md,
+    extract_example_references,
     extract_file_references,
 )
 from beaker_notebook.lib.integrations.types import (
@@ -216,6 +217,58 @@ class TestExtractFileReferences:
         assert "examples/" not in refs
         assert "examples/basic.md" not in refs
         assert "references/guide.md" in refs
+
+
+# ---------------------------------------------------------------------------
+# extract_example_references
+# ---------------------------------------------------------------------------
+
+class TestExtractExampleReferences:
+    def test_conventional_listing(self):
+        """The form skill authors actually write: a bulleted link plus a gloss."""
+        body = (
+            "## Runnable examples\n\n"
+            "- [examples/basic_fetch.py](examples/basic_fetch.py) — obs + hindcast fetch\n"
+            "- [examples/s2s.py](examples/s2s.py) — sub-seasonal issuance\n"
+        )
+        assert extract_example_references(body) == [
+            ("examples/basic_fetch.py", "basic_fetch.py", "obs + hindcast fetch"),
+            ("examples/s2s.py", "s2s.py", "sub-seasonal issuance"),
+        ]
+
+    def test_descriptive_link_text_becomes_the_title(self):
+        body = "- [End-to-end forecast](examples/e2e.py) — optimize then verify\n"
+        assert extract_example_references(body) == [
+            ("examples/e2e.py", "End-to-end forecast", "optimize then verify"),
+        ]
+
+    def test_separators_and_bullets_stripped_from_description(self):
+        for separator in ("-", "–", "—", ":"):
+            body = f"- [x](examples/a.py) {separator} does a thing\n"
+            assert extract_example_references(body)[0][2] == "does a thing"
+
+    def test_link_without_description(self):
+        assert extract_example_references("[x](examples/a.py)\n") == [
+            ("examples/a.py", "x", ""),
+        ]
+
+    def test_deduplicated_in_document_order(self):
+        body = (
+            "- [a](examples/a.py) — first\n"
+            "- [b](examples/b.py) — second\n"
+            "See [a](examples/a.py) again.\n"
+        )
+        paths = [path for path, _, _ in extract_example_references(body)]
+        assert paths == ["examples/a.py", "examples/b.py"]
+
+    def test_non_example_links_ignored(self):
+        body = "[guide](references/guide.md) and [site](https://example.com/examples/x.py)\n"
+        assert extract_example_references(body) == []
+
+    def test_nested_path_retained(self):
+        """Paths keep the examples/ prefix so they can be fetched back."""
+        body = "[deep](examples/advanced/tuning.py) — tuning\n"
+        assert extract_example_references(body)[0][0] == "examples/advanced/tuning.py"
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +661,107 @@ class TestRemoteUrlResolution:
         with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response) as mock_get:
             SkillIntegrationProvider._load_remote_skill("https://example.com/repo/main/")
             mock_get.assert_called_once_with("https://example.com/repo/main/SKILL.md", timeout=30)
+
+
+# ---------------------------------------------------------------------------
+# Remote example discovery
+# ---------------------------------------------------------------------------
+
+REMOTE_SKILL_WITH_EXAMPLES_MD = textwrap.dedent("""\
+    ---
+    name: remote-skill
+    description: A skill served over HTTP.
+    ---
+
+    # Remote skill
+
+    See [the guide](references/guide.md) for details.
+
+    ## Runnable examples
+
+    - [examples/basic.py](examples/basic.py) — the simplest case
+    - [examples/advanced.py](examples/advanced.py) — every knob turned
+    """)
+
+
+def _load_remote_skill_with_examples():
+    mock_response = MagicMock()
+    mock_response.text = REMOTE_SKILL_WITH_EXAMPLES_MD
+    mock_response.raise_for_status = MagicMock()
+    with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response):
+        return SkillIntegrationProvider._load_remote_skill("https://example.com/skill/")
+
+
+class TestRemoteExampleDiscovery:
+    """A remote skill's examples come from its own body.
+
+    Listing a directory over HTTP is not possible, so before this the agent saw
+    no examples at all for any remotely-loaded skill.
+    """
+
+    def test_examples_discovered_from_body(self):
+        skill = _load_remote_skill_with_examples()
+        examples = [r for r in skill.resources.values() if isinstance(r, SkillExampleResource)]
+        assert {e.filename for e in examples} == {"basic.py", "advanced.py"}
+
+    def test_descriptions_come_from_the_listing(self):
+        skill = _load_remote_skill_with_examples()
+        by_name = {
+            r.filename: r
+            for r in skill.resources.values()
+            if isinstance(r, SkillExampleResource)
+        }
+        assert by_name["basic.py"].description == "the simplest case"
+        assert by_name["advanced.py"].description == "every knob turned"
+
+    def test_content_is_not_fetched_during_discovery(self):
+        """Discovery must stay free; content is tier 3, loaded on demand."""
+        skill = _load_remote_skill_with_examples()
+        examples = [r for r in skill.resources.values() if isinstance(r, SkillExampleResource)]
+        assert examples and all(e.content is None for e in examples)
+
+    def test_only_one_request_is_made(self):
+        mock_response = MagicMock()
+        mock_response.text = REMOTE_SKILL_WITH_EXAMPLES_MD
+        mock_response.raise_for_status = MagicMock()
+        with patch(
+            "beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response
+        ) as mock_get:
+            SkillIntegrationProvider._load_remote_skill("https://example.com/skill/")
+        mock_get.assert_called_once()
+
+    def test_example_content_fetches_from_the_base_url(self):
+        skill = _load_remote_skill_with_examples()
+        provider = _make_provider([])
+        mock_response = MagicMock()
+        mock_response.text = "print('hi')"
+        mock_response.raise_for_status = MagicMock()
+        with patch(
+            "beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response
+        ) as mock_get:
+            content = provider._fetch_file_content(skill, "examples/basic.py")
+            mock_get.assert_called_once_with(
+                "https://example.com/skill/examples/basic.py", timeout=30
+            )
+        assert content == "print('hi')"
+
+    def test_examples_are_not_also_file_resources(self):
+        """Examples have their own tier; they must not double as reference files."""
+        skill = _load_remote_skill_with_examples()
+        file_paths = {
+            r.relative_path
+            for r in skill.resources.values()
+            if isinstance(r, SkillFileResource)
+        }
+        assert file_paths == {"references/guide.md"}
+
+    def test_skill_without_example_links_has_none(self):
+        mock_response = MagicMock()
+        mock_response.text = MINIMAL_SKILL_MD
+        mock_response.raise_for_status = MagicMock()
+        with patch("beaker_notebook.lib.integrations.skill.requests.get", return_value=mock_response):
+            skill = SkillIntegrationProvider._load_remote_skill("https://example.com/skill/")
+        assert not [r for r in skill.resources.values() if isinstance(r, SkillExampleResource)]
 
 
 # ---------------------------------------------------------------------------
