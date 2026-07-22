@@ -6,7 +6,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache, update_wrapper, wraps
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from jupyter_server.auth.authorizer import Authorizer
 from jupyter_server.auth.identity import IdentityProvider, User
@@ -14,6 +14,9 @@ from traitlets import Bool, Unicode
 from tornado import web
 
 from jupyter_server.services.config.manager import ConfigManager
+
+if TYPE_CHECKING:
+    from beaker_notebook.services.secrets.types import BaseSecret
 
 current_user = contextvars.ContextVar("current_user", default=None)
 current_request = contextvars.ContextVar("current_request", default=None)
@@ -134,6 +137,7 @@ class BeakerAuthorizer(Authorizer):
 class BeakerUser(User):
     home_dir: Optional[str] = field(default=None)
     config: Optional[dict] = field(default=None)
+    secrets: "list[BaseSecret]" = field(default_factory=list)
 
     def __post_init__(self):
         """Initialize home directory if not provided.
@@ -146,6 +150,7 @@ class BeakerUser(User):
         if self.config is None:
             # TODO: Fetch config from somewhere
             self.config = {}
+        # TODO: Populate user secrets
         return super().__post_init__()
 
     @staticmethod

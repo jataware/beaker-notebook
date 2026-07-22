@@ -9,6 +9,7 @@ from jupyter_client.ioloop.manager import AsyncIOLoopKernelManager
 
 from beaker_notebook.lib.app import BeakerApp
 from beaker_notebook.lib.config import config
+from beaker_notebook.services.auth import BeakerUser, current_user
 
 if TYPE_CHECKING:
     from beaker_notebook.app.base import BaseBeakerApp
@@ -113,6 +114,8 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
         if beaker_session and not self.beaker_session:
             self.beaker_session = beaker_session
 
+        beaker_user: BeakerUser = current_user.get()
+
         cmd, kw = await super()._async_pre_start_kernel(**kw)
 
         env = kw.pop("env", {})
@@ -123,9 +126,11 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             home_dir = os.path.expanduser(f"~{kernel_user}")
             kw["cwd"] = home_dir
             env["HOME"] = home_dir
+            env = await self.app.secrets_manager.sanitize_kernel_environment_vars(env=env)
         else:
             kernel_user = self.app.subkernel_user
             home_dir = kw.get("cwd")
+            env = await self.app.secrets_manager.sanitize_subkernel_envionment_vars(user=beaker_user, env=env)
 
         user_info = pwd.getpwnam(kernel_user)
         home_dir = os.path.expanduser(f"~{kernel_user}")

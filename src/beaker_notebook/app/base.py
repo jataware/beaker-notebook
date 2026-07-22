@@ -1,10 +1,11 @@
+import asyncio
 import getpass
 import inspect
 import logging
 import os
 import re
 import urllib.parse
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 import traitlets
 from traitlets.traitlets import Unicode
@@ -23,6 +24,9 @@ from beaker_notebook.lib.autodiscovery import autodiscover
 from beaker_notebook.lib.config import config, CONFIG_FILE_SEARCH_LOCATIONS
 from beaker_notebook.lib.utils import import_dotted_class
 from beaker_notebook.app.handlers import register_handlers
+
+if TYPE_CHECKING:
+    from beaker_notebook.services.secrets.manager import BeakerSecretsManager
 
 
 logger = logging.getLogger("beaker_server")
@@ -69,6 +73,12 @@ class BaseBeakerApp(ServerApp):
         help="Path pointing to where user directories should be stored. Defaults to 'root_dir' if not set.",
         config=True,
     )
+    secrets_manager: "BeakerSecretsManager" = traitlets.Instance(
+        f"beaker_notebook.services.secrets.manager.BeakerSecretsManager",
+        help="Beaker Secrets Manager singleton instance",
+        config=True,
+    )
+
     kernel_spec_include_local = traitlets.Bool(True, help="Include local kernel specs", config=True)
     kernel_spec_managers = traitlets.Dict(help="Kernel specification managers indexed by extension name", config=True)
 
@@ -111,6 +121,13 @@ class BaseBeakerApp(ServerApp):
     def _default_authorizer_class(self):
         from beaker_notebook.services.auth.notebook import NotebookAuthorizer
         return NotebookAuthorizer
+
+    @traitlets.default("secrets_manager")
+    def _default_secrets_manager(self):
+        from beaker_notebook.services.secrets.manager import BeakerSecretsManager
+        from beaker_notebook.services.secrets.types import UserEnvironmentSecret, SystemEnvironmentSecret
+        secrets_manager = BeakerSecretsManager()
+        return secrets_manager
 
     @traitlets.default("config_file_name")
     def _default_config_file_name(self):
@@ -175,6 +192,10 @@ class BaseBeakerApp(ServerApp):
             self.extra_template_paths = [*self.extra_template_paths, error_template_path]
 
         super().initialize(argv, find_extensions, new_httpserver, starter_extension, **kwargs)
+
+        ioloop = asyncio.get_event_loop()
+        system_secrets = ioloop.run_until_complete(self.secrets_manager.collect_system_secrets(self))
+        self.secrets_manager.add_secrets(system_secrets)
 
         self.config["KernelProvisionerFactory"].setdefault("default_provisioner_name", "beaker-local-provisioner")
         if config.jupyter_token:
