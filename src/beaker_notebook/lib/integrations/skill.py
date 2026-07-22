@@ -718,7 +718,12 @@ class SkillIntegrationProvider(BaseIntegrationProvider):
         if examples:
             result += "\n\n## Available Code Examples\n"
             for ex in examples:
-                result += f"\n- **{ex.filename}**: {ex.title}"
+                result += f"\n- **{ex.filename}**"
+                # An example discovered from a reference in the body has no
+                # title beyond its own filename; printing it twice reads as a
+                # bug and spends tokens saying nothing.
+                if ex.title and ex.title != ex.filename:
+                    result += f": {ex.title}"
                 if ex.description:
                     result += f"\n  {ex.description}"
             result += (

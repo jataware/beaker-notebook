@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from beaker_notebook.lib.integrations.skill import SkillIntegrationProvider
+from beaker_notebook.lib.integrations.types import SkillExampleResource
 
 
 SKILL_MD = textwrap.dedent("""\
@@ -85,6 +86,26 @@ async def test_load_skill_instructions_returns_body(provider):
     # Examples section should be appended (skill has 2 examples).
     assert "Available Code Examples" in result
     assert "basic.md" in result
+
+
+async def test_example_listing_does_not_repeat_the_filename_as_its_title(provider):
+    """An example found via a body reference has no title but its filename.
+
+    Rendering `- **basic.py**: basic.py` reads as a bug and spends tokens
+    saying nothing, so the title is omitted when it adds nothing.
+    """
+    skill = provider._find_skill_by_slug("my-skill")
+    for resource in skill.resources.values():
+        if isinstance(resource, SkillExampleResource):
+            resource.title = resource.filename
+            resource.description = ""
+
+    result = await SkillIntegrationProvider.load_skill_instructions(
+        provider, skill_slug="my-skill", agent=_agent_ref(),
+    )
+    listing = result.split("## Available Code Examples")[-1]
+    assert "- **basic.md**" in listing
+    assert "basic.md**: basic.md" not in listing
 
 
 async def test_load_skill_instructions_dedupes_per_session(provider):
