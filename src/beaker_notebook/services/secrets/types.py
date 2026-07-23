@@ -1,7 +1,9 @@
 import os
-
-from dataclasses import dataclass, field, is_dataclass, asdict
+import weakref
+from dataclasses import dataclass, InitVar, field, is_dataclass, asdict
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, TypeAlias, Type, TypeIs
+
+from traitlets.config import Application, Configurable
 
 from beaker_notebook.services.auth import BeakerUser
 from beaker_notebook.services.secrets.policies import BasePolicy, Allow, Redact, Remove
@@ -24,9 +26,9 @@ class BaseSecret:
     subkernel_environment_policy: PolicyRef
 
     def __post_init__(self, *args, **kwargs):
-        for name in self.__dataclass_fields__:
-            value = getattr(self, name)
-            if isinstance(value, type) and issubclass(value, BasePolicy):
+        for name, field_info in self.__dataclass_fields__.items():
+            if field_info.type == PolicyRef:
+                value = getattr(self, name)
                 setattr(self, name, value())
 
     def get_value(self) -> Optional[str]:
@@ -82,6 +84,43 @@ class SkillSecret(BaseSecret):
         return os.environ.get(self.name)
 
 
+@dataclass(kw_only=True)
+class AppTraitSecret(BaseSecret):
+    subkernel_message_policy: PolicyRef = Remove
+    ui_message_policy: PolicyRef = Redact
+    agent_message_policy: PolicyRef = Redact
+    beaker_kernel_environment_policy: PolicyRef = Allow
+    subkernel_environment_policy: PolicyRef = Remove
+
+    configurable: InitVar["Optional[Configurable]"] = field(default=None, repr=False, compare=False)
+    _configurable_ref: "weakref.ref[Configurable] | None" = field(default=None, init=False, repr=False, compare=False)
+    trait_name: str
+
+    def __post_init__(self, configurable=None):
+        if configurable is not None:
+            self._configurable_ref = weakref.ref(configurable)
+        super().__post_init__()
+        if configurable:
+            # We only need to validate when we have something to validate against
+            self._validate(configurable)
+
+    def _validate(self, configurable: Configurable):
+        from traitlets import Unicode, Bytes
+
+        traits = configurable.trait_names()
+        if self.trait_name not in traits:
+            raise ValueError(f"{self.__class__.__name__}: Class {configurable.__class__.__name__} does not contain a trait named '{self.trait_name}'")
+        trait = configurable.traits().get(self.trait_name)
+        if not isinstance(trait, (Unicode, Bytes)):
+            raise ValueError(f"{self.__class__.__name__} targeted traits should point to a string (Unicode or Bytes), not {trait.__class__.__name__}")
+
+    def get_value(self):
+        configurable = self._configurable_ref and self._configurable_ref()
+        if configurable is None:
+            raise ValueError(f"<{self.__class__.__name__}: name='{self.name}'> is not available.")
+        return getattr(configurable, self.trait_name, None)
+
+
 def is_env_secret(secret: BaseSecret) -> TypeIs[EnvironmentSecret]:
     return isinstance(secret, EnvironmentSecret)
 
@@ -91,3 +130,5 @@ def is_system_env_secret(secret: BaseSecret) -> TypeIs[SystemEnvironmentSecret]:
 def is_user_env_secret(secret: BaseSecret) -> TypeIs[UserEnvironmentSecret]:
     return isinstance(secret, UserEnvironmentSecret)
 
+def is_app_trait_secret(secret: BaseSecret) -> TypeIs[AppTraitSecret]:
+    return isinstance(secret, AppTraitSecret)

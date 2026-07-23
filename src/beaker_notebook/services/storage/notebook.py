@@ -89,7 +89,7 @@ class BaseNotebookManager(Configurable):
 class FileNotebookManager(BaseNotebookManager):
 
     contents_manager_class = traitlets.Type(
-        default_value=None,
+        default_value="jupyter_server.services.contents.filemanager.AsyncFileContentsManager",
         klass=ContentsManager,
         allow_none=True,
         config=True,
