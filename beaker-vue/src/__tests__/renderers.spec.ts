@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import type { PartialJSONObject } from '@lumino/coreutils';
-import { LatexRenderer } from '../renderers';
+import { LatexRenderer, TableRenderer } from '../renderers';
 
 // `text/latex` output is delivered as a raw TeX string; the renderer signature
 // types it as PartialJSONObject, so cast at the call site in these tests.
 const render = (data: string) =>
     LatexRenderer.render('text/latex', data as unknown as PartialJSONObject, {});
+
+describe('TableRenderer', () => {
+    it('registers the standard TSV MIME type', () => {
+        expect(TableRenderer.mimetypes).toContain('text/tab-separated-values');
+    });
+});
 
 describe('LatexRenderer', () => {
     it('typesets a display-delimited LaTeX string with KaTeX', () => {

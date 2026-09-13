@@ -90,6 +90,7 @@ export const TableRenderer: BeakerMimeRenderer = {
     mimetypes: [
         "text/csv",
         "text/tsv",
+        "text/tab-separated-values",
         "application/vnd.ms-excel",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     ],

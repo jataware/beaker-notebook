@@ -77,7 +77,7 @@ const processSeparatedValues = (data, rowSeparator, valueSeparator): DataTablePa
     const rows: string[] = data.split(rowSeparator);
     const header: string[] = rows[0].split(valueSeparator);
     const values = rows.slice(1).map((row) =>
-        row.split(',').reduce((combined, entry, index) =>
+        row.split(valueSeparator).reduce((combined, entry, index) =>
             ({[header[index]]: entry.trim(), ...combined}), {}))
     return {
         columns: header,
@@ -98,8 +98,8 @@ const processedData = computed<DataTablePayload | null>(() => {
     if (props.mimeType === 'text/csv') {
         return processSeparatedValues(props?.data, '\n', ',');
     }
-    else if (props.mimeType === 'text/tsv') {
-        return processSeparatedValues(props?.data, '\t', ',');
+    else if (props.mimeType === 'text/tsv' || props.mimeType === 'text/tab-separated-values') {
+        return processSeparatedValues(props?.data, '\n', '\t');
     }
     return props.data
 })

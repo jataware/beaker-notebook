@@ -104,7 +104,7 @@ class BeakerSessionManager(SessionManager):
 
         return env
 
-    async def start_kernel_for_session(self, session_id, path, name, type, kernel_name):
+    async def start_kernel_for_session(self, session_id, path, name, type, kernel_name, kernel_id=None):
         """Start a kernel for a session with user-specific path and permissions.
 
         For Beaker kernels, sets up user-specific home directories and proper

@@ -125,7 +125,7 @@ const mimeCategory = (mimetype: string): PreviewCategory => {
     if (mimetype === 'text/csv') {
         return 'csv'
     }
-    if (mimetype === 'text/tsv') {
+    if (mimetype === 'text/tsv' || mimetype === 'text/tab-separated-values') {
         return 'tsv'
     }
     if (mimetype === 'application/vnd.ms-excel' ||
@@ -159,6 +159,9 @@ const mimetypeConfig: {[key in string]: PreviewConfig} = {
         hasRawToggle: true
     },
     "text/tsv": {
+        hasRawToggle: true
+    },
+    "text/tab-separated-values": {
         hasRawToggle: true
     }
 }
