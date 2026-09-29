@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+import yaml
 
 from beaker_notebook.lib.integrations.skill import (
     SkillIntegrationProvider,
@@ -57,6 +58,17 @@ FULL_SKILL_MD = textwrap.dedent("""\
     Also see `scripts/run.py` for the main entrypoint.
 
     External link: [docs](https://example.com/docs) should be ignored.
+""")
+
+IDC_SKILL_MD = textwrap.dedent("""\
+    name: imaging-data-commons
+    description: Search and access imaging data.
+    metadata:
+      idc-index: "0.12.5"
+    ---
+    # Instructions
+
+    See [the IDC guide](references/idc-guide.md).
 """)
 
 
@@ -160,6 +172,12 @@ class TestParseSkillMd:
         assert fm["metadata"]["author"] == "test-org"
         assert fm["metadata"]["version"] == "2.0"
 
+    def test_single_terminating_delimiter_frontmatter(self):
+        fm, body = parse_skill_md(IDC_SKILL_MD)
+        assert fm["name"] == "imaging-data-commons"
+        assert fm["metadata"]["idc-index"] == "0.12.5"
+        assert body == "# Instructions\n\nSee [the IDC guide](references/idc-guide.md)."
+
     def test_missing_frontmatter_raises(self):
         with pytest.raises(ValueError, match="YAML frontmatter"):
             parse_skill_md("No frontmatter here")
@@ -167,6 +185,10 @@ class TestParseSkillMd:
     def test_non_dict_frontmatter_raises(self):
         with pytest.raises(ValueError, match="YAML mapping"):
             parse_skill_md("---\n- just a list\n---\nBody")
+
+    def test_invalid_yaml_frontmatter_raises(self):
+        with pytest.raises(yaml.YAMLError):
+            parse_skill_md("name: [unclosed\n---\nBody")
 
 
 # ---------------------------------------------------------------------------

@@ -163,15 +163,30 @@ calling `load_skill_examples(skill_slug={skill_slug!r}, filenames=[...])` again 
 
 
 def parse_skill_md(content: str) -> tuple[dict, str]:
-    """Parse SKILL.md content into (frontmatter_dict, markdown_body)."""
-    parts = content.split("---", 2)
-    if len(parts) < 3:
+    """Parse SKILL.md content into (frontmatter_dict, markdown_body).
+
+    Frontmatter can be enclosed by opening and closing ``---`` delimiters, or
+    use a single terminating delimiter after the YAML metadata.
+    """
+    delimiter_pattern = re.compile(r"^---[ \t]*\r?$", re.MULTILINE)
+    first_delimiter = delimiter_pattern.search(content)
+    if first_delimiter is None:
         raise ValueError("SKILL.md must contain YAML frontmatter delimited by ---")
-    frontmatter = yaml.safe_load(parts[1])
+
+    if content[:first_delimiter.start()].strip():
+        frontmatter_content = content[:first_delimiter.start()]
+        body = content[first_delimiter.end():]
+    else:
+        second_delimiter = delimiter_pattern.search(content, first_delimiter.end())
+        if second_delimiter is None:
+            raise ValueError("SKILL.md must contain YAML frontmatter delimited by ---")
+        frontmatter_content = content[first_delimiter.end():second_delimiter.start()]
+        body = content[second_delimiter.end():]
+
+    frontmatter = yaml.safe_load(frontmatter_content)
     if not isinstance(frontmatter, dict):
         raise ValueError("SKILL.md frontmatter must be a YAML mapping")
-    body = parts[2].strip()
-    return frontmatter, body
+    return frontmatter, body.strip()
 
 
 #: Path prefixes, relative to the skill root, whose contents are examples rather
