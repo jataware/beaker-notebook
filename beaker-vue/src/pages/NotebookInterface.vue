@@ -107,7 +107,7 @@
                         @preview-file="(file, mimetype) => {
                             previewedFile = {url: file, mimetype: mimetype};
                             previewVisible = true;
-                            rightSideMenuRef.selectPanel('file-contents');
+                            rightSideMenuRef.selectPanel('file-contents', true);
                         }"
                     />
                 </SideMenuPanel>
@@ -158,7 +158,7 @@
                     <WorkflowOutputPanel>
                     </WorkflowOutputPanel>
                 </SideMenuPanel>
-                <SideMenuPanel label="Preview" icon="pi pi-eye" no-overflow>
+                <SideMenuPanel id="preview" label="Preview" icon="pi pi-eye" no-overflow>
                     <PreviewPanel :previewData="contextPreviewData"/>
                 </SideMenuPanel>
                 <SideMenuPanel
@@ -187,7 +187,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeMount, provide } from 'vue';
+import { computed, ref, watch, onBeforeMount, provide, nextTick } from 'vue';
 import Button from "primevue/button";
 import BaseInterface from './BaseInterface.vue';
 import BeakerAgentQuery from '../components/agent/BeakerAgentQuery.vue';
@@ -267,6 +267,29 @@ const {
 } = useNotebookInterface();
 
 const uiStore = useUIStore();
+
+interface RightPanelPreference {
+    open?: boolean;
+    panel?: string;
+    force?: boolean;
+}
+
+const applyContextRightPanelPreference = async (activeContext: any) => {
+    const preference: RightPanelPreference | undefined = activeContext?.config?.ui?.right_panel;
+    if (!preference?.open || (!preference.force && uiStore.rightMenuState.userModified)) {
+        return;
+    }
+
+    await nextTick();
+    // Panel values are SideMenuPanel IDs. "preview" is the default panel.
+    rightSideMenuRef.value?.selectPanel(preference.panel ?? 'preview', false);
+};
+
+watch(
+    () => beakerSession.value?.activeContext,
+    applyContextRightPanelPreference,
+);
+
 beakerApp.setPage("notebook");
 
 const urlParams = new URLSearchParams(window.location.search);

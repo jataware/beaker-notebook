@@ -256,6 +256,7 @@ const moveDragHandle = (evt: MouseEvent) => {
 }
 
 const endDragHandle = (evt: MouseEvent) => {
+    state.value.userModified = true;
     document.removeEventListener("mousemove", moveDragHandle);
     document.removeEventListener("mouseup", endDragHandle);
     // Normalize position to closes full pixel. Prevent display errors for partial pixel sizes.
@@ -272,6 +273,7 @@ const endDragHandle = (evt: MouseEvent) => {
 };
 
 const handleButtonClick = (index: number) => {
+    state.value.userModified = true;
     if (state.value.selectedTabIndex !== index) {
         state.value.selectedTabIndex = index;
         emit("panel-show");
@@ -289,14 +291,24 @@ const resized = () => {
     });
 }
 
-const hidePanel = () => {
+const hidePanel = (userModified = false) => {
+    if (userModified) {
+        state.value.userModified = true;
+    }
     state.value.selectedTabIndex = null;
 }
 
-const selectPanel = (id_or_label: string) => {
-    state.value.selectedTabIndex = panels.value.findIndex(
+const selectPanel = (id_or_label: string, userModified = false) => {
+    const panelIndex = panels.value.findIndex(
         (panel) => (panel.props?.label === id_or_label || panel.props?.id === id_or_label)
     );
+    if (panelIndex === -1) {
+        return;
+    }
+    if (userModified) {
+        state.value.userModified = true;
+    }
+    state.value.selectedTabIndex = panelIndex;
     if (minimizeIndicator.value) {
         minimizeIndicator.value = false;
     }
@@ -355,9 +367,11 @@ defineExpose({
 export interface SideMenuState {
     selectedTabIndex: number | null;
     panelWidth?: number | null;
+    userModified?: boolean;
 }
 export const SideMenuStateDefaults: SideMenuState = {
     selectedTabIndex: null,
+    userModified: false,
 }
 
 </script>

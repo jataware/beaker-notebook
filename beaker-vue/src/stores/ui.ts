@@ -8,7 +8,11 @@ import { type SideMenuState, SideMenuStateDefaults } from '@/components/sidemenu
  */
 const LocalStoragePrefix = "beaker-notebook:ui:";
 
-const uiState = <T>(slug: string, defaultValue: T): Ref<T> => {
+const uiState = <T>(
+    slug: string,
+    defaultValue: T,
+    migrate?: (value: T) => T,
+): Ref<T> => {
     const localStorageKey = (slug: string): string => {
         return `${LocalStoragePrefix}${slug}`;
     }
@@ -19,7 +23,8 @@ const uiState = <T>(slug: string, defaultValue: T): Ref<T> => {
         }
         else {
             try {
-                return JSON.parse(rawValue);
+                const value = JSON.parse(rawValue) as T;
+                return migrate ? migrate(value) : value;
             }
             catch {
                 return structuredClone(defaultValue);
@@ -45,7 +50,12 @@ const uiState = <T>(slug: string, defaultValue: T): Ref<T> => {
 
 export const useUIStore = defineStore('beaker-ui', () => {
     const leftMenuState = uiState<SideMenuState>("leftMenuState", SideMenuStateDefaults);
-    const rightMenuState = uiState<SideMenuState>("rightMenuState", SideMenuStateDefaults);
+    const rightMenuState = uiState<SideMenuState>(
+        "rightMenuState",
+        SideMenuStateDefaults,
+        // Existing saved state reflects a user choice, before userModified was tracked.
+        (value) => ({...value, userModified: value.userModified ?? true}),
+    );
 
     return {
         leftMenuState,

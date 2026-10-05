@@ -88,10 +88,17 @@ class BeakerKernel(KernelProxyManager):
         event_loop = asyncio.get_event_loop()
         logger.debug(f"About to start default context: {context_args}")
 
-        context_task = event_loop.create_task(self.start_default_context(**context_args))
+        CONTEXT_STARTUP_TIMEOUT_SECS = 30
+        context_task = event_loop.create_task(
+            asyncio.wait_for(
+                self.start_default_context(**context_args),
+                timeout=CONTEXT_STARTUP_TIMEOUT_SECS,
+            )
+        )
         context_task.add_done_callback(self.startup_error_callback)
 
     def startup_error_callback(self, task: asyncio.Task):
+        logger.debug(f"Callback while initializing context. Information below.\n{task=}")
         try:
             exception = task.exception()
         except (asyncio.CancelledError, asyncio.InvalidStateError) as err:
@@ -110,6 +117,8 @@ class BeakerKernel(KernelProxyManager):
                 event_loop = asyncio.get_running_loop()
                 cleanup_task = event_loop.create_task(self.context.cleanup())
                 cleanup_task.add_done_callback(log_error)
+        else:
+            logger.debug(f"No error thrown by task")
 
     async def start_default_context(self, default_context=None, default_context_payload=None, **options):
         logger.debug("starting default context!")
@@ -479,8 +488,7 @@ class BeakerKernel(KernelProxyManager):
         subkernel_ref = subkernel
         context_cls: type[BeakerContext]|None = AVAILABLE_CONTEXTS.get(context_name, None)
         if not context_cls:
-            # TODO: Should we return an error if the requested context isn't available?
-            return False
+            raise RuntimeError(f"Context '{context_name}' is available. The available contexts are: ['{"', '".join(AVAILABLE_CONTEXTS.keys())}]")
 
         # Cleanup the old context, then create and setup the new context
         if self.context:

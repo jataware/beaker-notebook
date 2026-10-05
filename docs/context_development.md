@@ -27,6 +27,26 @@ External applications (such as a custom front-end) set a context by sending a `c
 
 The list of available subkernels and contexts depends on what has been installed. The contents of `context_info` are defined by the context itself. The Beaker service exposes a discovery endpoint at `http://{jupyter_url}/beaker/contexts/` that returns the installed contexts and which subkernels each supports.
 
+### Notebook right-panel preference
+
+A context payload can set the initial notebook right-panel state:
+
+```json
+{
+  "ui": {
+    "right_panel": {
+      "open": true,
+      "panel": "preview",
+      "force": false
+    }
+  }
+}
+```
+
+`panel` is a right-panel ID. The built-in IDs include `preview`, `file-contents`, `media`, `kernel-state`, `kernel-logs`, and `workflow-output` when a workflow is attached. If omitted, it defaults to `preview`.
+
+With `force: false` (the default), Beaker applies the preference only until the user changes the panel. With `force: true`, Beaker selects and opens the panel whenever this context becomes active.
+
 ## Tool toggling
 
 Tools on the agent can be toggled individually using either an environment variable or a class attribute. To toggle a tool, create an attribute on your context class or set a variable in your environment named `TOOL_ENABLED_{YOUR_TOOL_NAME_IN_UPPER_CASE}`. `True` enables the tool; `False` disables it. If both are set, the class attribute wins. For example, the environment variable `TOOL_ENABLED_ASK_USER=false` is overridden by:
