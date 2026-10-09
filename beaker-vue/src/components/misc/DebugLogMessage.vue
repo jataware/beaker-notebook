@@ -38,8 +38,9 @@
                         readonly
                         :modelValue="logEntry?.body?.output?.trim()"
                         class="debug-code-display"
-                        v-else
+                        v-else-if="logEntry?.body?.output?.trim().length <= 1500"
                     />
+                    <p v-else>Tool output was significantly long and has been hidden by default - view additional details below to see the raw output.</p>
                 </span>
                 <span v-if="logEntry?.type === 'agent_react_final_answer'">
                     {{ logEntry?.body?.final_answer?.response }}
