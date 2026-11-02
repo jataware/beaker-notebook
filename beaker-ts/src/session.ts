@@ -557,6 +557,10 @@ export class BeakerSession {
         return this._sessionContext.path;
     }
 
+    get serverSettings(): ServerConnection.ISettings {
+        return this._serverSettings;
+    }
+
     private _initialized: Promise<void>;
     private _chatHistory?: ChatHistory;
     private _contextInfo?: any;  // TODO: Properly type this

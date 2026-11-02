@@ -45,6 +45,11 @@ const baseHost = URLExt.parse(config.baseUrl).host;
 config.pathPrefix = pathPrefix;
 config.baseUrl = baseUrl;
 config.baseHost = baseHost;
+if (config.wsUrl == null) {
+  const wsUrl = new URL(baseUrl, window.location.href);
+  wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  config.wsUrl = wsUrl.href;
+}
 
 const app = createApp(App, {config});
 const router = createRouter(config);

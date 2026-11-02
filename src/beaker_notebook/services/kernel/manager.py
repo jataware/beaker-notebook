@@ -94,7 +94,7 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             }
             if app_context_dict:
                 kwargs["context"].update(**app_context_dict)
-        kwargs.setdefault("server", self.app.public_url)
+        kwargs.setdefault("server", self.app.connection_url)
 
         super().write_connection_file(
             **kwargs

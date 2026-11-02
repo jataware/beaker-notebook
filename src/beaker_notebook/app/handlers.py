@@ -299,21 +299,13 @@ class ConfigHandler(JupyterHandler):
         base_path = beakerapp.base_url or "/"
 
         base_url = os.environ.get("JUPYTER_BASE_URL", f"{self.request.protocol}://{self.request.host}{base_path}")
-
-        base_scheme = urllib.parse.urlparse(base_url).scheme
-        if base_scheme.endswith("s"):
-            ws_scheme = "wss"
-        else:
-            ws_scheme = "ws"
-        ws_url = base_url.replace(base_scheme, ws_scheme)
-
         beaker_app: BeakerApp|None = self.config.get("app", None)
         token = config.jupyter_token or self.identity_provider.token
 
         config_data = {
             "appUrl": os.environ.get("APP_URL", base_url),
             "baseUrl": base_url,
-            "wsUrl": os.environ.get("JUPYTER_WS_URL", ws_url),
+            "wsUrl": os.environ.get("JUPYTER_WS_URL", None),
             "token": token,
             "config_type": config.config_type,
             "defaultKernel": self.kernel_spec_manager.get_default_kernel_name(),

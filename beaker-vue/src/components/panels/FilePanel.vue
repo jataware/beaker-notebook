@@ -129,15 +129,12 @@ import DataTable from 'primevue/datatable';
 import Dialog from 'primevue/dialog';
 import * as cookie from 'cookie';
 import { filesize } from 'filesize';
-import { Time } from '@jupyterlab/coreutils';
+import { Time, URLExt  } from '@jupyterlab/coreutils';
 import scroll from 'scroll-into-view-if-needed'
-
-const previewFile = (path, mimetype) => {
-  emit("preview-file", `/files/${path}`, mimetype)
-}
 
 import { ContentsManager, Contents } from '@jupyterlab/services';
 
+const session = inject<any>('session');
 const curDir = ref<string>('.');
 
 const emit = defineEmits([
@@ -152,7 +149,7 @@ const props = defineProps<{
   hideUploads?: boolean
 }>()
 
-const contentManager = new ContentsManager({});
+const contentManager = new ContentsManager({serverSettings: session.serverSettings});
 
 const cookies = cookie.parse(document.cookie);
 const xsrfCookie = cookies._xsrf;
@@ -169,6 +166,10 @@ const largeFilePreviewDialogVisible = ref<boolean>()
 // in bytes - 10 MB
 const largeFileWarningSize = 10 * 1000000;
 const largeFileSizeUILabel = ref<string>();
+
+const previewFile = (path, mimetype) => {
+  emit("preview-file", URLExt.join(session?.serverSettings?.baseUrl, `files/${path}`), mimetype)
+}
 
 const formatDate = (dateString) => {
   return dateString !== null ? Time.formatHuman(dateString) : '-';

@@ -185,7 +185,8 @@ class BaseBeakerApp(ServerApp):
 
     def initialize(self, argv = None, find_extensions = False, new_httpserver = True, starter_extension = None, **kwargs):
         url_prefix = os.environ.get("BEAKER_SERVER_PREFIX", "").rstrip("/")
-        self.base_url = url_prefix
+        if url_prefix:
+            self.base_url = url_prefix
 
         # Register Beaker-branded error templates ahead of Jupyter's defaults so that
         # 404/500/generic error pages match the Beaker interface instead of the stock
@@ -318,18 +319,6 @@ class BaseBeakerApp(ServerApp):
     @property
     def beaker_config(self):
         return self.config
-
-    @property
-    def public_url(self):
-        return f"http://{self.ip}:{self.port}/"
-
-    @property
-    def local_url(self):
-        return self.public_url
-
-    @property
-    def display_url(self):
-        return f"    {self.public_url}"
 
     def _get_urlparts(self, path: str | None = None, include_token: bool = False, **kwargs) -> urllib.parse.ParseResult:
         # Always return urls without tokens
