@@ -76,6 +76,7 @@
                     v-if="Object.keys(integrations).length > 0"
                 >
                     <IntegrationPanel
+                        :sessionId="sessionId"
                         v-model="integrations"
                     >
                     </IntegrationPanel>
@@ -179,6 +180,7 @@ import MediaPanel from '../components/panels/MediaPanel.vue';
 import DebugPanel from '../components/panels/DebugPanel.vue';
 import AgentActivityPane from '../components/chat-interface/AgentActivityPane.vue';
 import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
+import { useSiteSession } from '../composables/useSiteSession';
 import { listIntegrations, type IntegrationMap } from '@/util/integration';
 
 const beakerInterfaceRef = ref();
@@ -316,10 +318,6 @@ const headerNav = computed((): NavOption[] => {
 const loadNotebook = (notebookJSON: any) => {
     beakerSession.value?.session.loadNotebook(notebookJSON);
 }
-const urlParams = new URLSearchParams(window.location.search);
-
-const sessionId = urlParams.has("session") ? urlParams.get("session") : "chat_dev_session";
-
 const props = defineProps([
     "config",
     "connectionSettings",
@@ -328,6 +326,9 @@ const props = defineProps([
     "defaultKernel",
     "renderers",
 ]);
+
+const siteSession = useSiteSession('chat_dev_session');
+const sessionId = props.sessionId || siteSession.sessionId;
 
 const renderers = [
     ...standardRendererFactories.map((factory: any) => new JupyterMimeRenderer(factory)).map(wrapJupyterRenderer),

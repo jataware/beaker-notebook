@@ -97,6 +97,7 @@
                     id="integrations" label="Integrations" icon="pi pi-database"
                 >
                     <IntegrationPanel
+                        :sessionId="sessionId"
                         v-model="integrations.integrations"
                         :read-only="readOnly"
                         @upload="handleSkillUpload"
@@ -196,6 +197,7 @@ import MCPIntegrationViewer from '../components/integrations/MCPIntegrationViewe
 import MCPIntegrationEditor from '../components/integrations/MCPIntegrationEditor.vue';
 import MCPToolsPanel from '../components/integrations/MCPToolsPanel.vue';
 import IntegrationPanel from '../components/integrations/IntegrationPanel.vue';
+import { useSiteSession } from '../composables/useSiteSession';
 import {
     listResources,
     listIntegrations,
@@ -235,7 +237,6 @@ const openResourceInRightPanel = (resourceId: string) => {
 const previewVisible = ref<boolean>(false);
 
 const urlParams = new URLSearchParams(window.location.search);
-const sessionId = urlParams.has("session") ? urlParams.get("session") : "notebook_dev_session";
 const selectedParam = urlParams.has("selected") ? urlParams.get("selected") : undefined;
 
 const props = defineProps([
@@ -246,6 +247,9 @@ const props = defineProps([
     "defaultKernel",
     "renderers",
 ]);
+
+const siteSession = useSiteSession('notebook_dev_session');
+const sessionId = props.sessionId || siteSession.sessionId;
 
 const renderers: IMimeRenderer<BeakerRenderOutput>[] = [
     ...standardRendererFactories.map((factory: any) => new JupyterMimeRenderer(factory)).map(wrapJupyterRenderer),

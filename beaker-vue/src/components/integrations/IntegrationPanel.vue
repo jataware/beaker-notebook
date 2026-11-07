@@ -29,7 +29,7 @@
                     width: 100%;
             ">
                 <RouterLink
-                    :to="(route.name == 'integrations' ? `/?session=${sessionId}` : `/integrations?session=${sessionId}`)"
+                    :to="{ path: route.name == 'integrations' ? '/' : '/integrations', query: sessionQuery }"
                 >
                     <Button
                         :label="(route.name == 'integrations' ? 'Back to session' : 'Manage Integrations') "
@@ -37,7 +37,7 @@
                 </RouterLink>
                 <span style="flex: 1"></span>
                 <RouterLink
-                    :to="`/integrations?selected=new${sessionIdParam}`"
+                    :to="{ path: '/integrations', query: { ...sessionQuery, selected: 'new' } }"
                     aria-label="New Integration"
                 >
                     <Button
@@ -115,7 +115,7 @@
 
                                 <span v-if="expandedIntegration === integration.uuid">
                                     <RouterLink
-                                        :to="`/integrations?selected=${integration?.uuid}${sessionIdParam}`"
+                                        :to="{ path: '/integrations', query: { ...sessionQuery, selected: integration?.uuid } }"
                                         :aria-label="(isEditableType(integration) ? 'Edit' : 'View') + ' ' + integration?.name"
                                     >
                                         <Button
@@ -169,6 +169,7 @@ import { renderMarkdown } from "../../util/markdown";
 import { type BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { type IntegrationMap, type Integration, type IntegrationProviders, listIntegrations, getIntegrationProviderType, getIntegrationIcon, getIntegrationTypeLabel, isContextProvidedIntegration } from "@/util/integration";
 import { useRoute, RouterLink } from "vue-router";
+import { useSiteSession } from "@/composables/useSiteSession";
 import { read } from "fs";
 
 const route = useRoute();
@@ -176,6 +177,7 @@ const searchText = ref(undefined);
 
 interface PropTypes {
     readOnly?: boolean;
+    sessionId?: string;
 }
 
 const props = withDefaults(defineProps<PropTypes>(), {
@@ -225,9 +227,10 @@ const onDrop = (event: DragEvent) => {
     }
 };
 
-const urlParams = new URLSearchParams(window.location.search);
-const sessionId = urlParams.get("session") ?? "";
-const sessionIdParam = sessionId ? `&session=${sessionId}` : "";
+const siteSession = useSiteSession('');
+const sessionQuery = computed(() =>
+    siteSession.sessionInPath ? {} : { session: props.sessionId || siteSession.sessionId || undefined },
+);
 
 
 const sortIntegrations = (integrations: Integration[]) =>

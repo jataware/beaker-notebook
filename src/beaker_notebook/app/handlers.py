@@ -15,7 +15,7 @@ from types import UnionType
 from jupyter_server.auth.decorator import authorized, allow_unauthenticated
 from jupyter_server.base.handlers import JupyterHandler
 from jupyterlab_server import LabServerApp
-from tornado import web, httputil
+from tornado import web
 from tornado.web import StaticFileHandler, RequestHandler, HTTPError
 
 from beaker_notebook.lib.autodiscovery import autodiscover
@@ -88,19 +88,21 @@ class PageHandler(JupyterHandler, ):
         if not (index_path.exists() and index_path.is_file()):
             raise web.HTTPError(404, "File not found")
 
-        session_id = None
-        # If no session is provided on a root request, generate a session uuid and redirect to it
-        if base_url and base_url.startswith('/session/'):
-            session_id = base_url.replace('/session/', '')
+        session_match = re.search(r"(?:^|/)session/([^/]+)$", base_url)
+        session_in_path = session_match is not None
+        session_id = urllib.parse.unquote(session_match.group(1)) if session_match else None
+        query = urllib.parse.parse_qsl(self.request.query, keep_blank_values=True)
+        if session_in_path and any(key == "session" for key, _ in query):
+            query = [(key, value) for key, value in query if key != "session"]
+            query_string = urllib.parse.urlencode(query)
+            return self.redirect(self.request.path + (f"?{query_string}" if query_string else ""))
         if not session_id:
             session_id = self.get_query_argument("session", None)
         if not session_id:
             session_id = str(uuid.uuid4())
-            to_url = httputil.url_concat(
-                f"{'/' if path.startswith('/') else '' }{path}",
-                {"session": session_id},
-            )
-            return self.redirect(to_url, permanent=False)
+            query = [(key, value) for key, value in query if key != "session"]
+            query.append(("session", session_id))
+            return self.redirect(f"{self.request.path}?{urllib.parse.urlencode(query)}")
 
         # Ensure a proper xsrf cookie value is set.
         cookie_name = self.settings.get("xsrf_cookie_name", "_xsrf")
@@ -117,6 +119,8 @@ class PageHandler(JupyterHandler, ):
         # Build configuration object
         config = {
             'pathPrefix': base_url,
+            'sessionId': session_id,
+            'sessionInPath': session_in_path,
             'username': self.current_user.name if self.current_user else None,
             '_xsrf': self.xsrf_token.decode(),
         }

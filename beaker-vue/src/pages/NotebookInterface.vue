@@ -6,7 +6,7 @@
         ref="beakerInterfaceRef"
         :connectionSettings="props.config"
         defaultKernel="beaker_kernel"
-        :sessionId="sessionIdFromProps || sessionIdFromUrl"
+        :sessionId="effectiveSessionId"
         :renderers="renderersFromProps || defaultRenderers"
         :savefile="saveAsFilename"
         @iopub-msg="iopubMessageHandler"
@@ -119,6 +119,7 @@
                     v-if="Object.keys(integrations).length > 0"
                 >
                     <IntegrationPanel
+                        :sessionId="effectiveSessionId"
                         v-model="integrations"
                         @upload="handleIntegrationUpload"
                     >
@@ -216,6 +217,7 @@ import BeakerRawCell from '../components/cell/BeakerRawCell.vue';
 import BeakerAgentCell from '../components/cell/BeakerAgentCell.vue';
 
 import { useIntegrationUpload } from '../composables/useIntegrationUpload';
+import { useSiteSession } from '../composables/useSiteSession';
 import { useNotebookInterface } from '../composables/useNotebookInterface';
 import { useQueryCellFlattening } from '../composables/useQueryCellFlattening';
 import { listIntegrations, type IntegrationMap } from '../util/integration';
@@ -292,12 +294,11 @@ watch(
 
 beakerApp.setPage("notebook");
 
-const urlParams = new URLSearchParams(window.location.search);
-const sessionIdFromUrl = urlParams.has("session") ? urlParams.get("session") : "nextgen_notebook_dev_session";
-const sessionIdFromProps = computed(() => props.sessionId);
+const siteSession = useSiteSession('nextgen_notebook_dev_session');
+const effectiveSessionId = computed(() => props.sessionId || siteSession.sessionId);
 
 const { handleUpload: handleIntegrationUpload } = useIntegrationUpload({
-    sessionId: () => sessionIdFromProps.value || sessionIdFromUrl,
+    sessionId: effectiveSessionId,
 });
 const renderersFromProps = computed(() => props.renderers);
 
@@ -409,7 +410,7 @@ const previewedFile = ref<FilePreview>();
 
 watch(
     [() => beakerSession?.value?.activeContext, () => beakerSession?.value?.session.kernelInfo],
-    async () => {integrations.value = await listIntegrations(sessionIdFromUrl)}
+    async () => {integrations.value = await listIntegrations(effectiveSessionId.value)}
 );
 
 </script>
