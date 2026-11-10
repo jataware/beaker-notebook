@@ -40,6 +40,18 @@ async def test_session_in_prefixed_base_url(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/"])
+async def test_session_extracted_from_request_path(tmp_path, suffix):
+    handler = FakePageHandler(tmp_path, "/beaker/", f"/beaker/session/path%20id{suffix}")
+    await PageHandler.get(handler, "")
+    html = handler.write.call_args.args[0]
+    config = json.loads(html.split('type="application/json">')[1].split('</script>')[0])
+    assert config["sessionId"] == "path id"
+    assert config["sessionInPath"] is True
+    handler.redirect.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_path_session_removes_conflicting_query(tmp_path):
     handler = FakePageHandler(
         tmp_path, "/beaker/session/path-id/", "/beaker/session/path-id/integrations?session=other&selected=foo"

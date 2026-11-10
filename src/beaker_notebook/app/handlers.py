@@ -88,7 +88,7 @@ class PageHandler(JupyterHandler, ):
         if not (index_path.exists() and index_path.is_file()):
             raise web.HTTPError(404, "File not found")
 
-        session_match = re.search(r"(?:^|/)session/([^/]+)$", base_url)
+        session_match = re.search(r"(?:^|/)session/([^/]+)/?", self.request.path)
         session_in_path = session_match is not None
         session_id = urllib.parse.unquote(session_match.group(1)) if session_match else None
         query = urllib.parse.parse_qsl(self.request.query, keep_blank_values=True)
