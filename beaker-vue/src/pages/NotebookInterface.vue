@@ -410,7 +410,7 @@ const previewedFile = ref<FilePreview>();
 
 watch(
     [() => beakerSession?.value?.activeContext, () => beakerSession?.value?.session.kernelInfo],
-    async () => {integrations.value = await listIntegrations(effectiveSessionId.value)}
+    async () => { integrations.value = await listIntegrations(effectiveSessionId.value); }
 );
 
 </script>

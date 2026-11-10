@@ -196,14 +196,14 @@ async function integrationApiWrapper<T>(
     return json as T;
 }
 
-export const getIntegrationProviderType = (integration: Integration) => integration.provider.split(":")[0];
+export const getIntegrationProviderType = (integration: Integration) => integration?.provider?.split(":")[0] ?? "";
 
 // MCP servers provided by a context are read-only and namespaced under a
 // "context-<slug>" corpus; locally-configured servers are user-editable.
 export const isContextProvidedIntegration = (integration: Integration): boolean =>
     (integration?.corpus ?? "").startsWith("context-");
 
-export const getIntegrationProviderSlug = (integration: Integration) => integration.provider.split(":")[1]
+export const getIntegrationProviderSlug = (integration: Integration) => integration?.provider?.split(":")[1];
 
 // True for hrefs that are relative paths within a skill (as opposed to
 // external URLs, mailto:, in-page anchors, or protocol-relative links).

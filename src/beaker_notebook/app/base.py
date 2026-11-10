@@ -113,6 +113,10 @@ class BaseBeakerApp(ServerApp):
         parts = [part.lower() for part in parts if part and part not in parts_to_remove]
         return "_".join(parts)
 
+    @traitlets.default("log_format")
+    def _default_log_format(self):
+        return "[%(name)s] %(levelname)s %(asctime)s.%(msecs)03d %(message)s"
+
     @traitlets.default("ui_path")
     def _default_ui_path(self):
         return os.path.join(os.path.dirname(__file__), "ui")
