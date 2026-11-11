@@ -266,7 +266,7 @@ class Page:
 
     def asdict(self, app: "BeakerApp"):
         bundle = app._template_bundle.clone()
-        stylesheet = get_stylesheet_url(app, self.stylesheet)
+        stylesheet = get_stylesheet_url(app, self.stylesheet) if self.stylesheet else None
         if self.template_bundle:
             bundle.update(**self.template_bundle)
             rendered_values = bundle.render()

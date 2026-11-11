@@ -1,3 +1,4 @@
+import { URLExt } from '@jupyterlab/coreutils';
 import { ref, capitalize } from 'vue';
 import type { Plugin, App, Ref } from 'vue';
 
@@ -29,7 +30,7 @@ export interface BeakerAppConfig {
 }
 
 export const BeakerAppConfigPlugin: Plugin = {
-    install(app: App, beakerAppConfig?: any) {
+    install(app: App, beakerAppConfig?: any, baseUrl: string = '/') {
         if (!beakerAppConfig) {
             // Fetch app config from globally defined instance or create fresh, empty version.
             beakerAppConfig = globalThis['beaker_app'] || {};
@@ -68,9 +69,14 @@ export const BeakerAppConfigPlugin: Plugin = {
             return assetName in assetValues;
         }
 
+        function resolveAssetUrl(url: string): string {
+            return url?.startsWith('/assets/') ? URLExt.join(baseUrl, url) : url;
+        }
+
         function getAsset(assetName: string): Asset {
             if (assetName in assetValues) {
-                return assetValues[assetName];
+                const asset = assetValues[assetName];
+                return { ...asset, src: resolveAssetUrl(asset.src) };
             }
             else {
                 return undefined;
@@ -95,12 +101,15 @@ export const BeakerAppConfigPlugin: Plugin = {
             if (pageStyle) {
                 setStylesheet(pageStyle, "beakerapp-page");
             }
+            else {
+                document.getElementById("beakerapp-page")?.remove();
+            }
         }
 
         const setStylesheet = (stylesheet: string | {[key: string]: string}, id: string) => {
             if (typeof(stylesheet) === "string") { // URL
                 const linkElement = document.getElementById(id) || document.createElement("link");
-                linkElement.setAttribute("href", stylesheet);
+                linkElement.setAttribute("href", resolveAssetUrl(stylesheet));
                 linkElement.setAttribute("rel", "stylesheet");
                 linkElement.setAttribute("id", id);
                 document.head.appendChild(linkElement);

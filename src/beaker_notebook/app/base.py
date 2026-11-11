@@ -226,14 +226,14 @@ class BaseBeakerApp(ServerApp):
         self.initialize_handlers()
 
     def initialize_handlers(self):
-        """Bypass initializing the default handler since we don't need to use the webserver, just the websockets."""
+        """Register Beaker handlers under the server's base URL."""
         register_handlers(self)
-        new_handlers = []
-        for handler in self.handlers:
-            pattern = url_path_join(self.base_url, handler[0])
-            new_handler = (pattern, *list(handler[1:]))
-            new_handlers.append(new_handler)
-        self.web_app.add_handlers(".*", new_handlers)
+        self.handlers = [
+            (url_path_join(self.base_url, handler[0]), *handler[1:])
+            for handler in self.handlers
+        ]
+        self.web_app.add_handlers(".*", self.handlers)
+        logger.debug("Registered Beaker handlers: %s", self.handlers)
 
     def load_config_file(self, suppress_errors = True):
         default_config_files = (self._default_config_file_name(), "beaker_config")

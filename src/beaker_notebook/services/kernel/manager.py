@@ -84,16 +84,14 @@ class BeakerKernelManager(AsyncIOLoopKernelManager):
             kwargs["beaker_session"] = beaker_session
         if jupyter_session:
             kwargs["jupyter_session"] = jupyter_session
+
         beaker_app: BeakerApp = self.beaker_config.get("app", None)
         default_context = beaker_app and beaker_app._default_context
         if default_context:
-            app_context_dict = default_context.asdict()
-            kwargs['context'] = {
-                "default_context": default_context.slug,
-                "default_context_payload": default_context.payload,
-            }
-            if app_context_dict:
-                kwargs["context"].update(**app_context_dict)
+            context_dict: dict = kwargs.setdefault("context", default_context.asdict())
+            context_dict.setdefault("default_context", default_context.slug)
+            context_dict.setdefault("default_context_payload", default_context.payload)
+
         kwargs.setdefault("server", self.app.connection_url)
 
         super().write_connection_file(

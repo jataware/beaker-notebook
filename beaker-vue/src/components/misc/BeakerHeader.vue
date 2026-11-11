@@ -307,6 +307,7 @@ export interface NavOption {
         padding: 0 0.5rem;
         display: flex;
         align-items: center;
+        width: 100%;
 
         font-weight: 500;
         color: var(--p-slate-500);
@@ -329,6 +330,20 @@ export interface NavOption {
         }
     }
 
+    .p-toolbar-start {
+        flex: 1;
+        justify-content: start;
+    }
+
+    .p-toolbar-center {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .p-toolbar-end {
+        flex: 1;
+        justify-content: end;
+    }
 }
 
 .status-bar {

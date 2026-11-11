@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { defineConfig, type UserConfig, type Plugin } from 'vite';
 import vueDevTools from 'vite-plugin-vue-devtools';
+import assignLayer from 'postcss-assign-layer';
 import { baseConfig } from './vite.config';
 
 const ProxyHost = `${process.env.PROXY || 'http://localhost:8888'}`;
@@ -30,6 +31,17 @@ function copyVueEsmPlugin(): Plugin {
 export const appConfig: UserConfig = {
   ...baseConfig,
   base: "./",
+  css: {
+    postcss: {
+      plugins: [
+        // Vue styles may pass through PostCSS twice, producing nested beaker layers.
+        assignLayer([
+          { include: '**/src/**/*.vue*', layerName: 'beaker' },
+          { include: '**/src/**/*.scss', layerName: 'beaker' },
+        ]),
+      ],
+    },
+  },
   server: {
     host: '0.0.0.0',
     port: 8080,

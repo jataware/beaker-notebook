@@ -73,7 +73,7 @@ app.use(PrimeVue, {
 app.use(ToastService);
 app.use(ConfirmationService);
 app.use(DialogService);
-app.use(BeakerAppConfigPlugin, config.appConfig);
+app.use(BeakerAppConfigPlugin, config.appConfig, baseUrl);
 app.use(BeakerThemePlugin);
 app.directive('tooltip', Tooltip);
 app.directive('focustrap', FocusTrap);
