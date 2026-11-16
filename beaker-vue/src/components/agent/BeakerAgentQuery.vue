@@ -61,19 +61,35 @@
                     size="small"
                     class="attachment-remove"
                     :aria-label="`Remove ${draft.file.name}`"
+                    :disabled="pendingBusy"
                     @click="removeAttachment(draft)"
                 />
             </div>
         </div>
 
         <div id="agent-inner-input">
-            <div class="query-input-container">
+            <div v-if="pending && !isAwaitingInput" class="pending-message">
+                <div class="pending-label">{{ pending.state === 'deferred' ? 'Waiting to send' : 'Pending' }}</div>
+                <div v-if="editingPending" class="query-input-container">
+                    <ContainedTextArea v-model="pendingDraft" style="flex: 1" />
+                    <Button icon="pi pi-check" aria-label="Save pending message" :disabled="pendingBusy" @click="savePending" />
+                    <Button icon="pi pi-undo" aria-label="Discard edits" :disabled="pendingBusy" @click="editingPending = false" />
+                </div>
+                <div v-else class="query-input-container">
+                    <div class="pending-text">{{ pending.text }}</div>
+                    <Button v-if="pending.state === 'deferred'" icon="pi pi-send" aria-label="Send pending message" :disabled="pendingBusy" @click="sendDeferred" />
+                    <Button icon="pi pi-pencil" aria-label="Edit pending message" :disabled="pendingBusy" @click="editPending" />
+                    <Button icon="pi pi-times" aria-label="Cancel pending message" :disabled="pendingBusy" @click="cancelPending" />
+                </div>
+            </div>
+            <div v-else class="query-input-container">
                 <input
                     ref="fileInputRef"
                     type="file"
                     multiple
                     class="attachment-file-input"
                     data-testid="attachment-file-input"
+                    :disabled="pendingBusy"
                     @change="handleFileSelection"
                 />
                 <Button
@@ -84,6 +100,7 @@
                     rounded
                     class="attachment-picker"
                     aria-label="Attach files"
+                    :disabled="pendingBusy"
                     v-tooltip.top="'Attach temporary files'"
                     @click="fileInputRef?.click()"
                 />
@@ -93,6 +110,7 @@
                     v-model="inputValue"
                     style="flex: 1; margin-right: 0.75rem"
                     :placeholder="isAwaitingInput ? 'Reply to the agent' : placeholder"
+                    :disabled="!isAwaitingInput && pendingBusy"
                 />
 
                 <Button
@@ -101,7 +119,7 @@
                     icon="pi pi-send"
                     :label="isAwaitingInput ? 'Reply' : $tmpl._('agent_submit_button_label', 'Submit')"
                     :foo="$tmpl"
-                    :disabled="!isAwaitingInput && hasPendingUploads"
+                    :disabled="!isAwaitingInput && (hasPendingUploads || pendingBusy)"
                 />
             </div>
         </div>
@@ -115,6 +133,7 @@ import Button from 'primevue/button';
 import { filesize } from 'filesize';
 import ContainedTextArea from '../misc/ContainedTextArea.vue';
 import { useWorkflows } from '../../composables/useWorkflows';
+import { usePendingMessage } from '../../composables/usePendingMessage';
 import { BeakerSession, type ISessionAttachment } from '@jataware/beaker-client';
 import { type BeakerSessionComponentType } from '../session/BeakerSession.vue';
 import { type BeakerNotebookComponentType } from '../notebook/BeakerNotebook.vue';
@@ -151,7 +170,7 @@ type ToastOptions = {
 const draftAttachments = ref<AttachmentDraft[]>([]);
 const fileInputRef = ref<HTMLInputElement>();
 const dragDepth = ref(0);
-const isDraggingFiles = computed(() => dragDepth.value > 0 && !isAwaitingInput.value);
+const isDraggingFiles = computed(() => dragDepth.value > 0 && !isAwaitingInput.value && !pending.value && !pendingBusy.value);
 const hasPendingUploads = computed(() => draftAttachments.value.some((draft) => draft.status === 'uploading'));
 const showToast = inject<(options: ToastOptions) => void>("show_toast");
 defineEmits([
@@ -160,6 +179,19 @@ defineEmits([
 ]);
 
 const session: BeakerSession = inject("session");
+
+const submitCell = (text: string, pendingId?: string, attachments: ISessionAttachment[] = []) => {
+    const cell = session.addQueryCell(text, {}, attachments);
+    if (pendingId) cell.pending_message_id = pendingId;
+    nextTick(() => {
+        notebook.selectCell(cell.id);
+        beakerSession.findNotebookCellById(cell.id).execute();
+    });
+};
+const {
+    pending, pendingDraft, editingPending, pendingBusy, queue,
+    editPending, savePending, cancelPending, sendDeferred,
+} = usePendingMessage(session, submitCell, showToast);
 
 const isAwaitingInput = computed(() => !!props.awaitingInputCell);
 
@@ -184,7 +216,8 @@ const handleSubmit = () => {
     }
 }
 
-const handleQuery = () => {
+const handleQuery = async () => {
+    if (pendingBusy.value) return;
     if (hasPendingUploads.value) {
         showToast?.({
             title: 'Attachments still uploading',
@@ -208,25 +241,42 @@ const handleQuery = () => {
         return;
     }
 
-    // remove the top cell if it is blank/not used.
-    if (notebook.notebook.cells.length === 1) {
-        const existingCell = notebook.notebook.cells[0];
-        if (
-            existingCell.cell_type === "code" && existingCell.source === ""
-            && existingCell.execution_count === null && existingCell.outputs.length === 0
-        ) {
-            notebook.notebook.removeCell(0);
-        }
-    }
     const prompt = query.value.trim() || 'Please inspect the attached file(s).';
-    const cell = session.addQueryCell(prompt, {}, readyAttachments);
-    query.value = "";
-    draftAttachments.value = [];
-
-    nextTick(() => {
-        notebook.selectCell(cell.id);
-        beakerSession.findNotebookCellById(cell.id).execute();
-    });
+    pendingBusy.value = true;
+    try {
+        const state = await queue(prompt, readyAttachments.length > 0);
+        if (state === 'attachments_not_supported') {
+            showToast?.({
+                title: 'Attachments cannot be sent while the agent is working',
+                detail: 'Messages with attachments cannot be accepted while the agent is working. Please remove the attachment or wait for the agent to finish its current task before resubmitting.',
+                severity: 'warn',
+                life: 8000,
+            });
+            return;
+        }
+        if (state === 'inactive') {
+            // Remove the top cell if it is blank/not used.
+            if (notebook.notebook.cells.length === 1) {
+                const existingCell = notebook.notebook.cells[0];
+                if (
+                    existingCell.cell_type === 'code' && existingCell.source === ''
+                    && existingCell.execution_count === null && existingCell.outputs.length === 0
+                ) {
+                    notebook.notebook.removeCell(0);
+                }
+            }
+            submitCell(prompt, undefined, readyAttachments);
+            draftAttachments.value = [];
+        } else if (state !== 'pending') {
+            showToast?.({title: 'Message not queued', detail: 'A message is already pending.', severity: 'warn', life: 4000});
+            return;
+        }
+        query.value = '';
+    } catch (error) {
+        showToast?.({title: 'Message not sent', detail: String(error), severity: 'error', life: 4000});
+    } finally {
+        pendingBusy.value = false;
+    }
 }
 
 const formatAttachmentSize = (size: number) => filesize(size, {spacer: ' '});
@@ -234,7 +284,7 @@ const formatAttachmentSize = (size: number) => filesize(size, {spacer: ' '});
 const containsFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
 
 const handleDragEnter = (event: DragEvent) => {
-    if (isAwaitingInput.value || !containsFiles(event)) return;
+    if (isAwaitingInput.value || pending.value || pendingBusy.value || !containsFiles(event)) return;
     event.preventDefault();
     dragDepth.value += 1;
 };
@@ -246,14 +296,14 @@ const handleDragLeave = (event: DragEvent) => {
 };
 
 const handleDragOver = (event: DragEvent) => {
-    if (isAwaitingInput.value || !containsFiles(event)) return;
+    if (isAwaitingInput.value || pending.value || pendingBusy.value || !containsFiles(event)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
 };
 
 const handleDrop = (event: DragEvent) => {
     dragDepth.value = 0;
-    if (isAwaitingInput.value || !containsFiles(event)) return;
+    if (isAwaitingInput.value || pending.value || pendingBusy.value || !containsFiles(event)) return;
     event.preventDefault();
     void addFiles(event.dataTransfer?.files);
 };
@@ -374,6 +424,18 @@ onBeforeUnmount(() => {
 
 <style lang="scss">
 #agent-input {
+    .pending-label {
+        font-size: 0.8rem;
+        color: var(--p-text-muted-color);
+    }
+    .pending-text {
+        flex: 1;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        padding: 0.5rem;
+    }
+
+
     padding: 0.5rem 0.75rem;
     background: var(--p-toolbar-background);
     border: 1px solid var(--p-toolbar-border-color);

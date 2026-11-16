@@ -354,6 +354,8 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
     /** Live-session chat attachments. Intentionally omitted from notebook serialization. */
     session_attachments: ISessionAttachment[] = [];
     _current_input_request_message?: messages.IInputRequestMsg;
+    /** ID of a deferred interjection being started as a new turn. */
+    pending_message_id?: string;
     _toolCallIndex: Map<string, {eventIndex: number; slot: number}> = new Map();
 
     constructor(content: Partial<nbformat.ICell>) {
@@ -422,6 +424,17 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
                     {...existing, ...updateFields},
                     ...event.content.tool_calls.slice(slot + 1),
                 ];
+            }
+            else if (msg_type === "llm_pending_update" && content.state === "sent") {
+                if (content.id === this.pending_message_id) {
+                    this.source = content.text;
+                } else {
+                    this.events.push({
+                        type: "user_answer",
+                        content: content.text,
+                        interjection: true,
+                    });
+                }
             }
             else if (msg_type === "llm_response" && content.name === "response_text") {
                 this.events.push({
@@ -584,6 +597,7 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
             {
                 request: this.source,
                 attachments: this.session_attachments.map((attachment) => attachment.id),
+                ...(this.pending_message_id ? {pending_id: this.pending_message_id} : {}),
             },
             undefined,
             metadata,

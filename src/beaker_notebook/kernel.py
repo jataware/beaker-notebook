@@ -77,6 +77,8 @@ class BeakerKernel(KernelProxyManager):
         self.internal_executions = set()
         self.subkernel_execution_tracking = {}
         self.running_actions = {}
+        self._llm_request_active = False
+        self._pending_llm_revision = 0
         self.secrets = []
         context_args = session_config.get("context", {})
         super().__init__(session_config, session_id=(self.beaker_session or self.kernel_id))
@@ -173,6 +175,7 @@ class BeakerKernel(KernelProxyManager):
             "shell", "context_setup_request", self.context_setup_request
         )
         self.server.intercept_message("shell", "llm_request", self.llm_request)
+        self.server.intercept_message("shell", "llm_pending_request", self.llm_pending_request)
         self.server.intercept_message(
             "shell", "execute_request", self.track_execute_request
         )
@@ -703,6 +706,71 @@ class BeakerKernel(KernelProxyManager):
     def stderr(self, text, parent_header=None):
         self.send_stream_message(stream_type="stderr", text=text, parent_header=parent_header)
 
+    def _pending_llm_state(self):
+        agent = self.context.agent if self.context else None
+        pending = agent.pending_message if agent else None
+        if pending is None:
+            return {"state": "empty", "revision": self._pending_llm_revision}
+        return {
+            "revision": self._pending_llm_revision,
+            "state": "pending" if self._llm_request_active else "deferred",
+            "id": pending.id,
+            "text": pending.response_metadata.get("beaker_pending_text", pending.content),
+        }
+
+    def _broadcast_pending_llm_state(self, state, parent_header=None):
+        self._pending_llm_revision += 1
+        state["revision"] = self._pending_llm_revision
+        self.send_response("iopub", "llm_pending_update", state, parent_header=parent_header)
+
+    @message_handler(send_status_updates=False)
+    async def llm_pending_request(self, message: JupyterMessage):
+        """Inspect or atomically change the single pending interjection."""
+        from langchain_core.messages import HumanMessage
+
+        agent = self.context.agent if self.context else None
+        if not agent:
+            raise RuntimeError("Context has not been set")
+        content = message.content
+        operation = content.get("operation")
+        pending = agent.pending_message
+        if operation == "status":
+            return self._pending_llm_state()
+        if operation == "queue":
+            if not self._llm_request_active:
+                return {"state": "inactive"}
+            if content.get("has_attachments"):
+                return {"state": "attachments_not_supported"}
+            if pending is not None:
+                return {"state": "occupied", "pending": self._pending_llm_state()}
+            message_id = content.get("id")
+        elif operation in ("edit", "cancel"):
+            if pending is None or pending.id != content.get("id"):
+                return {"state": "not_pending", "pending": self._pending_llm_state()}
+            message_id = pending.id
+            if operation == "cancel":
+                agent.cancel_pending_message()
+                state = {"state": "cancelled", "id": message_id}
+                self._broadcast_pending_llm_state(state, message.header)
+                return state
+        else:
+            raise ValueError("Unknown pending message operation")
+
+        text = content.get("text")
+        if not isinstance(message_id, str) or not message_id or not isinstance(text, str) or not text.strip():
+            raise ValueError("A message ID and non-empty text are required")
+        interjection = HumanMessage(
+            content=f"[User message received during the current task]\n{text}",
+            id=message_id,
+            response_metadata={"beaker_pending_text": text},
+        )
+        if operation == "edit":
+            agent.cancel_pending_message()
+        agent.queue_message(interjection)
+        state = self._pending_llm_state()
+        self._broadcast_pending_llm_state(state, message.header)
+        return state
+
     @message_handler
     async def llm_request(self, message: JupyterMessage):
         from archytas.exceptions import AuthenticationError
@@ -718,6 +786,20 @@ class BeakerKernel(KernelProxyManager):
 
         if not self.context:
             raise Exception("Context has not been set")
+        # Until pending-message handling is wired up, do not start a second
+        # ReAct loop against the same agent and its shared chat history.
+        if self._llm_request_active:
+            raise RuntimeError("An LLM request is already running")
+        agent = self.context.agent
+        pending_id = content.get("pending_id")
+        pending = agent.pending_message
+        if pending_id:
+            if pending is None or pending.id != pending_id:
+                raise RuntimeError("The pending message is no longer available")
+            request = pending.content
+        elif pending is not None:
+            raise RuntimeError("A pending message must be sent or cancelled first")
+        self._llm_request_active = True
         setattr(self.context, "current_llm_query", request)
         self.context.session_attachments = session_attachments
 
@@ -731,6 +813,15 @@ class BeakerKernel(KernelProxyManager):
                 # Before starting ReAct loop, install ReAct/tool-call handlers bound to the
                 # incoming request's parent header so IOPub traffic is correlated correctly.
                 if self.context.agent:
+                    def on_message_interjected(interjection):
+                        state = {
+                            "state": "sent",
+                            "id": interjection.id,
+                            "text": interjection.response_metadata.get("beaker_pending_text", interjection.content),
+                        }
+                        self._broadcast_pending_llm_state(state, message.header)
+
+                    self.context.agent.on_message_interjected = on_message_interjected
                     self.context.agent.on_react_step = partial(
                         self.handle_react_step, parent_header=message.header
                     )
@@ -741,6 +832,17 @@ class BeakerKernel(KernelProxyManager):
                 # Rebuild the system_preamble if a mid-session mutation (e.g. an
                 # edited skill) marked it dirty, so this turn sees current state.
                 await self.context.ensure_system_preamble_fresh()
+                if pending_id:
+                    # Editing or cancelling can race with preamble preparation.
+                    pending = agent.pending_message
+                    if pending is None or pending.id != pending_id:
+                        raise RuntimeError("The pending message is no longer available")
+                    request = pending.content
+                    agent.cancel_pending_message()
+                    self._broadcast_pending_llm_state({
+                        "state": "sent", "id": pending.id,
+                        "text": pending.response_metadata.get("beaker_pending_text", pending.content),
+                    }, message.header)
                 task = asyncio.create_task(self.context.agent.react_async(request, react_context={"message": message}))
                 self.running_actions[request_key] = task
                 result = await task
@@ -803,16 +905,18 @@ class BeakerKernel(KernelProxyManager):
                 self.send_response(
                     "iopub", "llm_response", stream_content, parent_header=message.header
                 )
-            finally:
-                # When done, restore the unbound handlers (no parent_header) so any
-                # background activity isn't attributed to this request's parent.
-                self.context.agent.on_react_step = self.handle_react_step
-                self.context.agent.on_tool_call_update = self.handle_tool_call_update
-                setattr(self.context, "current_llm_query", None)
+            await self.send_set_chat_history(message.header)
         finally:
             if request_key in self.running_actions:
                 del self.running_actions[request_key]
-        await self.send_set_chat_history(message.header)
+            self._llm_request_active = False
+            if self.context and self.context.agent:
+                self.context.agent.on_react_step = self.handle_react_step
+                self.context.agent.on_tool_call_update = self.handle_tool_call_update
+                self.context.agent.on_message_interjected = None
+                self.context.current_llm_query = None
+                if self.context.agent.pending_message is not None:
+                    self._broadcast_pending_llm_state(self._pending_llm_state(), message.header)
 
     @message_handler
     async def context_info_request(self, message):

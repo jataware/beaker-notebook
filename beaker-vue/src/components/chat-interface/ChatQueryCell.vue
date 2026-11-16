@@ -223,11 +223,11 @@ const lastEventThought = computed(() => {
         if (eventCursor === undefined) {
             return fallback;
         }
-        while (eventCursor.type !== 'thought' && events.value.length >= offset) {
+        while (eventCursor && eventCursor.type !== 'thought' && events.value.length >= offset) {
             offset += 1;
             eventCursor = events.value[events.value.length - offset];
         }
-        if (eventCursor.type === 'thought') {
+        if (eventCursor?.type === 'thought') {
             if (eventCursor.content.thought === "Thinking..." && lastEvent.type === "response") {
                 // TODO eventually summarize the previous work
                 return "Thinking...";

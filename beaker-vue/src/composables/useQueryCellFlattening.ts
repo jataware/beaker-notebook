@@ -292,7 +292,11 @@ export function useQueryCellFlattening(
                                         } else if (event.type === 'user_question') {
                                             createQuestionCell(event.content, cell.id, eventIndex);
                                         } else if (event.type === 'user_answer') {
-                                            updateQuestionCellWithReply(event.content, cell.id, eventIndex);
+                                            if (event.interjection) {
+                                                createReplyCell(event.content, cell.id, eventIndex);
+                                            } else {
+                                                updateQuestionCellWithReply(event.content, cell.id, eventIndex);
+                                            }
                                         }
                                     });
                                 },
