@@ -808,6 +808,14 @@ class BeakerKernel(KernelProxyManager):
             self.context.notebook_state = notebook_state
 
         request_key = f"llm_query:{message.header['msg_id']}"
+        completed = False
+
+        def on_pending_message_cancelled(pending):
+            self._broadcast_pending_llm_state({
+                "state": "restored", "id": pending.id,
+                "text": pending.response_metadata.get("beaker_pending_text", pending.content),
+            }, message.header)
+
         try:
             try:
                 # Before starting ReAct loop, install ReAct/tool-call handlers bound to the
@@ -822,6 +830,7 @@ class BeakerKernel(KernelProxyManager):
                         self._broadcast_pending_llm_state(state, message.header)
 
                     self.context.agent.on_message_interjected = on_message_interjected
+                    self.context.agent.on_pending_message_cancelled = on_pending_message_cancelled
                     self.context.agent.on_react_step = partial(
                         self.handle_react_step, parent_header=message.header
                     )
@@ -906,6 +915,7 @@ class BeakerKernel(KernelProxyManager):
                     "iopub", "llm_response", stream_content, parent_header=message.header
                 )
             await self.send_set_chat_history(message.header)
+            completed = True
         finally:
             if request_key in self.running_actions:
                 del self.running_actions[request_key]
@@ -914,9 +924,13 @@ class BeakerKernel(KernelProxyManager):
                 self.context.agent.on_react_step = self.handle_react_step
                 self.context.agent.on_tool_call_update = self.handle_tool_call_update
                 self.context.agent.on_message_interjected = None
+                self.context.agent.on_pending_message_cancelled = None
                 self.context.current_llm_query = None
                 if self.context.agent.pending_message is not None:
-                    self._broadcast_pending_llm_state(self._pending_llm_state(), message.header)
+                    if completed:
+                        self._broadcast_pending_llm_state(self._pending_llm_state(), message.header)
+                    else:
+                        on_pending_message_cancelled(self.context.agent.cancel_pending_message())
 
     @message_handler
     async def context_info_request(self, message):

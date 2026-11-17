@@ -85,6 +85,20 @@ describe('pending chat messages', () => {
         wrapper.unmount();
     });
 
+    it('restores an automatically cancelled pending message to the input', async () => {
+        const {wrapper, session, broadcast} = setup();
+        await flushPromises();
+        await wrapper.get('textarea').setValue('follow up');
+        await wrapper.get('button').trigger('click');
+        await flushPromises();
+        const queued = session.sendBeakerMessage.mock.calls.find((call) => call[1].operation === 'queue')![1];
+        broadcast({state: 'restored', id: queued.id, text: 'edited follow up', revision: 2});
+        await flushPromises();
+        expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('edited follow up');
+        expect(session.addQueryCell).not.toHaveBeenCalled();
+        wrapper.unmount();
+    });
+
     it('ignores an older pending acknowledgment after the sent event', async () => {
         const {wrapper, session, broadcast} = setup();
         await flushPromises();

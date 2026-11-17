@@ -143,6 +143,44 @@ async def test_message_arriving_during_cleanup_is_deferred(kernel):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_failure_restores_pending_message(kernel, cancel):
+    agent = kernel.context.agent
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def run_agent(query, react_context):
+        started.set()
+        await release.wait()
+        raise RuntimeError("failed")
+
+    agent.react_async = run_agent
+    kernel.context.ensure_system_preamble_fresh = AsyncMock()
+    kernel.get_session_attachments = Mock(return_value=[])
+    kernel.running_actions = {}
+    kernel.debug = Mock()
+    kernel.handle_react_step = Mock()
+    kernel.handle_tool_call_update = Mock()
+    kernel._llm_request_active = False
+    message = SimpleNamespace(content={"request": "first"}, metadata={}, header={"msg_id": "first"})
+    task = asyncio.create_task(BeakerKernel.llm_request.__wrapped__(kernel, message))
+    await started.wait()
+    await request(kernel, "queue", id="one", text="follow up")
+    if cancel:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        release.set()
+        with pytest.raises(RuntimeError, match="failed"):
+            await task
+    assert agent.pending_message is None
+    updates = [call.args[2] for call in kernel.send_response.call_args_list
+               if len(call.args) > 1 and call.args[1] == "llm_pending_update"]
+    assert updates[-1] == {"state": "restored", "id": "one", "text": "follow up", "revision": 2}
+
+
+@pytest.mark.asyncio
 async def test_deferred_message_is_claimed_as_next_turn(kernel):
     agent = kernel.context.agent
     await request(kernel, "queue", id="one", text="follow up")

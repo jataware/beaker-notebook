@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { defineComponent, ref } from 'vue';
+import { defineComponent, reactive, ref } from 'vue';
+import { Signal } from '@lumino/signaling';
 import BeakerAgentQuery from '../components/agent/BeakerAgentQuery.vue';
 
 vi.mock('../composables/useWorkflows', () => ({
@@ -93,6 +94,78 @@ describe('notebook pending messages', () => {
         await flushPromises();
         expect(wrapper.find('textarea').exists()).toBe(true);
         wrapper.unmount();
+    });
+
+    it('clears the pending input when the raw Jupyter signal reports the message sent', async () => {
+        const context: any = {ready: Promise.resolve()};
+        context.iopubMessage = new Signal(context);
+        let finishInitialization: () => void;
+        const sessionReady = new Promise<void>((resolve) => { finishInitialization = resolve; });
+        const session = reactive({
+            session: undefined as any,
+            sessionReady,
+            addQueryCell: vi.fn(),
+            sendBeakerMessage: vi.fn((_type, content) => {
+                const future: any = {dispose: vi.fn()};
+                queueMicrotask(() => {
+                    const result = content.operation === 'queue'
+                        ? {state: 'pending', id: content.id, text: content.text, revision: 1}
+                        : {state: 'empty', revision: 0};
+                    future.onReply({content: {status: 'ok', return: result}});
+                });
+                return future;
+            }),
+        });
+        const wrapper = mount(BeakerAgentQuery, {
+            global: {
+                provide: {
+                    session, notebook: {notebook: {cells: []}}, show_toast: vi.fn(),
+                    beakerSession: {},
+                },
+                mocks: {$tmpl: {_: (_key: string, fallback: string) => fallback}},
+                directives: {tooltip: {}},
+                stubs: {Button, ContainedTextArea: Textarea},
+            },
+        });
+        await flushPromises();
+        expect(session.sendBeakerMessage).not.toHaveBeenCalled();
+        session.session = context;
+        finishInitialization();
+        await flushPromises();
+        await wrapper.get('textarea').setValue('during the loop');
+        await wrapper.get('.agent-submit-button').trigger('click');
+        await flushPromises();
+        expect(wrapper.text()).toContain('Pending');
+        const queueCall = session.sendBeakerMessage.mock.calls.find(([, content]) => content.operation === 'queue');
+        context.iopubMessage.emit({
+            header: {msg_type: 'llm_pending_update'},
+            content: {state: 'sent', id: queueCall[1].id, text: 'during the loop', revision: 2},
+        });
+        await flushPromises();
+        expect(wrapper.find('textarea').exists()).toBe(true);
+        expect(wrapper.text()).not.toContain('Pending');
+        wrapper.unmount();
+    });
+
+    it('does not subscribe if unmounted before session initialization', async () => {
+        let finishInitialization: () => void;
+        const sessionReady = new Promise<void>((resolve) => { finishInitialization = resolve; });
+        const context = {iopubMessage: {connect: vi.fn(), disconnect: vi.fn()}};
+        const session = reactive({sessionReady, session: undefined as any, sendBeakerMessage: vi.fn()});
+        const wrapper = mount(BeakerAgentQuery, {
+            global: {
+                provide: {session, notebook: {notebook: {cells: []}}, show_toast: vi.fn(), beakerSession: {}},
+                mocks: {$tmpl: {_: (_key: string, fallback: string) => fallback}},
+                directives: {tooltip: {}},
+                stubs: {Button, ContainedTextArea: Textarea},
+            },
+        });
+        wrapper.unmount();
+        session.session = context;
+        finishInitialization();
+        await flushPromises();
+        expect(context.iopubMessage.connect).not.toHaveBeenCalled();
+        expect(session.sendBeakerMessage).not.toHaveBeenCalled();
     });
 
     it('replies to an agent question without queuing a message', async () => {

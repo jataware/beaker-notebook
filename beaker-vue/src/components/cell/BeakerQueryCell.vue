@@ -1,51 +1,5 @@
 <template>
-    <div
-        class="next-query-cell"
-        ref="queryCellRef"
-    >
-        <div class="query-cell-grid">
-            <div class="query-content">
-                <div class="query-prompt">
-                    <div class="query-label">
-                        <span class="pi pi-user query-icon"></span>
-                        <span class="query-label-user">User</span>
-                    </div>
-                    <div v-if="cell.session_attachments?.length" class="query-attachments">
-                        <span
-                            v-for="attachment in cell.session_attachments"
-                            :key="attachment.id"
-                            class="query-attachment"
-                            :title="attachment.archive_error || attachment.name"
-                        >
-                            <i :class="attachment.kind === 'archive' ? 'pi pi-box' : 'pi pi-paperclip'"></i>
-                            {{ attachment.name }}
-                            <small v-if="attachment.kind === 'archive' && attachment.archive_status === 'extracted'">
-                                {{ attachment.file_count }} {{ attachment.file_count === 1 ? 'file' : 'files' }}
-                            </small>
-                            <i
-                                v-if="attachment.archive_status === 'failed'"
-                                class="pi pi-exclamation-triangle attachment-warning"
-                            ></i>
-                        </span>
-                    </div>
-                    <div class="query-text">{{ cell.source }}</div>
-                </div>
-            </div>
-
-            <div class="state-info">
-                <div>
-                    <Badge
-                        class="execution-badge"
-                        :class="{secondary: badgeData.severity === 'secondary'}"
-                        :severity="badgeData.severity"
-                        value=" "
-                        v-tooltip.top="badgeData.tooltip">
-                        <i :class="badgeData.icon"></i>
-                    </Badge>
-                </div>
-            </div>
-        </div>
-    </div>
+    <BeakerUserMessageCell :cell="cell" :badge-data="badgeData"/>
 </template>
 
 <script setup lang="ts">
@@ -53,6 +7,7 @@ import { inject, computed, onBeforeMount, getCurrentInstance, onBeforeUnmount, w
 import Badge from 'primevue/badge';
 import type { BeakerSessionComponentType } from "../session/BeakerSession.vue";
 import { useBaseQueryCell } from './BaseQueryCell';
+import BeakerUserMessageCell from "./BeakerUserMessageCell.vue";
 
 const props = defineProps([
     'index',
@@ -166,7 +121,9 @@ defineExpose({
 });
 
 onBeforeMount(() => {
+    console.log("c")
     if (beakerSession?.cellRegistry) {
+        console.log("d");
       beakerSession.cellRegistry[cell.value.id] = instance.vnode;
     }
 

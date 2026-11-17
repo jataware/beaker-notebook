@@ -150,6 +150,7 @@ const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 const notebook = inject<BeakerNotebookComponentType>("notebook");
 
 const query = ref("");
+let restoredDraftVersion = 0;
 const response = ref("");
 type DraftStatus = 'uploading' | 'ready' | 'error';
 type AttachmentDraft = {
@@ -191,7 +192,10 @@ const submitCell = (text: string, pendingId?: string, attachments: ISessionAttac
 const {
     pending, pendingDraft, editingPending, pendingBusy, queue,
     editPending, savePending, cancelPending, sendDeferred,
-} = usePendingMessage(session, submitCell, showToast);
+} = usePendingMessage(session, submitCell, showToast, (text) => {
+    restoredDraftVersion++;
+    query.value = text;
+});
 
 const isAwaitingInput = computed(() => !!props.awaitingInputCell);
 
@@ -242,6 +246,7 @@ const handleQuery = async () => {
     }
 
     const prompt = query.value.trim() || 'Please inspect the attached file(s).';
+    const draftVersion = restoredDraftVersion;
     pendingBusy.value = true;
     try {
         const state = await queue(prompt, readyAttachments.length > 0);
@@ -271,7 +276,7 @@ const handleQuery = async () => {
             showToast?.({title: 'Message not queued', detail: 'A message is already pending.', severity: 'warn', life: 4000});
             return;
         }
-        query.value = '';
+        if (draftVersion === restoredDraftVersion) query.value = '';
     } catch (error) {
         showToast?.({title: 'Message not sent', detail: String(error), severity: 'error', life: 4000});
     } finally {

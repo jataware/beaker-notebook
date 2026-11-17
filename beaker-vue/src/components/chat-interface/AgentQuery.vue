@@ -51,6 +51,7 @@ import InputGroup from 'primevue/inputgroup';
 const beakerSession = inject<BeakerSessionComponentType>("beakerSession");
 
 const query = ref("");
+let restoredDraftVersion = 0;
 const emit = defineEmits([
     "select-cell",
     "run-cell",
@@ -74,7 +75,10 @@ const submitCell = (text: string, pendingId?: string) => {
 const {
     pending, pendingDraft, editingPending, pendingBusy, queue,
     editPending, savePending, cancelPending, sendDeferred,
-} = usePendingMessage(session, submitCell, showToast);
+} = usePendingMessage(session, submitCell, showToast, (text) => {
+    restoredDraftVersion++;
+    query.value = text;
+});
 
 const handleQuery = async (e: any) => {
     const notebook = session.notebook;
@@ -101,6 +105,7 @@ const handleQuery = async (e: any) => {
     }
     if (pendingBusy.value) return;
     const text = query.value;
+    const draftVersion = restoredDraftVersion;
     pendingBusy.value = true;
     try {
         const state = await queue(text);
@@ -108,7 +113,7 @@ const handleQuery = async (e: any) => {
             submitCell(text);
             query.value = "";
         } else if (state === "pending") {
-            query.value = "";
+            if (draftVersion === restoredDraftVersion) query.value = "";
         } else {
             showToast?.({title: "Message not queued", detail: "A message is already pending.", severity: "warn", life: 4000});
         }

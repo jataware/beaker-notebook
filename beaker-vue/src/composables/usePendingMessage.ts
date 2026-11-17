@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref, toRaw } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
 import type { BeakerSession } from '@jataware/beaker-client';
 
@@ -17,6 +17,7 @@ export function usePendingMessage(
     session: BeakerSession,
     submitDeferred: (text: string, id: string) => void,
     showToast?: Toast,
+    restoreDraft?: (text: string) => void,
 ) {
     const pending = ref<PendingState | null>(null);
     const pendingDraft = ref('');
@@ -48,6 +49,11 @@ export function usePendingMessage(
                     if (pending.value?.id === state.id && pending.value.state === 'deferred') sendDeferred();
                 });
             }
+        } else if (state.state === 'restored') {
+            if (state.id === ownedPendingId && state.text !== undefined) restoreDraft?.(state.text);
+            if (state.id === ownedPendingId) ownedPendingId = null;
+            pending.value = null;
+            editingPending.value = false;
         } else if (['sent', 'cancelled', 'empty'].includes(state.state)) {
             if (state.id === ownedPendingId) ownedPendingId = null;
             pending.value = null;
@@ -74,12 +80,16 @@ export function usePendingMessage(
         if (message.header.msg_type === 'llm_pending_update') applyPendingState(message.content);
     };
 
+    // Lumino identifies signals and their senders by object identity. Vue's
+    // reactive proxies must not be used to subscribe to a raw Jupyter signal.
+    let sessionContext: BeakerSession['session'] | undefined;
     let unmounted = false;
     onMounted(async () => {
-        await session.session.ready;
-        if (unmounted) return;
-        session.session.iopubMessage.connect(onPendingUpdate);
         try {
+            await session.sessionReady;
+            if (unmounted) return;
+            sessionContext = toRaw(session.session);
+            sessionContext.iopubMessage.connect(onPendingUpdate);
             applyPendingState(await request({operation: 'status'}));
         } catch (error) {
             showToast?.({title: 'Pending message status unavailable', detail: String(error), severity: 'error', life: 4000});
@@ -87,7 +97,7 @@ export function usePendingMessage(
     });
     onBeforeUnmount(() => {
         unmounted = true;
-        session.session.iopubMessage.disconnect(onPendingUpdate);
+        sessionContext?.iopubMessage.disconnect(onPendingUpdate);
     });
 
     const queue = async (text: string, hasAttachments = false): Promise<string> => {

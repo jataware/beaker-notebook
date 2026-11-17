@@ -112,7 +112,8 @@ type BeakerQueryTextEventType =
     | "response"
     | "user_question"
     | "user_answer"
-    | "abort";
+    | "abort"
+    | "interjection";
 
 export interface IBeakerQueryTextEvent extends PartialJSONObject {
     type: BeakerQueryTextEventType;
@@ -430,9 +431,8 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
                     this.source = content.text;
                 } else {
                     this.events.push({
-                        type: "user_answer",
+                        type: "interjection",
                         content: content.text,
-                        interjection: true,
                     });
                 }
             }
@@ -695,8 +695,9 @@ export class BeakerQueryCell extends BeakerBaseCell implements IQueryCell {
             else if (event.type === "user_question") {
                 return new AgentMarkdown(`**Agent Question:**  \n> ${event.content}\n`);
             }
-            else if (event.type === "user_answer") {
-                return new UserMarkdown(`**User Response:**  \n> ${event.content}\n`);
+            else if (event.type === "interjection" || event.type === "user_answer") {
+                return new UserMarkdown(event.content);
+
             }
             else if (event.type === "code_cell") {
                 const childCell = this.children.find(child => child.id === event.content.cell_id);
